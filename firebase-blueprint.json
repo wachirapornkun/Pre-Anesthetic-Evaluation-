@@ -1,0 +1,392 @@
+{
+  "entities": {
+    "PreAnestheticEvaluation": {
+      "title": "PreAnestheticEvaluation",
+      "description": "Bangplee Hospital Pre-Anesthetic Evaluation record (ANE-FM-002-03) containing patient demographics, pre-operative clinical assessment, laboratory fishbone values, anesthetic plan, and post-anesthesia evaluation.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique document identifier",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the clinician who created the record",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "status": {
+          "type": "string",
+          "description": "Workflow state of the evaluation record",
+          "enum": ["draft", "evaluated", "post_op_completed", "locked"]
+        },
+        "patientName": {
+          "type": "string",
+          "description": "Full patient name",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "hn": {
+          "type": "string",
+          "description": "Hospital Number (HN)",
+          "maxLength": 40
+        },
+        "an": {
+          "type": "string",
+          "description": "Admission Number (AN)",
+          "maxLength": 40
+        },
+        "age": {
+          "type": "string",
+          "description": "Patient age in years",
+          "maxLength": 16
+        },
+        "ward": {
+          "type": "string",
+          "description": "Hospital ward",
+          "maxLength": 80
+        },
+        "dateOfVisit": {
+          "type": "string",
+          "description": "Date of pre-anesthetic visit",
+          "maxLength": 32
+        },
+        "dateOfOperation": {
+          "type": "string",
+          "description": "Scheduled date of operation",
+          "maxLength": 32
+        },
+        "operationTime": {
+          "type": "string",
+          "description": "Scheduled time of operation",
+          "maxLength": 32
+        },
+        "surgeon": {
+          "type": "string",
+          "description": "Operating surgeon name",
+          "maxLength": 120
+        },
+        "diagnosis": {
+          "type": "string",
+          "description": "Clinical diagnosis",
+          "maxLength": 300
+        },
+        "operation": {
+          "type": "string",
+          "description": "Planned surgical operation",
+          "maxLength": 300
+        },
+        "asaClass": {
+          "type": "string",
+          "description": "ASA Physical Status Classification",
+          "enum": ["", "I", "II", "III", "IV", "V", "VI"]
+        },
+        "asaEmergency": {
+          "type": "boolean",
+          "description": "Emergency (E) modifier for ASA classification"
+        },
+        "expectedDifficultAirway": {
+          "type": "boolean",
+          "description": "Flag indicating expected difficult airway"
+        },
+        "hasComplication": {
+          "type": "boolean",
+          "description": "Flag indicating post-anesthesia complication"
+        },
+        "anesthesiaType": {
+          "type": "string",
+          "description": "Primary anesthetic plan summary",
+          "enum": ["", "GA", "RA", "GA+RA"]
+        },
+        "formData": {
+          "type": "object",
+          "description": "Structured clinical sections (history including DM/HT/DLP/CKD/Heart underlying diseases, medication, drinking/smoking/drug addiction details with quit duration, physicalExam including oxygen/ventilator support, per-tooth missingTeeth/looseTeeth markings, and 2.2 airway detail fields, investigation, laboratory including blood component T&S and readiness status/detail, premedication, consult, problemList, anestheticPlan, preparationOrders, postAnesthesia)"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp"
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "status",
+        "patientName",
+        "hn",
+        "an",
+        "age",
+        "ward",
+        "dateOfVisit",
+        "dateOfOperation",
+        "diagnosis",
+        "operation",
+        "asaClass",
+        "asaEmergency",
+        "expectedDifficultAirway",
+        "hasComplication",
+        "anesthesiaType",
+        "formData",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MedicationCatalog": {
+      "title": "MedicationCatalog",
+      "description": "Clinician-customizable grouped medication presets (HT, DM, Lipid, Heart, Anticoagulant, Antiplatelet, HIV, Asthma / COPD, TB, Other).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Document ID matching owner UID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of catalog owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "groups": {
+          "type": "array",
+          "description": "Ordered list of medication groups and selectable drug items"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "ownerId", "groups", "createdAt", "updatedAt"]
+    },
+    "WardCatalog": {
+      "title": "WardCatalog",
+      "description": "Clinician-customizable hospital ward options list.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Document ID matching owner UID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of catalog owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "wards": {
+          "type": "array",
+          "description": "Ordered list of clinician-configured ward names (max 40 items, each max 80 chars)"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "ownerId", "wards", "createdAt", "updatedAt"]
+    },
+    "SurgeonCatalog": {
+      "title": "SurgeonCatalog",
+      "description": "Clinician-customizable operating surgeon list.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Document ID matching owner UID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of catalog owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "surgeons": {
+          "type": "array",
+          "description": "Ordered list of clinician-configured surgeon names (max 100 items, each max 120 chars)"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "ownerId", "surgeons", "createdAt", "updatedAt"]
+    },
+    "OxygenCatalog": {
+      "title": "OxygenCatalog",
+      "description": "Clinician-customizable oxygen and ventilator support preset options.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Document ID matching owner UID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of catalog owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "presets": {
+          "type": "array",
+          "description": "Ordered list of clinician-configured oxygen/airway support presets (max 40 items, each max 120 chars)"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "ownerId", "presets", "createdAt", "updatedAt"]
+    },
+    "SummarizerCatalog": {
+      "title": "SummarizerCatalog",
+      "description": "Clinician-customizable post-anesthesia summarizer list.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Document ID matching owner UID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of catalog owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "summarizers": {
+          "type": "array",
+          "description": "Ordered list of clinician-configured post-anesthesia summarizer names (max 100 items, each max 120 chars)"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "ownerId", "summarizers", "createdAt", "updatedAt"]
+    },
+    "VisitorCatalog": {
+      "title": "VisitorCatalog",
+      "description": "Clinician-customizable post-anesthesia visitor list.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Document ID matching owner UID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of catalog owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "visitors": {
+          "type": "array",
+          "description": "Ordered list of clinician-configured post-anesthesia visitor names (max 100 items, each max 120 chars)"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "ownerId", "visitors", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/evaluations/{evaluationId}": {
+      "schema": {
+        "$ref": "#/entities/PreAnestheticEvaluation"
+      },
+      "description": "Clinician-owned pre-anesthetic evaluation records."
+    },
+    "/medicationCatalogs/{catalogId}": {
+      "schema": {
+        "$ref": "#/entities/MedicationCatalog"
+      },
+      "description": "Clinician-owned customizable medication group presets."
+    },
+    "/wardCatalogs/{catalogId}": {
+      "schema": {
+        "$ref": "#/entities/WardCatalog"
+      },
+      "description": "Clinician-owned customizable hospital ward options."
+    },
+    "/surgeonCatalogs/{catalogId}": {
+      "schema": {
+        "$ref": "#/entities/SurgeonCatalog"
+      },
+      "description": "Clinician-owned customizable operating surgeon options."
+    },
+    "/oxygenCatalogs/{catalogId}": {
+      "schema": {
+        "$ref": "#/entities/OxygenCatalog"
+      },
+      "description": "Clinician-owned customizable oxygen and airway support preset options."
+    },
+    "/summarizerCatalogs/{catalogId}": {
+      "schema": {
+        "$ref": "#/entities/SummarizerCatalog"
+      },
+      "description": "Clinician-owned customizable post-anesthesia summarizer options."
+    },
+    "/visitorCatalogs/{catalogId}": {
+      "schema": {
+        "$ref": "#/entities/VisitorCatalog"
+      },
+      "description": "Clinician-owned customizable post-anesthesia visitor options."
+    }
+  }
+}

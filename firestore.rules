@@ -1,0 +1,701 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isStr(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isBoundedStringList(arr, maxItems, maxItemLen) {
+      return arr is list
+        && arr.size() <= maxItems
+        && (arr.size() == 0 || (arr[0] is string && arr[0].size() <= maxItemLen));
+    }
+
+    function isValidHistory(h) {
+      return h is map
+        && h.keys().hasAll([
+          'presentIllness', 'pastIllness',
+          'allergyStatus', 'allergyDetail',
+          'underlyingStatus', 'dm', 'dmYears', 'ht', 'htYears',
+          'heartDisease', 'heartDiseaseYears', 'otherUnderlying',
+          'medication',
+          'previousOps', 'previousOpComplication',
+          'drinkingStatus', 'drinkingYears',
+          'smokingStatus', 'smokingCigsPerDay', 'smokingYears',
+          'drugAddictionStatus', 'drugAddictionYears'
+        ])
+        && h.keys().hasOnly([
+          'presentIllness', 'pastIllness',
+          'allergyStatus', 'allergyDetail',
+          'underlyingStatus', 'dm', 'dmYears', 'ht', 'htYears',
+          'dlp', 'dlpYears', 'ckd', 'ckdYears',
+          'heartDisease', 'heartDiseaseYears', 'otherUnderlying',
+          'medication',
+          'previousOps', 'previousOpComplication',
+          'drinkingStatus', 'drinkingDaysPerWeek', 'drinkingYears', 'drinkingDurationUnit',
+          'drinkingQuit', 'drinkingQuitDuration', 'drinkingQuitUnit',
+          'smokingStatus', 'smokingCigsPerDay', 'smokingYears', 'smokingDurationUnit',
+          'smokingQuit', 'smokingQuitDuration', 'smokingQuitUnit',
+          'drugAddictionStatus', 'drugAddictionTypes', 'drugAddictionOther',
+          'drugAddictionAmount', 'drugAddictionYears', 'drugAddictionDurationUnit',
+          'drugAddictionQuit', 'drugAddictionQuitDuration', 'drugAddictionQuitUnit'
+        ])
+        && isStr(h.presentIllness, 0, 1000)
+        && isStr(h.pastIllness, 0, 1000)
+        && (h.allergyStatus in ['none', 'no', 'yes'])
+        && isStr(h.allergyDetail, 0, 300)
+        && (h.underlyingStatus in ['none', 'no', 'yes'])
+        && h.dm is bool
+        && isStr(h.dmYears, 0, 20)
+        && h.ht is bool
+        && isStr(h.htYears, 0, 20)
+        && (!('dlp' in h) || h.dlp is bool)
+        && (!('dlpYears' in h) || isStr(h.dlpYears, 0, 20))
+        && (!('ckd' in h) || h.ckd is bool)
+        && (!('ckdYears' in h) || isStr(h.ckdYears, 0, 20))
+        && h.heartDisease is bool
+        && isStr(h.heartDiseaseYears, 0, 20)
+        && isBoundedStringList(h.otherUnderlying, 8, 120)
+        && isStr(h.medication, 0, 1000)
+        && isBoundedStringList(h.previousOps, 8, 250)
+        && isStr(h.previousOpComplication, 0, 500)
+        && (h.drinkingStatus in ['none', 'no', 'yes'])
+        && (!('drinkingDaysPerWeek' in h) || isStr(h.drinkingDaysPerWeek, 0, 20))
+        && isStr(h.drinkingYears, 0, 20)
+        && (!('drinkingDurationUnit' in h) || (h.drinkingDurationUnit in ['months', 'years']))
+        && (!('drinkingQuit' in h) || h.drinkingQuit is bool)
+        && (!('drinkingQuitDuration' in h) || isStr(h.drinkingQuitDuration, 0, 20))
+        && (!('drinkingQuitUnit' in h) || (h.drinkingQuitUnit in ['months', 'years']))
+        && (h.smokingStatus in ['none', 'no', 'yes'])
+        && isStr(h.smokingCigsPerDay, 0, 20)
+        && isStr(h.smokingYears, 0, 20)
+        && (!('smokingDurationUnit' in h) || (h.smokingDurationUnit in ['months', 'years']))
+        && (!('smokingQuit' in h) || h.smokingQuit is bool)
+        && (!('smokingQuitDuration' in h) || isStr(h.smokingQuitDuration, 0, 20))
+        && (!('smokingQuitUnit' in h) || (h.smokingQuitUnit in ['months', 'years']))
+        && (h.drugAddictionStatus in ['none', 'no', 'yes'])
+        && (!('drugAddictionTypes' in h) || isBoundedStringList(h.drugAddictionTypes, 10, 60))
+        && (!('drugAddictionOther' in h) || isStr(h.drugAddictionOther, 0, 120))
+        && (!('drugAddictionAmount' in h) || isStr(h.drugAddictionAmount, 0, 120))
+        && isStr(h.drugAddictionYears, 0, 20)
+        && (!('drugAddictionDurationUnit' in h) || (h.drugAddictionDurationUnit in ['months', 'years']))
+        && (!('drugAddictionQuit' in h) || h.drugAddictionQuit is bool)
+        && (!('drugAddictionQuitDuration' in h) || isStr(h.drugAddictionQuitDuration, 0, 20))
+        && (!('drugAddictionQuitUnit' in h) || (h.drugAddictionQuitUnit in ['months', 'years']));
+    }
+
+    function isValidOxygenSupport(ox) {
+      return ox is map
+        && ox.keys().hasAll([
+          'mode', 'cannulaLpm', 'maskBagLpm',
+          'ettSize', 'ettDeep', 'ventMode',
+          'tv', 'rr', 'fio2', 'peep', 'pins',
+          'otherItems'
+        ])
+        && ox.keys().hasOnly([
+          'mode', 'cannulaLpm', 'maskBagLpm',
+          'ettSize', 'ettDeep', 'ventMode',
+          'tv', 'rr', 'fio2', 'peep', 'pins',
+          'otherItems'
+        ])
+        && (ox.mode in ['', 'cannula', 'mask_bag', 'ett', 'other'])
+        && isStr(ox.cannulaLpm, 0, 20)
+        && isStr(ox.maskBagLpm, 0, 20)
+        && isStr(ox.ettSize, 0, 20)
+        && isStr(ox.ettDeep, 0, 20)
+        && (ox.ventMode in ['', 'vcv', 'pcv'])
+        && isStr(ox.tv, 0, 20)
+        && isStr(ox.rr, 0, 20)
+        && isStr(ox.fio2, 0, 20)
+        && isStr(ox.peep, 0, 20)
+        && isStr(ox.pins, 0, 20)
+        && isBoundedStringList(ox.otherItems, 10, 150);
+    }
+
+    function isValidToothIdList(arr) {
+      return arr is list
+        && arr.size() <= 18
+        && arr.hasOnly(['u1', 'u2', 'u3', 'u4', 'u5', 'u6', 'u7', 'u8', 'l1', 'l2', 'l3', 'l4', 'l5', 'l6', 'l7', 'l8', 'l9', 'l10']);
+    }
+
+    function isValidPhysicalExam(p) {
+      return p is map
+        && p.keys().hasAll([
+          'bw', 'ht', 'bmi',
+          'bp', 'pulse', 'rr', 'temp', 'spo2',
+          'toothStatus', 'toothDetail',
+          'mouthOpening', 'neckMovement', 'thyromentalDistance',
+          'mallampatiClass', 'expectedDifficultAirway',
+          'breathSound', 'breathSoundDetail',
+          'heartSound', 'heartSoundDetail',
+          'functionalCapacity'
+        ])
+        && p.keys().hasOnly([
+          'bw', 'ht', 'bmi',
+          'bp', 'pulse', 'rr', 'temp', 'spo2',
+          'oxygenSupport',
+          'toothStatus', 'toothDetail',
+          'missingTeeth', 'looseTeeth',
+          'mouthOpening', 'mouthOpeningDetail',
+          'neckMovement', 'neckMovementDetail',
+          'thyromentalDistance', 'thyromentalDistanceDetail',
+          'mallampatiClass', 'expectedDifficultAirway',
+          'breathSound', 'breathSoundDetail',
+          'heartSound', 'heartSoundDetail',
+          'functionalCapacity'
+        ])
+        && isStr(p.bw, 0, 20)
+        && isStr(p.ht, 0, 20)
+        && isStr(p.bmi, 0, 20)
+        && isStr(p.bp, 0, 30)
+        && isStr(p.pulse, 0, 20)
+        && isStr(p.rr, 0, 20)
+        && isStr(p.temp, 0, 20)
+        && isStr(p.spo2, 0, 20)
+        && (!('oxygenSupport' in p) || isValidOxygenSupport(p.oxygenSupport))
+        && p.toothStatus is list
+        && p.toothStatus.size() <= 4
+        && p.toothStatus.hasOnly(['Normal', 'Denture', 'Loose', 'Avulsion'])
+        && isStr(p.toothDetail, 0, 200)
+        && (!('missingTeeth' in p) || isValidToothIdList(p.missingTeeth))
+        && (!('looseTeeth' in p) || isValidToothIdList(p.looseTeeth))
+        && (p.mouthOpening in ['', 'normal', 'limited'])
+        && (!('mouthOpeningDetail' in p) || isStr(p.mouthOpeningDetail, 0, 200))
+        && (p.neckMovement in ['', 'normal', 'limited'])
+        && (!('neckMovementDetail' in p) || isStr(p.neckMovementDetail, 0, 200))
+        && (p.thyromentalDistance in ['', '<6', '>=6'])
+        && (!('thyromentalDistanceDetail' in p) || isStr(p.thyromentalDistanceDetail, 0, 200))
+        && (p.mallampatiClass in ['', 'I', 'II', 'III', 'IV'])
+        && (p.expectedDifficultAirway in ['none', 'no', 'yes'])
+        && (p.breathSound in ['', 'normal', 'abnormal'])
+        && isStr(p.breathSoundDetail, 0, 300)
+        && (p.heartSound in ['', 'normal', 'abnormal'])
+        && isStr(p.heartSoundDetail, 0, 300)
+        && isStr(p.functionalCapacity, 0, 200);
+    }
+
+    function isValidInvestigation(inv) {
+      return inv is map
+        && inv.keys().hasAll(['cxrStatus', 'cxrDetail', 'ekgStatus', 'ekgDetail', 'other'])
+        && inv.keys().hasOnly(['cxrStatus', 'cxrDetail', 'ekgStatus', 'ekgDetail', 'other'])
+        && (inv.cxrStatus in ['', 'normal', 'abnormal'])
+        && isStr(inv.cxrDetail, 0, 400)
+        && (inv.ekgStatus in ['', 'normal', 'abnormal'])
+        && isStr(inv.ekgDetail, 0, 400)
+        && isStr(inv.other, 0, 600);
+    }
+
+    function isValidLaboratory(lab) {
+      return lab is map
+        && lab.keys().hasAll([
+          'hb', 'hct', 'wbc', 'plt', 'neutrophil', 'lymphocyte',
+          'na', 'k', 'cl', 'co2', 'bun', 'cr',
+          'pt', 'ptt', 'inr',
+          'sgot', 'sgpt', 'alp', 'alb',
+          'glucose', 'hba1c', 'other',
+          'prepPrc', 'prepFfp', 'prepPlt'
+        ])
+        && lab.keys().hasOnly([
+          'hb', 'hct', 'wbc', 'plt', 'neutrophil', 'lymphocyte',
+          'na', 'k', 'cl', 'co2', 'bun', 'cr',
+          'pt', 'ptt', 'inr',
+          'sgot', 'sgpt', 'alp', 'alb',
+          'glucose', 'hba1c', 'other',
+          'prepTs', 'prepPrc', 'prepFfp', 'prepPlt',
+          'prepStatuses', 'prepStatusDetail'
+        ])
+        && isStr(lab.hb, 0, 20)
+        && isStr(lab.hct, 0, 20)
+        && isStr(lab.wbc, 0, 20)
+        && isStr(lab.plt, 0, 20)
+        && isStr(lab.neutrophil, 0, 20)
+        && isStr(lab.lymphocyte, 0, 20)
+        && isStr(lab.na, 0, 20)
+        && isStr(lab.k, 0, 20)
+        && isStr(lab.cl, 0, 20)
+        && isStr(lab.co2, 0, 20)
+        && isStr(lab.bun, 0, 20)
+        && isStr(lab.cr, 0, 20)
+        && isStr(lab.pt, 0, 20)
+        && isStr(lab.ptt, 0, 20)
+        && isStr(lab.inr, 0, 20)
+        && isStr(lab.sgot, 0, 20)
+        && isStr(lab.sgpt, 0, 20)
+        && isStr(lab.alp, 0, 20)
+        && isStr(lab.alb, 0, 20)
+        && isStr(lab.glucose, 0, 20)
+        && isStr(lab.hba1c, 0, 20)
+        && isStr(lab.other, 0, 400)
+        && (!('prepTs' in lab) || lab.prepTs is bool)
+        && isStr(lab.prepPrc, 0, 20)
+        && isStr(lab.prepFfp, 0, 20)
+        && isStr(lab.prepPlt, 0, 20)
+        && (!('prepStatuses' in lab) || (
+          lab.prepStatuses is list
+          && lab.prepStatuses.size() <= 4
+          && lab.prepStatuses.hasOnly(['ready', 'not_ready', 'waiting_red_cross', 'other'])
+        ))
+        && (!('prepStatusDetail' in lab) || isStr(lab.prepStatusDetail, 0, 300));
+    }
+
+    function isValidPremedication(pm) {
+      return pm is map
+        && pm.keys().hasAll(['items', 'npoTime', 'onIvf'])
+        && pm.keys().hasOnly(['items', 'npoTime', 'onIvf'])
+        && isBoundedStringList(pm.items, 10, 200)
+        && isStr(pm.npoTime, 0, 100)
+        && isStr(pm.onIvf, 0, 150);
+    }
+
+    function isValidAnestheticPlan(ap) {
+      return ap is map
+        && ap.keys().hasAll([
+          'gaSelected', 'gaMethods', 'gaOther',
+          'raSelected', 'raMethods', 'raOther'
+        ])
+        && ap.keys().hasOnly([
+          'gaSelected', 'gaMethods', 'gaOther',
+          'raSelected', 'raMethods', 'raOther'
+        ])
+        && ap.gaSelected is bool
+        && ap.gaMethods is list
+        && ap.gaMethods.size() <= 5
+        && ap.gaMethods.hasOnly(['Intubation', 'LMA', 'Mask', 'TIVA', 'Other'])
+        && isStr(ap.gaOther, 0, 200)
+        && ap.raSelected is bool
+        && ap.raMethods is list
+        && ap.raMethods.size() <= 4
+        && ap.raMethods.hasOnly(['Spinal block', 'Epidural', 'Nerve block', 'Other'])
+        && isStr(ap.raOther, 0, 200);
+    }
+
+    function isValidPostAnesthesia(pa) {
+      return pa is map
+        && pa.keys().hasAll([
+          'summarizedBy', 'summarizedDate',
+          'bp', 'pulse', 'rr', 'temp', 'spo2', 'painScore',
+          'complicationStatus', 'complicationDetail',
+          'visitBy', 'visitDate'
+        ])
+        && pa.keys().hasOnly([
+          'summarizedBy', 'summarizedDate',
+          'bp', 'pulse', 'rr', 'temp', 'spo2', 'painScore',
+          'complicationStatus', 'complicationDetail',
+          'visitBy', 'visitDate'
+        ])
+        && isStr(pa.summarizedBy, 0, 120)
+        && isStr(pa.summarizedDate, 0, 32)
+        && isStr(pa.bp, 0, 30)
+        && isStr(pa.pulse, 0, 20)
+        && isStr(pa.rr, 0, 20)
+        && isStr(pa.temp, 0, 20)
+        && isStr(pa.spo2, 0, 20)
+        && isStr(pa.painScore, 0, 20)
+        && (pa.complicationStatus in ['none', 'no', 'yes'])
+        && isStr(pa.complicationDetail, 0, 500)
+        && isStr(pa.visitBy, 0, 120)
+        && isStr(pa.visitDate, 0, 32);
+    }
+
+    function isValidFormData(fd) {
+      return fd is map
+        && fd.keys().hasAll([
+          'history', 'physicalExam', 'investigation', 'laboratory',
+          'premedication', 'consult', 'problemList', 'anestheticPlan',
+          'preparationOrders', 'postAnesthesia'
+        ])
+        && fd.keys().hasOnly([
+          'history', 'physicalExam', 'investigation', 'laboratory',
+          'premedication', 'consult', 'problemList', 'anestheticPlan',
+          'preparationOrders', 'postAnesthesia'
+        ])
+        && isValidHistory(fd.history)
+        && isValidPhysicalExam(fd.physicalExam)
+        && isValidInvestigation(fd.investigation)
+        && isValidLaboratory(fd.laboratory)
+        && isValidPremedication(fd.premedication)
+        && isStr(fd.consult, 0, 1500)
+        && isBoundedStringList(fd.problemList, 12, 250)
+        && isValidAnestheticPlan(fd.anestheticPlan)
+        && isBoundedStringList(fd.preparationOrders, 12, 250)
+        && isValidPostAnesthesia(fd.postAnesthesia);
+    }
+
+    function isValidEvaluation(data) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'status', 'patientName', 'hn', 'an', 'age', 'ward',
+          'dateOfVisit', 'dateOfOperation', 'diagnosis', 'operation',
+          'asaClass', 'asaEmergency', 'expectedDifficultAirway',
+          'hasComplication', 'anesthesiaType', 'formData', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerId', 'status', 'patientName', 'hn', 'an', 'age', 'ward',
+          'dateOfVisit', 'dateOfOperation', 'operationTime', 'surgeon', 'diagnosis', 'operation',
+          'asaClass', 'asaEmergency', 'expectedDifficultAirway',
+          'hasComplication', 'anesthesiaType', 'formData', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.ownerId)
+        && (data.status in ['draft', 'evaluated', 'post_op_completed', 'locked'])
+        && isStr(data.patientName, 1, 120)
+        && isStr(data.hn, 0, 40)
+        && isStr(data.an, 0, 40)
+        && isStr(data.age, 0, 16)
+        && isStr(data.ward, 0, 80)
+        && isStr(data.dateOfVisit, 0, 32)
+        && isStr(data.dateOfOperation, 0, 32)
+        && (!('operationTime' in data) || isStr(data.operationTime, 0, 32))
+        && (!('surgeon' in data) || isStr(data.surgeon, 0, 120))
+        && isStr(data.diagnosis, 0, 300)
+        && isStr(data.operation, 0, 300)
+        && (data.asaClass in ['', 'I', 'II', 'III', 'IV', 'V', 'VI'])
+        && data.asaEmergency is bool
+        && data.expectedDifficultAirway is bool
+        && data.hasComplication is bool
+        && (data.anesthesiaType in ['', 'GA', 'RA', 'GA+RA'])
+        && isValidFormData(data.formData)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMedicationCatalog(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'groups', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerId', 'groups', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && isValidId(data.ownerId)
+        && data.groups is list
+        && data.groups.size() <= 20
+        && (
+          data.groups.size() == 0 || (
+            data.groups[0] is map
+            && data.groups[0].keys().hasAll(['id', 'label', 'items'])
+            && data.groups[0].keys().hasOnly(['id', 'label', 'items', 'autoUnderlying'])
+            && isStr(data.groups[0].id, 1, 64)
+            && isStr(data.groups[0].label, 1, 100)
+            && isBoundedStringList(data.groups[0].items, 30, 120)
+          )
+        )
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidWardCatalog(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'wards', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerId', 'wards', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && isValidId(data.ownerId)
+        && isBoundedStringList(data.wards, 40, 80)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSurgeonCatalog(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'surgeons', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerId', 'surgeons', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && isValidId(data.ownerId)
+        && isBoundedStringList(data.surgeons, 100, 120)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidOxygenCatalog(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'presets', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerId', 'presets', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && isValidId(data.ownerId)
+        && isBoundedStringList(data.presets, 40, 120)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSummarizerCatalog(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'summarizers', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerId', 'summarizers', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && isValidId(data.ownerId)
+        && isBoundedStringList(data.summarizers, 100, 120)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidVisitorCatalog(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'visitors', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerId', 'visitors', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && isValidId(data.ownerId)
+        && isBoundedStringList(data.visitors, 100, 120)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // 3. Collection Match Block: /evaluations/{evaluationId}
+    match /evaluations/{evaluationId} {
+      allow get: if isVerifiedUser()
+        && isValidId(evaluationId)
+        && existing().ownerId == request.auth.uid;
+
+      allow list: if isVerifiedUser()
+        && resource.data.ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidId(evaluationId)
+        && isValidEvaluation(incoming())
+        && incoming().id == evaluationId
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(evaluationId)
+        && isValidEvaluation(incoming())
+        && existing().ownerId == request.auth.uid
+        && existing().status != 'locked'
+        && incoming().id == existing().id
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Edit evaluation content
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'status', 'patientName', 'hn', 'an', 'age', 'ward',
+            'dateOfVisit', 'dateOfOperation', 'operationTime', 'surgeon', 'diagnosis', 'operation',
+            'asaClass', 'asaEmergency', 'expectedDifficultAirway',
+            'hasComplication', 'anesthesiaType', 'formData', 'updatedAt'
+          ])
+          ||
+          // Action 2: Transition status only
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(evaluationId)
+        && existing().ownerId == request.auth.uid;
+    }
+
+    // 4. Collection Match Block: /medicationCatalogs/{catalogId}
+    match /medicationCatalogs/{catalogId} {
+      allow get: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && (resource == null || existing().ownerId == request.auth.uid);
+
+      allow create: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && isValidMedicationCatalog(incoming())
+        && incoming().id == catalogId
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && isValidMedicationCatalog(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().id == existing().id
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['groups', 'updatedAt']);
+
+      allow delete: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && existing().ownerId == request.auth.uid;
+    }
+
+    // 5. Collection Match Block: /wardCatalogs/{catalogId}
+    match /wardCatalogs/{catalogId} {
+      allow get: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && (resource == null || existing().ownerId == request.auth.uid);
+
+      allow create: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && isValidWardCatalog(incoming())
+        && incoming().id == catalogId
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && isValidWardCatalog(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().id == existing().id
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['wards', 'updatedAt']);
+
+      allow delete: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && existing().ownerId == request.auth.uid;
+    }
+
+    // 6. Collection Match Block: /surgeonCatalogs/{catalogId}
+    match /surgeonCatalogs/{catalogId} {
+      allow get: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && (resource == null || existing().ownerId == request.auth.uid);
+
+      allow create: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && isValidSurgeonCatalog(incoming())
+        && incoming().id == catalogId
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && isValidSurgeonCatalog(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().id == existing().id
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['surgeons', 'updatedAt']);
+
+      allow delete: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && existing().ownerId == request.auth.uid;
+    }
+
+    // 7. Collection Match Block: /oxygenCatalogs/{catalogId}
+    match /oxygenCatalogs/{catalogId} {
+      allow get: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && (resource == null || existing().ownerId == request.auth.uid);
+
+      allow create: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && isValidOxygenCatalog(incoming())
+        && incoming().id == catalogId
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && isValidOxygenCatalog(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().id == existing().id
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['presets', 'updatedAt']);
+
+      allow delete: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && existing().ownerId == request.auth.uid;
+    }
+
+    // 8. Collection Match Block: /summarizerCatalogs/{catalogId}
+    match /summarizerCatalogs/{catalogId} {
+      allow get: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && (resource == null || existing().ownerId == request.auth.uid);
+
+      allow create: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && isValidSummarizerCatalog(incoming())
+        && incoming().id == catalogId
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && isValidSummarizerCatalog(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().id == existing().id
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['summarizers', 'updatedAt']);
+
+      allow delete: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && existing().ownerId == request.auth.uid;
+    }
+
+    // 9. Collection Match Block: /visitorCatalogs/{catalogId}
+    match /visitorCatalogs/{catalogId} {
+      allow get: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && (resource == null || existing().ownerId == request.auth.uid);
+
+      allow create: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && isValidVisitorCatalog(incoming())
+        && incoming().id == catalogId
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && isValidVisitorCatalog(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().id == existing().id
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['visitors', 'updatedAt']);
+
+      allow delete: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && existing().ownerId == request.auth.uid;
+    }
+  }
+}

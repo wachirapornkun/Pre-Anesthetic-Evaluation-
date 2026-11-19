@@ -10,7 +10,12 @@ import {
   Sparkles,
   Trash2,
 } from 'lucide-react';
-import { computeClinicalSummary, PreAnestheticEvaluation } from '../types/evaluation';
+import {
+  compareElectiveSchedule,
+  computeClinicalSummary,
+  getEffectiveScheduleType,
+  PreAnestheticEvaluation,
+} from '../types/evaluation';
 import { exportEvaluationsCsv, exportSingleHtmlReport } from '../utils/exportReports';
 
 interface RegistryViewProps {
@@ -36,13 +41,16 @@ export function RegistryView({
 }: RegistryViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'draft' | 'evaluated' | 'post_op_completed'>('ALL');
+  const [scheduleFilter, setScheduleFilter] = useState<'ALL' | 'elective' | 'emergency'>('ALL');
+  const [sortMode, setSortMode] = useState<'op_asc' | 'op_desc' | 'updated'>('op_asc');
   const [confirmDeleteRecord, setConfirmDeleteRecord] = useState<PreAnestheticEvaluation | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return records.filter((r) => {
+    const list = records.filter((r) => {
       if (statusFilter !== 'ALL' && r.status !== statusFilter) return false;
+      if (scheduleFilter !== 'ALL' && getEffectiveScheduleType(r) !== scheduleFilter) return false;
       if (!q) return true;
       return (
         r.patientName.toLowerCase().includes(q) ||
@@ -50,11 +58,19 @@ export function RegistryView({
         r.an.toLowerCase().includes(q) ||
         r.ward.toLowerCase().includes(q) ||
         (r.surgeon || '').toLowerCase().includes(q) ||
+        (r.orRoom || '').toLowerCase().includes(q) ||
         r.diagnosis.toLowerCase().includes(q) ||
         r.operation.toLowerCase().includes(q)
       );
     });
-  }, [records, searchQuery, statusFilter]);
+    if (sortMode === 'op_asc') {
+      return [...list].sort((a, b) => compareElectiveSchedule(a, b, 'asc'));
+    }
+    if (sortMode === 'op_desc') {
+      return [...list].sort((a, b) => compareElectiveSchedule(a, b, 'desc'));
+    }
+    return list;
+  }, [records, searchQuery, statusFilter, scheduleFilter, sortMode]);
 
   const statusText = (s: PreAnestheticEvaluation['status']) => {
     switch (s) {
@@ -108,6 +124,28 @@ export function RegistryView({
               </button>
             ))}
           </div>
+
+          <select
+            aria-label="ประเภทตารางผ่าตัด"
+            value={scheduleFilter}
+            onChange={(e) => setScheduleFilter(e.target.value as 'ALL' | 'elective' | 'emergency')}
+            className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
+          >
+            <option value="ALL">ทุกประเภทเคส</option>
+            <option value="elective">เฉพาะ Elective</option>
+            <option value="emergency">เฉพาะ Emergency</option>
+          </select>
+
+          <select
+            aria-label="เรียงลำดับข้อมูล"
+            value={sortMode}
+            onChange={(e) => setSortMode(e.target.value as 'op_asc' | 'op_desc' | 'updated')}
+            className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
+          >
+            <option value="op_asc">เรียงตามวันผ่าตัด (ใกล้ → ไกล)</option>
+            <option value="op_desc">เรียงตามวันผ่าตัด (ล่าสุด → เก่า)</option>
+            <option value="updated">เรียงตามแก้ไขล่าสุด</option>
+          </select>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -191,8 +229,13 @@ export function RegistryView({
                           ) : null}
                         </div>
                         <div className="text-[11px] text-slate-500 font-mono tabular-nums">
-                          Visit: {r.dateOfVisit || '—'} · Op: {r.dateOfOperation || '—'}
+                          Op: {r.dateOfOperation || '—'}
                           {r.operationTime ? ` ${r.operationTime}` : ''}
+                          {r.orRoom ? ` · ${r.orRoom}` : ''}
+                          {r.caseOrder ? ` #${r.caseOrder}` : ''}
+                          {' · '}
+                          {getEffectiveScheduleType(r) === 'emergency' ? 'Emergency' : 'Elective'}
+                          {r.dateOfVisit ? ` · Visit: ${r.dateOfVisit}` : ''}
                         </div>
                       </td>
                       <td className="py-2.5 px-4 max-w-xs">

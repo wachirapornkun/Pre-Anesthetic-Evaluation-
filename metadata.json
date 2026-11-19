@@ -2,5 +2,7 @@
   "name": "Bangplee Pre-Anesthetic Evaluation",
   "description": "ระบบบันทึกข้อมูลการเยี่ยมผู้ป่วยก่อนผ่าตัด แบบฟอร์มดิจิทัลมาตรฐานโรงพยาบาล (ANE-FM-002-03) พร้อมสรุปผลคลินิกทันที Dashboard และส่งออกรายงาน 1 หน้ากระดาษ",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

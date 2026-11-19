@@ -1,6 +1,16 @@
 export type EvaluationStatus = 'draft' | 'evaluated' | 'post_op_completed' | 'locked';
+export type ScheduleType = 'elective' | 'emergency';
 export type AsaClass = '' | 'I' | 'II' | 'III' | 'IV' | 'V' | 'VI';
 export type AnesthesiaSummaryType = '' | 'GA' | 'RA' | 'GA+RA';
+
+export const OR_ROOM_OPTIONS = [
+  'OR 1',
+  'OR 2',
+  'OR 3',
+  'OR 4',
+  'OR 5',
+  'ห้องคลอด',
+] as const;
 export type TriStatus = 'none' | 'no' | 'yes';
 export type NormalAbnormal = '' | 'normal' | 'abnormal';
 export type NormalLimited = '' | 'normal' | 'limited';
@@ -13,9 +23,10 @@ export type RaMethod = 'Spinal block' | 'Epidural' | 'Nerve block' | 'Other';
 export type DurationUnit = 'months' | 'years';
 export type OxygenSupportMode = '' | 'cannula' | 'mask_bag' | 'ett' | 'other';
 export type VentilatorMode = '' | 'vcv' | 'pcv';
-export type BloodPrepStatus = 'ready' | 'not_ready' | 'waiting_red_cross' | 'other';
+export type BloodPrepStatus = 'no_blood' | 'ready' | 'not_ready' | 'waiting_red_cross' | 'other';
 
 export const BLOOD_PREP_STATUS_OPTIONS: readonly { value: BloodPrepStatus; label: string }[] = [
+  { value: 'no_blood', label: 'ไม่มีจองเลือด' },
   { value: 'ready', label: 'พร้อมใช้' },
   { value: 'not_ready', label: 'ไม่พร้อมใช้' },
   { value: 'waiting_red_cross', label: 'รอเลือดจากกาชาด' },
@@ -299,6 +310,9 @@ export interface PreAnestheticEvaluation {
   dateOfVisit: string;
   dateOfOperation: string;
   operationTime: string;
+  scheduleType?: ScheduleType;
+  orRoom?: string;
+  caseOrder?: string;
   surgeon: string;
   diagnosis: string;
   operation: string;
@@ -613,6 +627,243 @@ export function toggleMedicationToken(medicationText: string, drugPreset: string
   return serializeMedicationList([...entries, presetEntry]);
 }
 
+export type AutoPremedDrugClass = 'CCB' | 'Beta-blocker';
+
+const CCB_DRUG_PATTERNS: readonly RegExp[] = [
+  /\bamlodipin(?:e)?\b/i,
+  /\bs-amlodipin(?:e)?\b/i,
+  /\blevamlodipin(?:e)?\b/i,
+  /\besamlodipin(?:e)?\b/i,
+  /\bnorvasc\b/i,
+  /\bamlopine\b/i,
+  /\bnifedipin(?:e)?\b/i,
+  /\badalat\b/i,
+  /\bnifecard\b/i,
+  /\bnelapine\b/i,
+  /\bnifelat\b/i,
+  /\bmanidipin(?:e)?\b/i,
+  /\bmadiplot\b/i,
+  /\bfelodipin(?:e)?\b/i,
+  /\bplendil\b/i,
+  /\bler(?:ca)?nidipin(?:e)?\b/i,
+  /\bzanidip\b/i,
+  /\bnicardipin(?:e)?\b/i,
+  /\bnimodipin(?:e)?\b/i,
+  /\bbenidipin(?:e)?\b/i,
+  /\bbarnidipin(?:e)?\b/i,
+  /\bcilnidipin(?:e)?\b/i,
+  /\bazelnidipin(?:e)?\b/i,
+  /\bisradipin(?:e)?\b/i,
+  /\blacidipin(?:e)?\b/i,
+  /\bnisoldipin(?:e)?\b/i,
+  /\bnitrendipin(?:e)?\b/i,
+  /\bclevidipin(?:e)?\b/i,
+  /\bdiltiazem\b/i,
+  /\bherbesser\b/i,
+  /\bcardizem\b/i,
+  /\bverapamil\b/i,
+  /\bisoptin\b/i,
+  /\bcalcium\s*channel\s*block(?:er)?s?\b/i,
+  /\bccb\b/i,
+];
+
+const BETA_BLOCKER_PATTERNS: readonly RegExp[] = [
+  /\batenolol\b/i,
+  /\btenormin\b/i,
+  /\bprenolol\b/i,
+  /\bmetoprolol\b/i,
+  /\bbetaloc\b/i,
+  /\blopressor\b/i,
+  /\btoprol\b/i,
+  /\bbisoprolol\b/i,
+  /\bconcor\b/i,
+  /\bnovacor\b/i,
+  /\bpropranolol\b/i,
+  /\binderal\b/i,
+  /\bbetalol\b/i,
+  /\bcarvedilol\b/i,
+  /\bdilatrend\b/i,
+  /\bcarvid\b/i,
+  /\bnebivolol\b/i,
+  /\bnebilet\b/i,
+  /\blabetalol\b/i,
+  /\btrandate\b/i,
+  /\bnadolol\b/i,
+  /\bpindolol\b/i,
+  /\bsotalol\b/i,
+  /\btimolol\b/i,
+  /\bbetaxolol\b/i,
+  /\bacebutolol\b/i,
+  /\bceliprolol\b/i,
+  /\besmolol\b/i,
+  /\boxprenolol\b/i,
+  /\bpenbutolol\b/i,
+  /\bcarteolol\b/i,
+  /\bbeta[\s-]*block(?:er)?s?\b/i,
+];
+
+export function detectAutoPremedDrugClass(medText: string): AutoPremedDrugClass | null {
+  const cleaned = medText.trim();
+  if (!cleaned) return null;
+  if (CCB_DRUG_PATTERNS.some((re) => re.test(cleaned))) return 'CCB';
+  if (BETA_BLOCKER_PATTERNS.some((re) => re.test(cleaned))) return 'Beta-blocker';
+  return null;
+}
+
+export interface AutoPremedEntry {
+  entry: SelectedMedicationEntry;
+  drugClass: AutoPremedDrugClass;
+  orderText: string;
+}
+
+function formatLegacyAutoPremedOrder(entry: SelectedMedicationEntry): string {
+  const formatted = formatMedicationEntry(entry);
+  if (!formatted) return '';
+  return `Continue ${formatted} เช้าวันผ่าตัด (with sip of water)`.slice(0, 200);
+}
+
+export function formatAutoPremedOrder(entry: SelectedMedicationEntry): string {
+  const formatted = formatMedicationEntry(entry);
+  if (!formatted) return '';
+  return `${formatted} เวลา 06.00 น. เช้าวันผ่าตัด`.slice(0, 200);
+}
+
+export function getAutoPremedEntries(medicationText: string): AutoPremedEntry[] {
+  const entries = parseMedicationList(medicationText);
+  const results: AutoPremedEntry[] = [];
+  const seenOrders = new Set<string>();
+  for (const entry of entries) {
+    const drugClass = detectAutoPremedDrugClass(entry.name);
+    if (!drugClass) continue;
+    const orderText = formatAutoPremedOrder(entry);
+    if (!orderText) continue;
+    const key = orderText.toLowerCase();
+    if (seenOrders.has(key)) continue;
+    seenOrders.add(key);
+    results.push({ entry, drugClass, orderText });
+  }
+  return results;
+}
+
+function insertPremedLine(items: string[], line: string): void {
+  const emptyIdx = items.findIndex((x) => !x.trim());
+  if (emptyIdx !== -1) {
+    items[emptyIdx] = line;
+  } else if (items.length < 10) {
+    items.push(line);
+  }
+}
+
+function normalizePremedSlots(items: string[], compactNonEmpty: boolean): string[] {
+  const list = compactNonEmpty ? items.filter((x) => x.trim().length > 0) : [...items];
+  const minSlots = Math.max(4, list.length);
+  while (list.length < minSlots && list.length < 10) {
+    list.push('');
+  }
+  return list.slice(0, 10);
+}
+
+export function syncPremedicationWithMedications(
+  currentItems: string[],
+  prevMedicationText: string,
+  nextMedicationText: string,
+): string[] {
+  const prevAuto = getAutoPremedEntries(prevMedicationText);
+  const nextAuto = getAutoPremedEntries(nextMedicationText);
+
+  if (prevAuto.length === 0 && nextAuto.length === 0) {
+    return currentItems;
+  }
+
+  const nextOrderSet = new Set(nextAuto.map((a) => a.orderText.toLowerCase()));
+  const items = [...currentItems];
+  const consumedNextOrders = new Set<string>();
+  let removedAny = false;
+
+  // 1. Update in-place or remove previous auto-generated orders
+  for (const prev of prevAuto) {
+    const prevLower = prev.orderText.toLowerCase();
+    if (nextOrderSet.has(prevLower)) {
+      consumedNextOrders.add(prevLower);
+      continue;
+    }
+
+    const prevLegacyLower = formatLegacyAutoPremedOrder(prev.entry).toLowerCase();
+    const existingIdx = items.findIndex((it) => {
+      const trimmedLower = it.trim().toLowerCase();
+      return trimmedLower === prevLower || trimmedLower === prevLegacyLower;
+    });
+    if (existingIdx === -1) continue;
+
+    // Look for an updated entry with the same drug name in nextAuto
+    const prevNameLower = prev.entry.name.trim().toLowerCase();
+    const replacement = nextAuto.find(
+      (n) =>
+        n.entry.name.trim().toLowerCase() === prevNameLower &&
+        !consumedNextOrders.has(n.orderText.toLowerCase()) &&
+        !items.some((it) => it.trim().toLowerCase() === n.orderText.toLowerCase()),
+    );
+
+    if (replacement) {
+      items[existingIdx] = replacement.orderText;
+      consumedNextOrders.add(replacement.orderText.toLowerCase());
+    } else {
+      items[existingIdx] = '';
+      removedAny = true;
+    }
+  }
+
+  // 2. Insert newly added CCB / Beta-blocker entries
+  const nameCounts = new Map<string, number>();
+  for (const n of nextAuto) {
+    const nm = n.entry.name.trim().toLowerCase();
+    nameCounts.set(nm, (nameCounts.get(nm) || 0) + 1);
+  }
+
+  for (const next of nextAuto) {
+    const nextLower = next.orderText.toLowerCase();
+    if (consumedNextOrders.has(nextLower)) continue;
+    if (items.some((it) => it.trim().toLowerCase() === nextLower)) continue;
+
+    const nm = next.entry.name.trim().toLowerCase();
+    const isSingleOfName = (nameCounts.get(nm) || 0) === 1;
+    if (isSingleOfName && items.some((it) => it.trim().toLowerCase().includes(nm))) {
+      continue;
+    }
+
+    insertPremedLine(items, next.orderText);
+  }
+
+  return normalizePremedSlots(items, removedAny);
+}
+
+export function getMissingAutoPremedEntries(
+  currentItems: string[],
+  medicationText: string,
+): AutoPremedEntry[] {
+  const autoEntries = getAutoPremedEntries(medicationText);
+  if (autoEntries.length === 0) return [];
+  const lowerItems = currentItems.map((it) => it.trim().toLowerCase()).filter(Boolean);
+  return autoEntries.filter((auto) => {
+    const orderLower = auto.orderText.toLowerCase();
+    const nameLower = auto.entry.name.trim().toLowerCase();
+    return !lowerItems.some((it) => it === orderLower || it.includes(nameLower));
+  });
+}
+
+export function applyMissingAutoPremeds(
+  currentItems: string[],
+  medicationText: string,
+): string[] {
+  const missing = getMissingAutoPremedEntries(currentItems, medicationText);
+  if (missing.length === 0) return currentItems;
+  const items = [...currentItems];
+  for (const entry of missing) {
+    insertPremedLine(items, entry.orderText);
+  }
+  return normalizePremedSlots(items, false);
+}
+
 export const FIELD_LIMITS = {
   id: 64,
   ownerId: 128,
@@ -623,6 +874,8 @@ export const FIELD_LIMITS = {
   ward: 80,
   date: 32,
   operationTime: 32,
+  orRoom: 32,
+  caseOrder: 16,
   surgeon: 120,
   diagnosis: 300,
   operation: 300,
@@ -645,8 +898,119 @@ export function getTodayIsoDate(): string {
   return `${y}-${m}-${d}`;
 }
 
-export function createEmptyEvaluation(ownerId = 'local'): PreAnestheticEvaluation {
+export function addDaysToIsoDate(isoDate: string, days: number): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate.trim());
+  const base = match
+    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+    : new Date();
+  base.setDate(base.getDate() + days);
+  const y = base.getFullYear();
+  const m = String(base.getMonth() + 1).padStart(2, '0');
+  const d = String(base.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function getEffectiveScheduleType(record: PreAnestheticEvaluation): ScheduleType {
+  if (record.scheduleType === 'emergency' || record.scheduleType === 'elective') {
+    return record.scheduleType;
+  }
+  return record.asaEmergency ? 'emergency' : 'elective';
+}
+
+export function formatThaiScheduleDate(isoDate: string): { label: string; relativeTag: string } {
+  const trimmed = (isoDate || '').trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (!match) {
+    return { label: 'ยังไม่ระบุวันที่ผ่าตัด', relativeTag: '' };
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const target = new Date(year, month, day);
+
+  const todayStr = getTodayIsoDate();
+  const [ty, tm, td] = todayStr.split('-').map(Number);
+  const todayDate = new Date(ty, tm - 1, td);
+  const diffDays = Math.round((target.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24));
+
+  const weekdays = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+  const months = [
+    'มกราคม',
+    'กุมภาพันธ์',
+    'มีนาคม',
+    'เมษายน',
+    'พฤษภาคม',
+    'มิถุนายน',
+    'กรกฎาคม',
+    'สิงหาคม',
+    'กันยายน',
+    'ตุลาคม',
+    'พฤศจิกายน',
+    'ธันวาคม',
+  ];
+  const beYear = year + 543;
+  const label = `วัน${weekdays[target.getDay()]}ที่ ${day} ${months[month]} ${beYear}`;
+
+  let relativeTag = '';
+  if (diffDays === 0) relativeTag = 'วันนี้';
+  else if (diffDays === 1) relativeTag = 'พรุ่งนี้';
+  else if (diffDays === 2) relativeTag = 'มะรืนนี้';
+  else if (diffDays > 2) relativeTag = `อีก ${diffDays} วัน`;
+  else if (diffDays === -1) relativeTag = 'เมื่อวาน';
+  else relativeTag = `ผ่านมาแล้ว ${Math.abs(diffDays)} วัน`;
+
+  return { label, relativeTag };
+}
+
+export function compareElectiveSchedule(
+  a: PreAnestheticEvaluation,
+  b: PreAnestheticEvaluation,
+  direction: 'asc' | 'desc' = 'asc',
+): number {
+  const dateA = (a.dateOfOperation || '').trim();
+  const dateB = (b.dateOfOperation || '').trim();
+
+  if (dateA !== dateB) {
+    if (!dateA) return 1;
+    if (!dateB) return -1;
+    return direction === 'asc' ? dateA.localeCompare(dateB) : dateB.localeCompare(dateA);
+  }
+
+  const roomA = (a.orRoom || '').trim();
+  const roomB = (b.orRoom || '').trim();
+  if (roomA !== roomB) {
+    if (!roomA) return 1;
+    if (!roomB) return -1;
+    const roomCmp = roomA.localeCompare(roomB, 'th', { numeric: true });
+    if (roomCmp !== 0) return roomCmp;
+  }
+
+  const orderA = parseInt((a.caseOrder || '').trim(), 10);
+  const orderB = parseInt((b.caseOrder || '').trim(), 10);
+  const hasOrderA = Number.isFinite(orderA);
+  const hasOrderB = Number.isFinite(orderB);
+  if (hasOrderA !== hasOrderB) return hasOrderA ? -1 : 1;
+  if (hasOrderA && hasOrderB && orderA !== orderB) return orderA - orderB;
+
+  const timeA = (a.operationTime || '').trim();
+  const timeB = (b.operationTime || '').trim();
+  if (timeA !== timeB) {
+    if (!timeA) return 1;
+    if (!timeB) return -1;
+    const timeCmp = timeA.localeCompare(timeB);
+    if (timeCmp !== 0) return timeCmp;
+  }
+
+  return (a.patientName || '').localeCompare(b.patientName || '', 'th');
+}
+
+export function createEmptyEvaluation(
+  ownerId = 'local',
+  overrides?: Partial<Pick<PreAnestheticEvaluation, 'dateOfOperation' | 'dateOfVisit' | 'orRoom' | 'caseOrder' | 'operationTime' | 'scheduleType' | 'asaEmergency'>>,
+): PreAnestheticEvaluation {
   const today = getTodayIsoDate();
+  const scheduleType: ScheduleType =
+    overrides?.scheduleType ?? (overrides?.asaEmergency ? 'emergency' : 'elective');
   return {
     id: generateEvaluationId(),
     ownerId,
@@ -656,9 +1020,12 @@ export function createEmptyEvaluation(ownerId = 'local'): PreAnestheticEvaluatio
     an: '',
     age: '',
     ward: '',
-    dateOfVisit: today,
-    dateOfOperation: today,
-    operationTime: '',
+    dateOfVisit: overrides?.dateOfVisit ?? today,
+    dateOfOperation: overrides?.dateOfOperation ?? today,
+    operationTime: overrides?.operationTime ?? '',
+    scheduleType,
+    orRoom: overrides?.orRoom ?? '',
+    caseOrder: overrides?.caseOrder ?? '',
     surgeon: '',
     diagnosis: '',
     operation: '',
@@ -887,6 +1254,12 @@ export function sanitizeEvaluationForFirestore(
     dateOfVisit: clampStr(evalRecord.dateOfVisit, FIELD_LIMITS.date),
     dateOfOperation: clampStr(evalRecord.dateOfOperation, FIELD_LIMITS.date),
     operationTime: clampStr(evalRecord.operationTime ?? '', FIELD_LIMITS.operationTime),
+    scheduleType:
+      evalRecord.scheduleType === 'emergency' || (evalRecord.scheduleType !== 'elective' && evalRecord.asaEmergency)
+        ? 'emergency'
+        : 'elective',
+    orRoom: clampStr((evalRecord.orRoom ?? '').trim(), FIELD_LIMITS.orRoom),
+    caseOrder: clampStr((evalRecord.caseOrder ?? '').trim(), FIELD_LIMITS.caseOrder),
     surgeon: clampStr((evalRecord.surgeon ?? '').trim(), FIELD_LIMITS.surgeon),
     diagnosis: clampStr(evalRecord.diagnosis, FIELD_LIMITS.diagnosis),
     operation: clampStr(evalRecord.operation, FIELD_LIMITS.operation),
@@ -1043,11 +1416,11 @@ export function sanitizeEvaluationForFirestore(
         prepFfp: clampStr(fd.laboratory.prepFfp, 20),
         prepPlt: clampStr(fd.laboratory.prepPlt, 20),
         prepStatuses: (() => {
-          const allow: BloodPrepStatus[] = ['ready', 'not_ready', 'waiting_red_cross', 'other'];
+          const allow: BloodPrepStatus[] = ['no_blood', 'ready', 'not_ready', 'waiting_red_cross', 'other'];
           const raw = Array.isArray(fd.laboratory.prepStatuses) ? fd.laboratory.prepStatuses : [];
           return Array.from(
             new Set(raw.filter((s): s is BloodPrepStatus => allow.includes(s))),
-          ).slice(0, 4);
+          ).slice(0, 5);
         })(),
         prepStatusDetail: clampStr(fd.laboratory.prepStatusDetail ?? '', 300),
       },
@@ -1401,6 +1774,8 @@ export function computeClinicalSummary(record: PreAnestheticEvaluation): Clinica
 
 export function createSampleEvaluations(ownerId: string): PreAnestheticEvaluation[] {
   const today = getTodayIsoDate();
+  const tomorrow = addDaysToIsoDate(today, 1);
+  const dayAfterTomorrow = addDaysToIsoDate(today, 2);
 
   const makeCase = (
     suffix: string,
@@ -1451,7 +1826,12 @@ export function createSampleEvaluations(ownerId: string): PreAnestheticEvaluatio
         age: '64',
         ward: 'ศัลยกรรมชาย',
         dateOfVisit: today,
-        dateOfOperation: today,
+        dateOfOperation: tomorrow,
+        operationTime: '08:30',
+        scheduleType: 'elective',
+        orRoom: 'OR 1',
+        caseOrder: '1',
+        surgeon: 'นพ.คริส ผลประเสริฐ',
         diagnosis: 'Calculous cholecystitis',
         operation: 'Laparoscopic cholecystectomy',
         asaClass: 'III',
@@ -1528,7 +1908,7 @@ export function createSampleEvaluations(ownerId: string): PreAnestheticEvaluatio
           prepPrc: '1',
         },
         premedication: {
-          items: ['Omeprazole 40 mg IV ก่อนผ่าตัด', 'Off Metformin เช้าวันผ่าตัด', 'Continue Amlodipine with sip of water', ''],
+          items: ['Omeprazole 40 mg IV ก่อนผ่าตัด', 'Off Metformin เช้าวันผ่าตัด', 'Amlodipine (5 mg) เวลา 06.00 น. เช้าวันผ่าตัด', ''],
           npoTime: 'หลัง 24.00 น.',
           onIvf: '0.9% NSS 1000 ml IV rate 80 ml/hr',
         },
@@ -1564,6 +1944,11 @@ export function createSampleEvaluations(ownerId: string): PreAnestheticEvaluatio
         ward: 'ห้องคลอด',
         dateOfVisit: today,
         dateOfOperation: today,
+        operationTime: '13:30',
+        scheduleType: 'emergency',
+        orRoom: 'OR 4',
+        caseOrder: '1',
+        surgeon: 'พญ.ปวีณา อมรเพชรกุล',
         diagnosis: 'CPD (Cephalopelvic disproportion) at 39 wks GA',
         operation: 'Emergency Cesarean Section',
         asaClass: 'II',
@@ -1628,7 +2013,12 @@ export function createSampleEvaluations(ownerId: string): PreAnestheticEvaluatio
         age: '72',
         ward: 'ศัลยกรรมชาย',
         dateOfVisit: today,
-        dateOfOperation: today,
+        dateOfOperation: tomorrow,
+        operationTime: '10:30',
+        scheduleType: 'elective',
+        orRoom: 'OR 2',
+        caseOrder: '2',
+        surgeon: 'นพ.วรภพ ไตรรัตนาภิกุล',
         diagnosis: 'Closed fracture Rt. neck of femur',
         operation: 'Rt. Bipolar hemiarthroplasty',
         asaClass: 'III',
@@ -1719,6 +2109,11 @@ export function createSampleEvaluations(ownerId: string): PreAnestheticEvaluatio
         ward: 'กุมาร',
         dateOfVisit: today,
         dateOfOperation: today,
+        operationTime: '15:00',
+        scheduleType: 'emergency',
+        orRoom: 'OR 3',
+        caseOrder: '2',
+        surgeon: 'นพ.ชัชวาล สืบนุการณ์',
         diagnosis: 'Acute appendicitis',
         operation: 'Appendectomy',
         asaClass: 'I',
@@ -1801,7 +2196,12 @@ export function createSampleEvaluations(ownerId: string): PreAnestheticEvaluatio
         age: '54',
         ward: 'ศัลยกรรมหญิง',
         dateOfVisit: today,
-        dateOfOperation: today,
+        dateOfOperation: dayAfterTomorrow,
+        operationTime: '08:30',
+        scheduleType: 'elective',
+        orRoom: 'OR 2',
+        caseOrder: '1',
+        surgeon: 'พญ.ตรีรินทร์ ยิ่งยงวัฒนวิทยา',
         diagnosis: 'Myoma uteri with AUB',
         operation: 'TAH with BSO',
         asaClass: 'II',

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Check, Edit2, Plus, RotateCcw, Settings2, Trash2, X } from 'lucide-react';
 import {
   DEFAULT_MEDICATION_GROUPS,
+  detectAutoPremedDrugClass,
   hasMedicationToken,
   MedicationGroup,
   parseMedicationEntry,
@@ -450,19 +451,28 @@ export function MedicationGroupSelector({
               <span />
             </div>
 
-            {rows.map((entry, idx) => (
+            {rows.map((entry, idx) => {
+              const autoClass = detectAutoPremedDrugClass(entry.name);
+              return (
               <div
                 key={`sel_med_${idx}`}
                 className="grid grid-cols-1 sm:grid-cols-[1.2fr_0.9fr_1.1fr_24px] gap-1.5 items-center"
               >
-                <input
-                  type="text"
-                  value={entry.name}
-                  onChange={(e) => handleUpdateRow(idx, { name: e.target.value })}
-                  placeholder="ชื่อยา"
-                  aria-label="ชื่อยา"
-                  className="bg-slate-50/70 border border-slate-300 rounded px-2 py-1 text-xs font-medium text-slate-900 focus:bg-white focus:outline-none focus:border-blue-800"
-                />
+                <div className="space-y-0.5">
+                  <input
+                    type="text"
+                    value={entry.name}
+                    onChange={(e) => handleUpdateRow(idx, { name: e.target.value })}
+                    placeholder="ชื่อยา"
+                    aria-label="ชื่อยา"
+                    className="w-full bg-slate-50/70 border border-slate-300 rounded px-2 py-1 text-xs font-medium text-slate-900 focus:bg-white focus:outline-none focus:border-blue-800"
+                  />
+                  {autoClass && (
+                    <div className="text-[10px] font-medium text-emerald-700 px-0.5">
+                      {autoClass} · สั่งเป็นยา Pre-med อัตโนมัติ
+                    </div>
+                  )}
+                </div>
                 <input
                   type="text"
                   value={entry.dose}
@@ -489,7 +499,8 @@ export function MedicationGroupSelector({
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 

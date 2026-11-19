@@ -65,6 +65,21 @@
           "description": "Scheduled time of operation",
           "maxLength": 32
         },
+        "scheduleType": {
+          "type": "string",
+          "description": "Surgical scheduling category (elective OR schedule vs emergency)",
+          "enum": ["elective", "emergency"]
+        },
+        "orRoom": {
+          "type": "string",
+          "description": "Operating room assignment (e.g., OR 1, OR 2, Delivery Room)",
+          "maxLength": 32
+        },
+        "caseOrder": {
+          "type": "string",
+          "description": "Queue order within the OR schedule for that date and room",
+          "maxLength": 16
+        },
         "surgeon": {
           "type": "string",
           "description": "Operating surgeon name",
@@ -104,7 +119,7 @@
         },
         "formData": {
           "type": "object",
-          "description": "Structured clinical sections (history including DM/HT/DLP/CKD/Heart underlying diseases, medication, drinking/smoking/drug addiction details with quit duration, physicalExam including oxygen/ventilator support, per-tooth missingTeeth/looseTeeth markings, and 2.2 airway detail fields, investigation, laboratory including blood component T&S and readiness status/detail, premedication, consult, problemList, anestheticPlan, preparationOrders, postAnesthesia)"
+          "description": "Structured clinical sections (history including DM/HT/DLP/CKD/Heart underlying diseases, medication, drinking/smoking/drug addiction details with quit duration, physicalExam including oxygen/ventilator support, per-tooth missingTeeth/looseTeeth markings, and 2.2 airway detail fields, investigation, laboratory including blood component T&S, no_blood/ไม่มีจองเลือด, and readiness status/detail, premedication, consult, problemList, anestheticPlan, preparationOrders, postAnesthesia)"
         },
         "createdAt": {
           "type": "string",

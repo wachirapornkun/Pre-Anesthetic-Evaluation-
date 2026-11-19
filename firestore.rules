@@ -259,8 +259,8 @@ service cloud.firestore {
         && isStr(lab.prepPlt, 0, 20)
         && (!('prepStatuses' in lab) || (
           lab.prepStatuses is list
-          && lab.prepStatuses.size() <= 4
-          && lab.prepStatuses.hasOnly(['ready', 'not_ready', 'waiting_red_cross', 'other'])
+          && lab.prepStatuses.size() <= 5
+          && lab.prepStatuses.hasOnly(['no_blood', 'ready', 'not_ready', 'waiting_red_cross', 'other'])
         ))
         && (!('prepStatusDetail' in lab) || isStr(lab.prepStatusDetail, 0, 300));
     }
@@ -357,7 +357,8 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'id', 'ownerId', 'status', 'patientName', 'hn', 'an', 'age', 'ward',
-          'dateOfVisit', 'dateOfOperation', 'operationTime', 'surgeon', 'diagnosis', 'operation',
+          'dateOfVisit', 'dateOfOperation', 'operationTime', 'scheduleType', 'orRoom', 'caseOrder',
+          'surgeon', 'diagnosis', 'operation',
           'asaClass', 'asaEmergency', 'expectedDifficultAirway',
           'hasComplication', 'anesthesiaType', 'formData', 'createdAt', 'updatedAt'
         ])
@@ -372,6 +373,9 @@ service cloud.firestore {
         && isStr(data.dateOfVisit, 0, 32)
         && isStr(data.dateOfOperation, 0, 32)
         && (!('operationTime' in data) || isStr(data.operationTime, 0, 32))
+        && (!('scheduleType' in data) || (data.scheduleType in ['elective', 'emergency']))
+        && (!('orRoom' in data) || isStr(data.orRoom, 0, 32))
+        && (!('caseOrder' in data) || isStr(data.caseOrder, 0, 16))
         && (!('surgeon' in data) || isStr(data.surgeon, 0, 120))
         && isStr(data.diagnosis, 0, 300)
         && isStr(data.operation, 0, 300)
@@ -486,7 +490,8 @@ service cloud.firestore {
           // Action 1: Edit evaluation content
           incoming().diff(existing()).affectedKeys().hasOnly([
             'status', 'patientName', 'hn', 'an', 'age', 'ward',
-            'dateOfVisit', 'dateOfOperation', 'operationTime', 'surgeon', 'diagnosis', 'operation',
+            'dateOfVisit', 'dateOfOperation', 'operationTime', 'scheduleType', 'orRoom', 'caseOrder',
+            'surgeon', 'diagnosis', 'operation',
             'asaClass', 'asaEmergency', 'expectedDifficultAirway',
             'hasComplication', 'anesthesiaType', 'formData', 'updatedAt'
           ])

@@ -103,6 +103,11 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
             <span>
               Time: <strong className="font-mono">{evaluation.operationTime || '______'}</strong>
             </span>
+            {(evaluation.orRoom || evaluation.caseOrder) && (
+              <span>
+                OR: <strong className="font-mono">{evaluation.orRoom || '—'}{evaluation.caseOrder ? ` #${evaluation.caseOrder}` : ''}</strong>
+              </span>
+            )}
           </div>
         </div>
 

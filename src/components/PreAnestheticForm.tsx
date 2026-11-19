@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Check, Edit2, Plus, RotateCcw, Trash2, X } from 'lucide-react';
 import {
+  applyMissingAutoPremeds,
   AsaClass,
   BLOOD_PREP_STATUS_OPTIONS,
   BloodPrepStatus,
@@ -17,10 +18,14 @@ import {
   formatOxygenSupportSummary,
   formatToothMarksSummary,
   GaMethod,
+  getEffectiveScheduleType,
+  getMissingAutoPremedEntries,
   MedicationGroup,
+  OR_ROOM_OPTIONS,
   OxygenSupportData,
   PreAnestheticEvaluation,
   RaMethod,
+  syncPremedicationWithMedications,
   ToothCondition,
   ToothId,
   ToothMarkMode,
@@ -411,18 +416,38 @@ export function PreAnestheticForm({
   const toggleBloodPrepStatus = (status: BloodPrepStatus) => {
     const current = Array.isArray(lab.prepStatuses) ? lab.prepStatuses : [];
     const exists = current.includes(status);
-    let next: BloodPrepStatus[];
     if (exists) {
-      next = current.filter((s) => s !== status);
-    } else {
-      next = [...current, status];
-      if (status === 'ready') {
-        next = next.filter((s) => s !== 'not_ready');
-      } else if (status === 'not_ready') {
-        next = next.filter((s) => s !== 'ready');
-      }
+      updateLabPatch({ prepStatuses: current.filter((s) => s !== status) });
+      return;
+    }
+
+    if (status === 'no_blood') {
+      const preserved = current.filter((s) => s === 'other');
+      updateLabPatch({
+        prepTs: false,
+        prepPrc: '',
+        prepFfp: '',
+        prepPlt: '',
+        prepStatuses: ['no_blood', ...preserved],
+      });
+      return;
+    }
+
+    let next: BloodPrepStatus[] = [...current, status];
+    if (status === 'ready') {
+      next = next.filter((s) => s !== 'not_ready' && s !== 'no_blood');
+    } else if (status === 'not_ready') {
+      next = next.filter((s) => s !== 'ready' && s !== 'no_blood');
+    } else if (status === 'waiting_red_cross') {
+      next = next.filter((s) => s !== 'no_blood');
     }
     updateLabPatch({ prepStatuses: next });
+  };
+
+  const updateBloodPrepUnit = (field: 'prepPrc' | 'prepFfp' | 'prepPlt', val: string) => {
+    const current = Array.isArray(lab.prepStatuses) ? lab.prepStatuses : [];
+    const nextStatuses = val.trim() ? current.filter((s) => s !== 'no_blood') : current;
+    updateLabPatch({ [field]: val, prepStatuses: nextStatuses });
   };
 
   const updatePremed = (patch: Partial<EvaluationFormData['premedication']>) => {
@@ -859,7 +884,7 @@ export function PreAnestheticForm({
               );
             })()}
           </div>
-          <label className="lg:col-span-3 flex flex-col gap-1">
+          <label className="lg:col-span-2 flex flex-col gap-1">
             <span className="text-xs font-medium text-slate-600">Date of operation</span>
             <input
               type="date"
@@ -868,7 +893,7 @@ export function PreAnestheticForm({
               className={`${inputBase} font-mono tabular-nums`}
             />
           </label>
-          <label className="lg:col-span-3 flex flex-col gap-1">
+          <label className="lg:col-span-2 flex flex-col gap-1">
             <span className="text-xs font-medium text-slate-600">เวลาทำผ่าตัด (Time)</span>
             <input
               type="time"
@@ -877,6 +902,69 @@ export function PreAnestheticForm({
               className={`${inputBase} font-mono tabular-nums`}
             />
           </label>
+          <div className="lg:col-span-2 flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-600">ตารางผ่าตัด / ห้อง OR / คิว</span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() =>
+                  onChange({
+                    ...value,
+                    scheduleType: 'elective',
+                    asaEmergency: false,
+                  })
+                }
+                className={`px-2 py-1 text-xs font-medium rounded border transition-colors ${
+                  getEffectiveScheduleType(value) === 'elective'
+                    ? 'bg-blue-50 border-blue-800 text-blue-900'
+                    : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                Elective
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  onChange({
+                    ...value,
+                    scheduleType: 'emergency',
+                    asaEmergency: true,
+                  })
+                }
+                className={`px-2 py-1 text-xs font-medium rounded border transition-colors ${
+                  getEffectiveScheduleType(value) === 'emergency'
+                    ? 'bg-red-50 border-red-600 text-red-800'
+                    : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                Emerg
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              <select
+                aria-label="ห้องผ่าตัด (OR Room)"
+                value={OR_ROOM_OPTIONS.includes((value.orRoom ?? '') as (typeof OR_ROOM_OPTIONS)[number]) ? value.orRoom : ''}
+                onChange={(e) => updateTop('orRoom', e.target.value)}
+                className={`${inputBase} min-w-0 flex-1`}
+              >
+                <option value="">ห้อง OR</option>
+                {OR_ROOM_OPTIONS.map((room) => (
+                  <option key={room} value={room}>
+                    {room}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="text"
+                aria-label="ลำดับคิวผ่าตัด"
+                value={value.caseOrder ?? ''}
+                onChange={(e) => updateTop('caseOrder', e.target.value)}
+                placeholder="คิว#"
+                maxLength={16}
+                className={`${inputBase} w-14 font-mono tabular-nums`}
+              />
+            </div>
+          </div>
         </div>
 
         {isManagingSurgeons && (
@@ -1325,14 +1413,26 @@ export function PreAnestheticForm({
                     groups={medicationGroups}
                     medicationText={h.medication}
                     onChangeMedicationText={(nextText, autoUnderlying) => {
-                      updateHistory({
-                        medication: nextText,
-                        ...(autoUnderlying === 'ht' ? { ht: true, underlyingStatus: 'yes' } : {}),
-                        ...(autoUnderlying === 'dm' ? { dm: true, underlyingStatus: 'yes' } : {}),
-                        ...(autoUnderlying === 'dlp' ? { dlp: true, underlyingStatus: 'yes' } : {}),
-                        ...(autoUnderlying === 'heartDisease'
-                          ? { heartDisease: true, underlyingStatus: 'yes' }
-                          : {}),
+                      const nextPremedItems = syncPremedicationWithMedications(
+                        pm.items,
+                        h.medication,
+                        nextText,
+                      );
+                      updateFormData({
+                        history: {
+                          ...h,
+                          medication: nextText,
+                          ...(autoUnderlying === 'ht' ? { ht: true, underlyingStatus: 'yes' } : {}),
+                          ...(autoUnderlying === 'dm' ? { dm: true, underlyingStatus: 'yes' } : {}),
+                          ...(autoUnderlying === 'dlp' ? { dlp: true, underlyingStatus: 'yes' } : {}),
+                          ...(autoUnderlying === 'heartDisease'
+                            ? { heartDisease: true, underlyingStatus: 'yes' }
+                            : {}),
+                        },
+                        premedication: {
+                          ...pm,
+                          items: nextPremedItems,
+                        },
                       });
                     }}
                     onUpdateGroups={onUpdateMedicationGroups}
@@ -1920,19 +2020,39 @@ export function PreAnestheticForm({
 
           {/* 5. Premedication */}
           <div className="p-4 space-y-2.5">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-1">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-1">
               <h2 className="text-sm font-bold text-slate-900">5. Premedication</h2>
-              {pm.items.length < 10 && (
-                <button
-                  type="button"
-                  onClick={() => updatePremed({ items: [...pm.items, ''] })}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-blue-800 hover:text-blue-900"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  เพิ่มยาเตรียมก่อนผ่าตัด
-                </button>
-              )}
+              <div className="flex items-center gap-3">
+                {getMissingAutoPremedEntries(pm.items, h.medication).length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updatePremed({
+                        items: applyMissingAutoPremeds(pm.items, h.medication),
+                      })
+                    }
+                    className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-900 whitespace-nowrap"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    ดึงยา CCB / Beta-blocker อัตโนมัติ (
+                    {getMissingAutoPremedEntries(pm.items, h.medication).length})
+                  </button>
+                )}
+                {pm.items.length < 10 && (
+                  <button
+                    type="button"
+                    onClick={() => updatePremed({ items: [...pm.items, ''] })}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-blue-800 hover:text-blue-900 whitespace-nowrap"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    เพิ่มยาเตรียมก่อนผ่าตัด
+                  </button>
+                )}
+              </div>
             </div>
+            <p className="text-[11px] text-slate-500">
+              ยากลุ่ม Calcium Channel Blocker (CCB) และ Beta-blocker ที่ระบุในหัวข้อ 1.4 Medication จะถูกสั่งเป็นยา Premedication อัตโนมัติในรูปแบบ &quot;ชื่อยา เวลา 06.00 น. เช้าวันผ่าตัด&quot;
+            </p>
 
             <div className="space-y-1.5">
               {pm.items.map((item, idx) => (
@@ -1946,7 +2066,7 @@ export function PreAnestheticForm({
                       next[idx] = e.target.value;
                       updatePremed({ items: next });
                     }}
-                    placeholder="ยาและขนาดที่สั่งก่อนผ่าตัด"
+                    placeholder="เช่น ชื่อยา (ขนาด) เวลา 06.00 น. เช้าวันผ่าตัด"
                     className={`${inputBase} flex-1 text-xs`}
                   />
                   {pm.items.length > 1 && (
@@ -3107,7 +3227,14 @@ export function PreAnestheticForm({
                 </span>
                 <button
                   type="button"
-                  onClick={() => updateLabPatch({ prepTs: !lab.prepTs })}
+                  onClick={() => {
+                    const nextTs = !lab.prepTs;
+                    const current = Array.isArray(lab.prepStatuses) ? lab.prepStatuses : [];
+                    updateLabPatch({
+                      prepTs: nextTs,
+                      prepStatuses: nextTs ? current.filter((s) => s !== 'no_blood') : current,
+                    });
+                  }}
                   className={radioBtn(Boolean(lab.prepTs))}
                 >
                   {lab.prepTs ? '☑' : '☐'} T&amp;S
@@ -3117,7 +3244,7 @@ export function PreAnestheticForm({
                   <input
                     type="text"
                     value={lab.prepPrc}
-                    onChange={(e) => updateLab('prepPrc', e.target.value)}
+                    onChange={(e) => updateBloodPrepUnit('prepPrc', e.target.value)}
                     className={`${inputBase} w-12 text-center font-mono tabular-nums text-xs`}
                   />
                   <span className="text-xs text-slate-500">u</span>
@@ -3127,7 +3254,7 @@ export function PreAnestheticForm({
                   <input
                     type="text"
                     value={lab.prepFfp}
-                    onChange={(e) => updateLab('prepFfp', e.target.value)}
+                    onChange={(e) => updateBloodPrepUnit('prepFfp', e.target.value)}
                     className={`${inputBase} w-12 text-center font-mono tabular-nums text-xs`}
                   />
                   <span className="text-xs text-slate-500">u</span>
@@ -3137,7 +3264,7 @@ export function PreAnestheticForm({
                   <input
                     type="text"
                     value={lab.prepPlt}
-                    onChange={(e) => updateLab('prepPlt', e.target.value)}
+                    onChange={(e) => updateBloodPrepUnit('prepPlt', e.target.value)}
                     className={`${inputBase} w-12 text-center font-mono tabular-nums text-xs`}
                   />
                   <span className="text-xs text-slate-500">u</span>
@@ -3218,7 +3345,14 @@ export function PreAnestheticForm({
           ))}
           <button
             type="button"
-            onClick={() => updateTop('asaEmergency', !value.asaEmergency)}
+            onClick={() => {
+              const nextEmerg = !value.asaEmergency;
+              onChange({
+                ...value,
+                asaEmergency: nextEmerg,
+                scheduleType: nextEmerg ? 'emergency' : 'elective',
+              });
+            }}
             className={radioBtn(value.asaEmergency, 'danger')}
           >
             {value.asaEmergency ? '●' : '○'} E (Emergency)

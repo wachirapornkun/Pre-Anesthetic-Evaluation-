@@ -26,6 +26,7 @@ import {
 import { A4PrintSheet } from './components/A4PrintSheet';
 import { ClinicalSummaryBar } from './components/ClinicalSummaryBar';
 import { DashboardView } from './components/DashboardView';
+import { ElectiveScheduleView } from './components/ElectiveScheduleView';
 import { PreAnestheticForm } from './components/PreAnestheticForm';
 import { RegistryView } from './components/RegistryView';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from './firebase';
@@ -50,7 +51,7 @@ import {
 } from './types/evaluation';
 import { exportEvaluationJson, exportEvaluationsCsv, exportSingleHtmlReport } from './utils/exportReports';
 
-type ActiveTab = 'form' | 'dashboard' | 'registry' | 'print_preview';
+type ActiveTab = 'form' | 'schedule' | 'dashboard' | 'registry' | 'print_preview';
 
 function getTimestampMillis(ts: unknown): number {
   if (!ts) return 0;
@@ -193,6 +194,13 @@ export default function App() {
           items.push({
             ...raw,
             operationTime: raw.operationTime ?? '',
+            scheduleType:
+              raw.scheduleType === 'emergency' ||
+              (raw.scheduleType !== 'elective' && raw.asaEmergency)
+                ? 'emergency'
+                : 'elective',
+            orRoom: raw.orRoom ?? '',
+            caseOrder: raw.caseOrder ?? '',
             surgeon: raw.surgeon ?? '',
             formData: {
               ...raw.formData,
@@ -754,29 +762,45 @@ export default function App() {
     showNotice('success', 'เปิดแบบฟอร์มผู้ป่วยใหม่เรียบร้อย');
   };
 
-  const handleSave = async () => {
-    if (!currentForm.patientName.trim()) {
+  const handleCreateNewForDate = (dateOfOperation: string, orRoom?: string) => {
+    setCurrentForm(
+      createEmptyEvaluation(user?.uid || 'local', {
+        dateOfOperation,
+        dateOfVisit: '',
+        scheduleType: 'elective',
+        orRoom: orRoom ?? '',
+      }),
+    );
+    setActiveTab('form');
+    showNotice('success', `เปิดแบบฟอร์มเตรียมเยี่ยม Pre-Op สำหรับวันผ่าตัด ${dateOfOperation}`);
+  };
+
+  const saveEvaluationRecord = async (
+    recordToSave: PreAnestheticEvaluation,
+  ): Promise<PreAnestheticEvaluation | null> => {
+    if (!recordToSave.patientName.trim()) {
       showNotice('error', 'กรุณาระบุชื่อผู้ป่วย (Name) ก่อนบันทึกข้อมูล');
-      setActiveTab('form');
-      return;
+      return null;
     }
 
     setIsSaving(true);
     try {
       if (!user) {
-        const sanitized = sanitizeEvaluationForFirestore(currentForm, 'local');
+        const sanitized = sanitizeEvaluationForFirestore(recordToSave, 'local');
         setLocalRecords((prev) => {
           const exists = prev.some((r) => r.id === sanitized.id);
           return exists
             ? prev.map((r) => (r.id === sanitized.id ? sanitized : r))
             : [sanitized, ...prev];
         });
-        setCurrentForm(sanitized);
+        if (currentForm.id === sanitized.id) {
+          setCurrentForm(sanitized);
+        }
         showNotice('success', 'บันทึกข้อมูลชั่วคราวในเบราว์เซอร์แล้ว (เข้าสู่ระบบ Google เพื่อบันทึกถาวร)');
-        return;
+        return sanitized;
       }
 
-      const sanitized = sanitizeEvaluationForFirestore(currentForm, user.uid);
+      const sanitized = sanitizeEvaluationForFirestore(recordToSave, user.uid);
       const docPath = `evaluations/${sanitized.id}`;
       const docRef = doc(db, 'evaluations', sanitized.id);
       const isExisting = cloudRecords.some((r) => r.id === sanitized.id);
@@ -793,6 +817,9 @@ export default function App() {
             dateOfVisit: sanitized.dateOfVisit,
             dateOfOperation: sanitized.dateOfOperation,
             operationTime: sanitized.operationTime,
+            scheduleType: sanitized.scheduleType,
+            orRoom: sanitized.orRoom,
+            caseOrder: sanitized.caseOrder,
             surgeon: sanitized.surgeon,
             diagnosis: sanitized.diagnosis,
             operation: sanitized.operation,
@@ -819,10 +846,25 @@ export default function App() {
         }
       }
 
-      setCurrentForm(sanitized);
+      if (currentForm.id === sanitized.id) {
+        setCurrentForm(sanitized);
+      }
       showNotice('success', `บันทึกข้อมูลของ ${sanitized.patientName} ลงฐานข้อมูลเรียบร้อย`);
+      return sanitized;
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!currentForm.patientName.trim()) {
+      showNotice('error', 'กรุณาระบุชื่อผู้ป่วย (Name) ก่อนบันทึกข้อมูล');
+      setActiveTab('form');
+      return;
+    }
+    const saved = await saveEvaluationRecord(currentForm);
+    if (saved) {
+      setCurrentForm(saved);
     }
   };
 
@@ -914,10 +956,10 @@ export default function App() {
             Bangplee Pre-Anesthetic
           </button>
 
-          {/* Zone 2: 4 concise single-line nav links */}
+          {/* Zone 2: 5 concise single-line nav links */}
           <nav
             aria-label="หลัก"
-            className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600"
+            className="hidden md:flex items-center gap-5 text-sm font-medium text-slate-600"
           >
             <button
               type="button"
@@ -929,6 +971,17 @@ export default function App() {
               }`}
             >
               แบบฟอร์มประเมิน
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('schedule')}
+              className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+                activeTab === 'schedule'
+                  ? 'border-blue-800 text-slate-950 font-semibold'
+                  : 'border-transparent hover:text-slate-900'
+              }`}
+            >
+              ตารางนัดผ่าตัด
             </button>
             <button
               type="button"
@@ -995,6 +1048,7 @@ export default function App() {
           {(
             [
               { key: 'form', label: 'แบบฟอร์ม' },
+              { key: 'schedule', label: 'ตารางผ่าตัด' },
               { key: 'dashboard', label: 'Dashboard' },
               { key: 'registry', label: `ทะเบียน (${records.length})` },
               { key: 'print_preview', label: 'พิมพ์ A4' },
@@ -1143,6 +1197,22 @@ export default function App() {
               onUpdateVisitorOptions={handleUpdateVisitorOptions}
             />
           </>
+        )}
+
+        {activeTab === 'schedule' && (
+          <ElectiveScheduleView
+            records={records}
+            activeId={currentForm.id}
+            wardOptions={wardOptions}
+            surgeonOptions={surgeonOptions}
+            isLoading={isLoadingRecords}
+            onSaveRecord={saveEvaluationRecord}
+            onEdit={handleEditRecord}
+            onDuplicate={handleDuplicate}
+            onDelete={handleDelete}
+            onPrintRecord={handlePrintRecord}
+            onCreateNewForDate={handleCreateNewForDate}
+          />
         )}
 
         {activeTab === 'dashboard' && (

@@ -13,6 +13,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import {
+  Calendar,
   CheckCircle2,
   Download,
   FileCode2,
@@ -22,6 +23,7 @@ import {
   Printer,
   Save,
   Sparkles,
+  X,
 } from 'lucide-react';
 import { A4PrintSheet } from './components/A4PrintSheet';
 import { ClinicalSummaryBar } from './components/ClinicalSummaryBar';
@@ -31,6 +33,8 @@ import { PreAnestheticForm } from './components/PreAnestheticForm';
 import { RegistryView } from './components/RegistryView';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from './firebase';
 import {
+  addDaysToIsoDate,
+  compareElectiveSchedule,
   createEmptyEvaluation,
   createEmptyOxygenSupport,
   createSampleEvaluations,
@@ -39,8 +43,11 @@ import {
   DEFAULT_SUMMARIZER_LIST,
   DEFAULT_SURGEON_LIST,
   DEFAULT_WARD_LIST,
+  formatThaiScheduleDate,
   generateEvaluationId,
+  getTodayIsoDate,
   MedicationGroup,
+  OR_ROOM_OPTIONS,
   PreAnestheticEvaluation,
   sanitizeEvaluationForFirestore,
   sanitizeMedicationGroups,
@@ -48,18 +55,18 @@ import {
   sanitizeSummarizerList,
   sanitizeSurgeonList,
   sanitizeWardList,
+  ScheduleType,
 } from './types/evaluation';
 import { exportEvaluationJson, exportEvaluationsCsv, exportSingleHtmlReport } from './utils/exportReports';
 
 type ActiveTab = 'form' | 'schedule' | 'dashboard' | 'registry' | 'print_preview';
 
-function getTimestampMillis(ts: unknown): number {
-  if (!ts) return 0;
-  if (typeof ts === 'object' && ts !== null && 'toMillis' in ts) {
-    const fn = (ts as { toMillis?: () => number }).toMillis;
-    if (typeof fn === 'function') return fn();
-  }
-  return 0;
+interface NewFormScheduleDraft {
+  dateOfOperation: string;
+  scheduleType: ScheduleType;
+  orRoom: string;
+  caseOrder: string;
+  operationTime: string;
 }
 
 export default function App() {
@@ -74,6 +81,14 @@ export default function App() {
   );
   const [isSaving, setIsSaving] = useState(false);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isNewFormModalOpen, setIsNewFormModalOpen] = useState(false);
+  const [newFormDraft, setNewFormDraft] = useState<NewFormScheduleDraft>(() => ({
+    dateOfOperation: getTodayIsoDate(),
+    scheduleType: 'elective',
+    orRoom: '',
+    caseOrder: '',
+    operationTime: '',
+  }));
   const [hasCloudCatalog, setHasCloudCatalog] = useState(false);
   const [hasCloudWardCatalog, setHasCloudWardCatalog] = useState(false);
   const [hasCloudSurgeonCatalog, setHasCloudSurgeonCatalog] = useState(false);
@@ -255,7 +270,7 @@ export default function App() {
             },
           });
         });
-        items.sort((a, b) => getTimestampMillis(b.updatedAt) - getTimestampMillis(a.updatedAt));
+        items.sort((a, b) => compareElectiveSchedule(a, b, 'asc'));
         setCloudRecords(items);
         setIsLoadingRecords(false);
       },
@@ -756,19 +771,62 @@ export default function App() {
     }
   };
 
+  const countCasesOnDate = (targetDate: string, targetRoom?: string): number =>
+    records.filter(
+      (r) =>
+        (r.dateOfOperation || '').trim() === targetDate.trim() &&
+        (!targetRoom || (r.orRoom || '').trim() === targetRoom.trim()),
+    ).length;
+
   const handleCreateNew = () => {
-    setCurrentForm(createEmptyEvaluation(user?.uid || 'local'));
+    const defaultDate = currentForm.dateOfOperation?.trim() || getTodayIsoDate();
+    setNewFormDraft({
+      dateOfOperation: defaultDate,
+      scheduleType: 'elective',
+      orRoom: '',
+      caseOrder: '',
+      operationTime: '',
+    });
+    setIsNewFormModalOpen(true);
+  };
+
+  const handleConfirmCreateNew = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const chosenDate = newFormDraft.dateOfOperation.trim();
+    if (!chosenDate) {
+      showNotice('error', 'กรุณาเลือกวันที่ทำผ่าตัด (Date of Operation)');
+      return;
+    }
+    const created = createEmptyEvaluation(user?.uid || 'local', {
+      dateOfOperation: chosenDate,
+      dateOfVisit: getTodayIsoDate(),
+      scheduleType: newFormDraft.scheduleType,
+      asaEmergency: newFormDraft.scheduleType === 'emergency',
+      orRoom: newFormDraft.orRoom.trim(),
+      caseOrder: newFormDraft.caseOrder.trim(),
+      operationTime: newFormDraft.operationTime.trim(),
+    });
+    setCurrentForm(created);
+    setIsNewFormModalOpen(false);
     setActiveTab('form');
-    showNotice('success', 'เปิดแบบฟอร์มผู้ป่วยใหม่เรียบร้อย');
+    const dateMeta = formatThaiScheduleDate(chosenDate);
+    showNotice(
+      'success',
+      `เปิดแบบฟอร์มใหม่สำหรับวันผ่าตัด ${dateMeta.label} (${chosenDate}) เรียบร้อย`,
+    );
   };
 
   const handleCreateNewForDate = (dateOfOperation: string, orRoom?: string) => {
+    const nextOrder = orRoom
+      ? String(countCasesOnDate(dateOfOperation, orRoom) + 1)
+      : '';
     setCurrentForm(
       createEmptyEvaluation(user?.uid || 'local', {
         dateOfOperation,
         dateOfVisit: '',
         scheduleType: 'elective',
         orRoom: orRoom ?? '',
+        caseOrder: nextOrder,
       }),
     );
     setActiveTab('form');
@@ -789,14 +847,18 @@ export default function App() {
         const sanitized = sanitizeEvaluationForFirestore(recordToSave, 'local');
         setLocalRecords((prev) => {
           const exists = prev.some((r) => r.id === sanitized.id);
-          return exists
+          const next = exists
             ? prev.map((r) => (r.id === sanitized.id ? sanitized : r))
-            : [sanitized, ...prev];
+            : [...prev, sanitized];
+          return next.sort((a, b) => compareElectiveSchedule(a, b, 'asc'));
         });
         if (currentForm.id === sanitized.id) {
           setCurrentForm(sanitized);
         }
-        showNotice('success', 'บันทึกข้อมูลชั่วคราวในเบราว์เซอร์แล้ว (เข้าสู่ระบบ Google เพื่อบันทึกถาวร)');
+        showNotice(
+          'success',
+          `บันทึกข้อมูลชั่วคราว (${sanitized.dateOfOperation ? `วันผ่าตัด ${sanitized.dateOfOperation}` : 'ยังไม่ระบุวันผ่าตัด'}) เรียงตามวันผ่าตัดแล้ว`,
+        );
         return sanitized;
       }
 
@@ -849,7 +911,10 @@ export default function App() {
       if (currentForm.id === sanitized.id) {
         setCurrentForm(sanitized);
       }
-      showNotice('success', `บันทึกข้อมูลของ ${sanitized.patientName} ลงฐานข้อมูลเรียบร้อย`);
+      showNotice(
+        'success',
+        `บันทึกข้อมูลของ ${sanitized.patientName}${sanitized.dateOfOperation ? ` (วันผ่าตัด ${sanitized.dateOfOperation})` : ''} เรียงตามวันที่ผ่าตัดเรียบร้อย`,
+      );
       return sanitized;
     } finally {
       setIsSaving(false);
@@ -893,9 +958,11 @@ export default function App() {
   const handleLoadSamples = async () => {
     const samples = createSampleEvaluations(user?.uid || 'local');
     if (!user) {
-      setLocalRecords((prev) => [...samples, ...prev]);
+      setLocalRecords((prev) =>
+        [...samples, ...prev].sort((a, b) => compareElectiveSchedule(a, b, 'asc')),
+      );
       setCurrentForm(samples[0]);
-      showNotice('success', 'โหลดข้อมูลตัวอย่าง 5 เคสเรียบร้อย (โหมดทดลองใช้งาน)');
+      showNotice('success', 'โหลดข้อมูลตัวอย่าง 5 เคสเรียบร้อย (เรียงตามวันที่ผ่าตัด)');
       return;
     }
 
@@ -1080,6 +1147,10 @@ export default function App() {
                 : 'แบบฟอร์มใหม่ (ยังไม่บันทึก)'}
             </span>
             <span aria-hidden="true">·</span>
+            <span className="font-mono tabular-nums text-blue-900 font-medium">
+              วันผ่าตัด: {currentForm.dateOfOperation || 'ยังไม่ระบุ'}
+            </span>
+            <span aria-hidden="true">·</span>
             <span>แบบฟอร์มมาตรฐาน ANE-FM-002-03</span>
             {user ? (
               <>
@@ -1235,6 +1306,7 @@ export default function App() {
             onDelete={handleDelete}
             onPrintRecord={handlePrintRecord}
             onCreateNew={handleCreateNew}
+            onCreateNewForDate={handleCreateNewForDate}
             onLoadSamples={handleLoadSamples}
           />
         )}
@@ -1286,6 +1358,226 @@ export default function App() {
           <A4PrintSheet evaluation={currentForm} previewMode={false} />
         )}
       </main>
+
+      {/* New Form — Select Operation Date Modal */}
+      {isNewFormModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="new-form-date-modal-title"
+          className="no-print fixed inset-0 z-50 bg-slate-900/45 flex items-center justify-center p-4"
+        >
+          <form
+            onSubmit={handleConfirmCreateNew}
+            className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-5 space-y-4 shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-3 pb-2 border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-blue-800 shrink-0" />
+                <div>
+                  <h3
+                    id="new-form-date-modal-title"
+                    className="text-sm font-bold text-slate-900"
+                  >
+                    สร้างแบบฟอร์มใหม่ — เลือกวันที่ทำผ่าตัด
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    ข้อมูลจะถูกจัดเก็บและเรียงลำดับตามวันที่ทำผ่าตัดโดยอัตโนมัติ
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsNewFormModalOpen(false)}
+                aria-label="ปิดหน้าต่าง"
+                className="p-1 text-slate-400 hover:text-slate-700 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {(() => {
+              const todayStr = getTodayIsoDate();
+              const quickDates = [
+                { label: 'วันนี้', val: todayStr },
+                { label: 'พรุ่งนี้', val: addDaysToIsoDate(todayStr, 1) },
+                { label: 'มะรืนนี้', val: addDaysToIsoDate(todayStr, 2) },
+                { label: '+3 วัน', val: addDaysToIsoDate(todayStr, 3) },
+              ];
+              const selectedMeta = formatThaiScheduleDate(newFormDraft.dateOfOperation);
+              const existingCount = newFormDraft.dateOfOperation
+                ? countCasesOnDate(newFormDraft.dateOfOperation)
+                : 0;
+              return (
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label
+                        htmlFor="new-form-op-date"
+                        className="text-xs font-semibold text-slate-700"
+                      >
+                        วันที่ทำผ่าตัด (Date of Operation) <span className="text-red-600">*</span>
+                      </label>
+                      <div className="flex items-center gap-1">
+                        {quickDates.map((opt) => (
+                          <button
+                            key={opt.label}
+                            type="button"
+                            onClick={() =>
+                              setNewFormDraft((prev) => ({
+                                ...prev,
+                                dateOfOperation: opt.val,
+                              }))
+                            }
+                            className={`px-2 py-0.5 text-[11px] font-medium rounded border transition-colors ${
+                              newFormDraft.dateOfOperation === opt.val
+                                ? 'bg-blue-800 text-white border-blue-800'
+                                : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <input
+                      id="new-form-op-date"
+                      type="date"
+                      required
+                      value={newFormDraft.dateOfOperation}
+                      onChange={(e) =>
+                        setNewFormDraft((prev) => ({
+                          ...prev,
+                          dateOfOperation: e.target.value,
+                        }))
+                      }
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800 focus:ring-1 focus:ring-blue-800"
+                    />
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs">
+                      <span className="font-medium text-slate-800">
+                        {selectedMeta.label}
+                        {selectedMeta.relativeTag ? (
+                          <span className="ml-1.5 text-blue-800 font-semibold">
+                            ({selectedMeta.relativeTag})
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="text-slate-600 tabular-nums">
+                        เคสที่เก็บไว้ในวันนี้: <strong className="font-mono text-slate-900">{existingCount}</strong> ราย
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs font-medium text-slate-700">ประเภทเคส</span>
+                      <div className="flex items-center gap-1 p-0.5 bg-slate-100 rounded-lg border border-slate-200">
+                        {(
+                          [
+                            { key: 'elective', label: 'Elective' },
+                            { key: 'emergency', label: 'Emerg' },
+                          ] as const
+                        ).map((t) => (
+                          <button
+                            key={t.key}
+                            type="button"
+                            onClick={() =>
+                              setNewFormDraft((prev) => ({ ...prev, scheduleType: t.key }))
+                            }
+                            className={`flex-1 py-1 text-xs font-medium rounded-md transition-colors ${
+                              newFormDraft.scheduleType === t.key
+                                ? 'bg-white text-slate-900 shadow-sm'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            {t.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="text-xs font-medium text-slate-700">ห้องผ่าตัด (OR)</span>
+                      <select
+                        value={newFormDraft.orRoom}
+                        onChange={(e) => {
+                          const nextRoom = e.target.value;
+                          const suggestedOrder =
+                            nextRoom && newFormDraft.dateOfOperation
+                              ? String(countCasesOnDate(newFormDraft.dateOfOperation, nextRoom) + 1)
+                              : newFormDraft.caseOrder;
+                          setNewFormDraft((prev) => ({
+                            ...prev,
+                            orRoom: nextRoom,
+                            caseOrder: suggestedOrder,
+                          }));
+                        }}
+                        className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
+                      >
+                        <option value="">-- ไม่ระบุ --</option>
+                        {OR_ROOM_OPTIONS.map((room) => (
+                          <option key={room} value={room}>
+                            {room}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs font-medium text-slate-700">คิว#</span>
+                        <input
+                          type="text"
+                          value={newFormDraft.caseOrder}
+                          onChange={(e) =>
+                            setNewFormDraft((prev) => ({ ...prev, caseOrder: e.target.value }))
+                          }
+                          placeholder="1, 2"
+                          maxLength={16}
+                          className="bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs font-medium text-slate-700">เวลา</span>
+                        <input
+                          type="time"
+                          value={newFormDraft.operationTime}
+                          onChange={(e) =>
+                            setNewFormDraft((prev) => ({
+                              ...prev,
+                              operationTime: e.target.value,
+                            }))
+                          }
+                          className="bg-white border border-slate-300 rounded-lg px-1.5 py-1.5 text-xs font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsNewFormModalOpen(false)}
+                className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="submit"
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-blue-800 rounded-lg hover:bg-blue-900"
+              >
+                <FilePlus2 className="w-3.5 h-3.5" />
+                เปิดแบบฟอร์มใหม่
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Toast Notification */}
       {notice && (

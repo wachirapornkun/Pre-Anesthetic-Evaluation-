@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Check, Edit2, Plus, RotateCcw, Trash2, X } from 'lucide-react';
 import {
+  addDaysToIsoDate,
   applyMissingAutoPremeds,
   AsaClass,
   BLOOD_PREP_STATUS_OPTIONS,
@@ -16,10 +17,12 @@ import {
   DurationUnit,
   EvaluationFormData,
   formatOxygenSupportSummary,
+  formatThaiScheduleDate,
   formatToothMarksSummary,
   GaMethod,
   getEffectiveScheduleType,
   getMissingAutoPremedEntries,
+  getTodayIsoDate,
   MedicationGroup,
   OR_ROOM_OPTIONS,
   OxygenSupportData,
@@ -403,6 +406,119 @@ export function PreAnestheticForm({
 
   const updateInvestigation = (patch: Partial<EvaluationFormData['investigation']>) => {
     updateFormData({ investigation: { ...inv, ...patch } });
+  };
+
+  const labSectionRef = useRef<HTMLDivElement>(null);
+
+  const handleLabKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.nativeEvent.isComposing || e.altKey || e.ctrlKey || e.metaKey) return;
+    const key = e.key;
+    if (
+      key !== 'ArrowRight' &&
+      key !== 'ArrowLeft' &&
+      key !== 'ArrowDown' &&
+      key !== 'ArrowUp' &&
+      key !== 'Enter'
+    ) {
+      return;
+    }
+
+    const target = e.target;
+    if (!(target instanceof HTMLInputElement) || target.type !== 'text') return;
+
+    const container = labSectionRef.current;
+    if (!container) return;
+
+    const valLen = target.value.length;
+    const selStart = target.selectionStart ?? valLen;
+    const selEnd = target.selectionEnd ?? valLen;
+    const isAllSelected = valLen > 0 && selStart === 0 && selEnd === valLen;
+
+    // Allow caret movement inside non-empty text unless at boundary or all text is selected
+    if (key === 'ArrowLeft' && !isAllSelected && selStart > 0) return;
+    if (key === 'ArrowRight' && !isAllSelected && selEnd < valLen) return;
+
+    const rawInputs = Array.from(
+      container.querySelectorAll<HTMLInputElement>('input[type="text"]'),
+    ).filter((el) => !el.disabled && el.offsetParent !== null);
+
+    if (rawInputs.length <= 1) return;
+
+    const measured = rawInputs.map((el) => {
+      const rect = el.getBoundingClientRect();
+      return {
+        el,
+        cx: (rect.left + rect.right) / 2,
+        cy: (rect.top + rect.bottom) / 2,
+        left: rect.left,
+        height: rect.height,
+      };
+    });
+
+    // Cluster inputs into visual rows by center-Y, sorted left-to-right within each row
+    const byY = [...measured].sort((a, b) => a.cy - b.cy || a.left - b.left);
+    const rows: (typeof measured)[] = [];
+    for (const item of byY) {
+      const lastRow = rows[rows.length - 1];
+      if (!lastRow) {
+        rows.push([item]);
+        continue;
+      }
+      const rowAvgY = lastRow.reduce((sum, it) => sum + it.cy, 0) / lastRow.length;
+      const rowThreshold = Math.max(16, item.height * 0.65);
+      if (Math.abs(item.cy - rowAvgY) <= rowThreshold) {
+        lastRow.push(item);
+      } else {
+        rows.push([item]);
+      }
+    }
+    rows.forEach((row) => row.sort((a, b) => a.left - b.left));
+
+    const flatVisual = rows.flat();
+    const flatIdx = flatVisual.findIndex((item) => item.el === target);
+    if (flatIdx === -1) return;
+
+    let rowIdx = -1;
+    for (let r = 0; r < rows.length; r += 1) {
+      if (rows[r].some((item) => item.el === target)) {
+        rowIdx = r;
+        break;
+      }
+    }
+    if (rowIdx === -1) return;
+
+    const currentItem = flatVisual[flatIdx];
+    let nextEl: HTMLInputElement | null = null;
+
+    if (key === 'ArrowRight' || (key === 'Enter' && !e.shiftKey)) {
+      if (flatIdx + 1 < flatVisual.length) {
+        nextEl = flatVisual[flatIdx + 1].el;
+      }
+    } else if (key === 'ArrowLeft' || (key === 'Enter' && e.shiftKey)) {
+      if (flatIdx - 1 >= 0) {
+        nextEl = flatVisual[flatIdx - 1].el;
+      }
+    } else if (key === 'ArrowDown') {
+      if (rowIdx + 1 < rows.length) {
+        const targetRow = rows[rowIdx + 1];
+        nextEl = targetRow.reduce((best, cand) =>
+          Math.abs(cand.cx - currentItem.cx) < Math.abs(best.cx - currentItem.cx) ? cand : best,
+        ).el;
+      }
+    } else if (key === 'ArrowUp') {
+      if (rowIdx - 1 >= 0) {
+        const targetRow = rows[rowIdx - 1];
+        nextEl = targetRow.reduce((best, cand) =>
+          Math.abs(cand.cx - currentItem.cx) < Math.abs(best.cx - currentItem.cx) ? cand : best,
+        ).el;
+      }
+    }
+
+    if (nextEl) {
+      e.preventDefault();
+      nextEl.focus();
+      nextEl.select();
+    }
   };
 
   const updateLab = (field: keyof EvaluationFormData['laboratory'], val: string) => {
@@ -884,15 +1000,46 @@ export function PreAnestheticForm({
               );
             })()}
           </div>
-          <label className="lg:col-span-2 flex flex-col gap-1">
-            <span className="text-xs font-medium text-slate-600">Date of operation</span>
+          <div className="lg:col-span-2 flex flex-col gap-1">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-xs font-medium text-slate-600">Date of operation</span>
+              <div className="flex items-center gap-0.5">
+                {(() => {
+                  const todayIso = getTodayIsoDate();
+                  return [
+                    { label: 'วันนี้', val: todayIso },
+                    { label: 'พรุ่งนี้', val: addDaysToIsoDate(todayIso, 1) },
+                    { label: 'มะรืน', val: addDaysToIsoDate(todayIso, 2) },
+                  ].map((opt) => (
+                    <button
+                      key={opt.label}
+                      type="button"
+                      onClick={() => updateTop('dateOfOperation', opt.val)}
+                      className={`px-1 py-0.5 text-[10px] font-medium rounded border transition-colors ${
+                        value.dateOfOperation === opt.val
+                          ? 'bg-blue-800 text-white border-blue-800'
+                          : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ));
+                })()}
+              </div>
+            </div>
             <input
               type="date"
+              aria-label="Date of operation (วันที่ทำผ่าตัด)"
               value={value.dateOfOperation}
               onChange={(e) => updateTop('dateOfOperation', e.target.value)}
               className={`${inputBase} font-mono tabular-nums`}
             />
-          </label>
+            {value.dateOfOperation && (
+              <span className="text-[11px] text-blue-900 truncate">
+                {formatThaiScheduleDate(value.dateOfOperation).label}
+              </span>
+            )}
+          </div>
           <label className="lg:col-span-2 flex flex-col gap-1">
             <span className="text-xs font-medium text-slate-600">เวลาทำผ่าตัด (Time)</span>
             <input
@@ -3104,10 +3251,19 @@ export function PreAnestheticForm({
           </div>
 
           {/* 4. Laboratory Evaluation */}
-          <div className="p-4 space-y-3">
-            <h2 className="text-sm font-bold text-slate-900 border-b border-slate-200 pb-1">
-              4. Laboratory Evaluation
-            </h2>
+          <div
+            ref={labSectionRef}
+            onKeyDown={handleLabKeyDown}
+            className="p-4 space-y-3"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-200 pb-1">
+              <h2 className="text-sm font-bold text-slate-900">
+                4. Laboratory Evaluation
+              </h2>
+              <span className="text-[11px] text-slate-500">
+                ใช้ลูกศร ↑ ↓ ← → หรือ Enter เลื่อนช่องกรอกได้
+              </span>
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50/60 border border-slate-200 rounded-lg p-3">
               <CbcFishbone lab={lab} onChange={updateLab} />

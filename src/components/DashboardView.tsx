@@ -414,7 +414,7 @@ export function DashboardView({
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-slate-900">
-            รายการผู้ป่วยที่ต้องเฝ้าระวังเป็นพิเศษหรือล่าสุด (คลิกเพื่อเปิดแก้ไขในแบบฟอร์ม)
+            รายการผู้ป่วยเรียงตามวันที่ทำผ่าตัด (คลิกเพื่อเปิดแก้ไขในแบบฟอร์ม)
           </h3>
           <span className="text-xs text-slate-500 tabular-nums">
             แสดง {Math.min(8, filtered.length)} รายการ

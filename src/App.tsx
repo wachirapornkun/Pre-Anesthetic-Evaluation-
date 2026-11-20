@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
 import {
   collection,
@@ -23,7 +23,6 @@ import {
   LogOut,
   Printer,
   Save,
-  Sparkles,
   UploadCloud,
   X,
 } from 'lucide-react';
@@ -42,7 +41,6 @@ import {
   compareByDateAndSurgeon,
   createEmptyEvaluation,
   createEmptyOxygenSupport,
-  createSampleEvaluations,
   DEFAULT_MEDICATION_GROUPS,
   DEFAULT_OXYGEN_OTHER_PRESETS,
   DEFAULT_SPECIALTY_LIST,
@@ -53,6 +51,7 @@ import {
   generateEvaluationId,
   getEffectiveEvaluationStatus,
   getTodayIsoDate,
+  isSampleEvaluationRecord,
   MedicationGroup,
   OR_ROOM_OPTIONS,
   PreAnestheticEvaluation,
@@ -88,7 +87,11 @@ function loadSavedLocalRecords(): PreAnestheticEvaluation[] {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .filter((item): item is PreAnestheticEvaluation => Boolean(item && typeof item === 'object' && item.id))
+      .filter(
+        (item): item is PreAnestheticEvaluation =>
+          Boolean(item && typeof item === 'object' && item.id) &&
+          !isSampleEvaluationRecord(item),
+      )
       .map((item) => sanitizeEvaluationForFirestore(item, 'local'))
       .sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
   } catch {
@@ -113,6 +116,7 @@ export default function App() {
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncingLocal, setIsSyncingLocal] = useState(false);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const purgedSampleIdsRef = useRef<Set<string>>(new Set());
   const [isNewFormModalOpen, setIsNewFormModalOpen] = useState(false);
   const [newFormDraft, setNewFormDraft] = useState<NewFormScheduleDraft>(() => ({
     dateOfOperation: getTodayIsoDate(),
@@ -252,8 +256,16 @@ export default function App() {
       q,
       (snapshot) => {
         const items: PreAnestheticEvaluation[] = [];
+        const sampleIdsToDelete: string[] = [];
         snapshot.forEach((docSnap) => {
           const raw = docSnap.data() as PreAnestheticEvaluation;
+          const docId = docSnap.id || raw.id;
+          if (isSampleEvaluationRecord({ id: docId, hn: raw.hn, patientName: raw.patientName })) {
+            if (docId && !purgedSampleIdsRef.current.has(docId)) {
+              sampleIdsToDelete.push(docId);
+            }
+            return;
+          }
           const hist = raw.formData?.history;
           const phys = raw.formData?.physicalExam;
           const emptyOx = createEmptyOxygenSupport();
@@ -349,6 +361,29 @@ export default function App() {
         items.sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
         setCloudRecords(items);
         setIsLoadingRecords(false);
+
+        if (sampleIdsToDelete.length > 0) {
+          sampleIdsToDelete.forEach((id) => purgedSampleIdsRef.current.add(id));
+          setCurrentForm((prev) =>
+            sampleIdsToDelete.includes(prev.id) ? createEmptyEvaluation(user.uid) : prev,
+          );
+          const batch = writeBatch(db);
+          sampleIdsToDelete.forEach((id) => {
+            batch.delete(doc(db, path, id));
+          });
+          batch
+            .commit()
+            .then(() => {
+              showNotice(
+                'success',
+                `ลบข้อมูลเคสตัวอย่างออกเรียบร้อยแล้ว (${sampleIdsToDelete.length} รายการ) พร้อมบันทึกข้อมูลจริง`,
+              );
+            })
+            .catch((error) => {
+              sampleIdsToDelete.forEach((id) => purgedSampleIdsRef.current.delete(id));
+              handleFirestoreError(error, OperationType.DELETE, path);
+            });
+        }
       },
       (error) => {
         setIsLoadingRecords(false);
@@ -1144,35 +1179,6 @@ export default function App() {
     }
   };
 
-  const handleLoadSamples = async () => {
-    const samples = createSampleEvaluations(user?.uid || 'local');
-    if (!user) {
-      setLocalRecords((prev) =>
-        [...samples, ...prev].sort((a, b) => compareByDateAndSurgeon(a, b, 'asc')),
-      );
-      setCurrentForm(samples[0]);
-      showNotice('success', 'โหลดข้อมูลตัวอย่าง 5 เคสเรียบร้อย (เรียงตามวันผ่าตัดและแพทย์ผ่าตัด)');
-      return;
-    }
-
-    try {
-      const batch = writeBatch(db);
-      samples.forEach((sample) => {
-        const ref = doc(db, 'evaluations', sample.id);
-        batch.set(ref, {
-          ...sample,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      });
-      await batch.commit();
-      setCurrentForm(samples[0]);
-      showNotice('success', 'เพิ่มข้อมูลตัวอย่าง 5 เคสลง Firestore เรียบร้อย');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'evaluations');
-    }
-  };
-
   const handleDuplicate = (record: PreAnestheticEvaluation) => {
     const copy: PreAnestheticEvaluation = {
       ...record,
@@ -1419,17 +1425,6 @@ export default function App() {
               สร้างใบเยี่ยมใหม่
             </button>
 
-            {records.length === 0 && (
-              <button
-                type="button"
-                onClick={handleLoadSamples}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-800 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-blue-800" />
-                โหลดตัวอย่าง 5 เคส
-              </button>
-            )}
-
             <button
               type="button"
               onClick={() => window.print()}
@@ -1590,7 +1585,6 @@ export default function App() {
             wardOptions={wardOptions}
             isLoading={isLoadingRecords}
             onCreateNew={handleCreateNew}
-            onLoadSamples={handleLoadSamples}
             onSelectRecord={handleEditRecord}
             onSelectRecordPostOp={(rec) => {
               handleEditRecord(rec);
@@ -1610,7 +1604,6 @@ export default function App() {
             onPrintRecord={handlePrintRecord}
             onCreateNew={handleCreateNew}
             onCreateNewForDate={handleCreateNewForDate}
-            onLoadSamples={handleLoadSamples}
           />
         )}
 

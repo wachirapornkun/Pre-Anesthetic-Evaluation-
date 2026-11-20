@@ -9,7 +9,6 @@ import {
   Plus,
   Printer,
   Search,
-  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
@@ -44,7 +43,6 @@ interface RegistryViewProps {
   onPrintRecord: (record: PreAnestheticEvaluation) => void;
   onCreateNew: () => void;
   onCreateNewForDate?: (dateOfOperation: string, orRoom?: string, surgeon?: string) => void;
-  onLoadSamples: () => void;
 }
 
 export function RegistryView({
@@ -57,7 +55,6 @@ export function RegistryView({
   onPrintRecord,
   onCreateNew,
   onCreateNewForDate,
-  onLoadSamples,
 }: RegistryViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<
@@ -260,14 +257,6 @@ export function RegistryView({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={onLoadSamples}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-blue-800" />
-            เพิ่มตัวอย่าง 5 เคส
-          </button>
           <button
             type="button"
             onClick={() => exportEvaluationsCsv(filtered)}

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Download, FilePlus2, Printer, RotateCcw, Sparkles } from 'lucide-react';
+import { Download, FilePlus2, Printer, RotateCcw } from 'lucide-react';
 import {
   AsaClass,
   generateAutoProblemEntries,
@@ -32,7 +32,6 @@ interface DashboardViewProps {
   records: PreAnestheticEvaluation[];
   wardOptions: string[];
   onCreateNew: () => void;
-  onLoadSamples: () => void;
   onSelectRecord: (record: PreAnestheticEvaluation) => void;
   onSelectRecordPostOp?: (record: PreAnestheticEvaluation) => void;
   isLoading: boolean;
@@ -220,7 +219,6 @@ export function DashboardView({
   records,
   wardOptions,
   onCreateNew,
-  onLoadSamples,
   onSelectRecord,
   onSelectRecordPostOp,
   isLoading,
@@ -901,7 +899,7 @@ export function DashboardView({
           ยังไม่มีข้อมูลการเยี่ยมผู้ป่วยก่อนผ่าตัดในระบบ
         </h2>
         <p className="text-sm text-slate-600 max-w-lg mx-auto">
-          เริ่มบันทึกแบบประเมินผู้ป่วยรายใหม่ หรือโหลดข้อมูลตัวอย่าง 5 เคสเพื่อทดสอบการแสดงผล Dashboard และรายงานสรุป
+          เริ่มบันทึกแบบประเมินผู้ป่วยรายใหม่ เพื่อแสดงผลสรุปบน Dashboard และรายงานต่างๆ
         </p>
         <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
           <button
@@ -911,14 +909,6 @@ export function DashboardView({
           >
             <FilePlus2 className="w-4 h-4" />
             สร้างแบบประเมินใหม่
-          </button>
-          <button
-            type="button"
-            onClick={onLoadSamples}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-800 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
-          >
-            <Sparkles className="w-4 h-4 text-blue-800" />
-            โหลดข้อมูลตัวอย่าง (5 เคส)
           </button>
         </div>
       </div>

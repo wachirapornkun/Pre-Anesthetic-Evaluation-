@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar, ChevronDown, ChevronRight, FilePlus2, FolderOpen, Plus, Search, X } from 'lucide-react';
 import {
   compareByDateAndSurgeon,
@@ -35,6 +35,14 @@ export function CaseFolderSidebar({
   const [wardFilter, setWardFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'draft' | 'evaluated'>('ALL');
   const [collapsedDates, setCollapsedDates] = useState<Record<string, boolean>>({});
+
+  // Automatically expand the active record's date folder so newly created/saved visits are immediately visible
+  useEffect(() => {
+    const activeRecord = records.find((r) => r.id === activeId);
+    if (!activeRecord) return;
+    const dateKey = (activeRecord.dateOfOperation || '').trim() || '__UNSPECIFIED__';
+    setCollapsedDates((prev) => (prev[dateKey] ? { ...prev, [dateKey]: false } : prev));
+  }, [activeId, records]);
 
   const availableSurgeons = useMemo(() => {
     const set = new Set<string>(surgeonOptions);
@@ -161,6 +169,24 @@ export function CaseFolderSidebar({
     surgeonFilter !== 'ALL' ||
     wardFilter !== 'ALL' ||
     statusFilter !== 'ALL';
+  const activeRecordExists = useMemo(
+    () => records.some((r) => r.id === activeId),
+    [records, activeId],
+  );
+  const activeRecordVisible = useMemo(
+    () =>
+      groupedFolders.some((g) =>
+        g.surgeons.some((s) => s.items.some((item) => item.id === activeId)),
+      ),
+    [groupedFolders, activeId],
+  );
+  const resetSidebarFilters = () => {
+    setSearchQuery('');
+    setDateFilter('');
+    setSurgeonFilter('ALL');
+    setWardFilter('ALL');
+    setStatusFilter('ALL');
+  };
 
   return (
     <aside
@@ -307,6 +333,18 @@ export function CaseFolderSidebar({
 
       {/* Folder Tree Body */}
       <div className="flex-1 overflow-y-auto max-h-[calc(100vh-290px)] divide-y divide-slate-200">
+        {hasActiveFilters && activeRecordExists && !activeRecordVisible && totalFiltered > 0 && (
+          <div className="px-3 py-2 bg-amber-50 border-b border-amber-200 flex items-center justify-between gap-2 text-[11px] text-amber-900">
+            <span>ใบเยี่ยมที่เปิดอยู่ถูกซ่อนโดยตัวกรอง</span>
+            <button
+              type="button"
+              onClick={resetSidebarFilters}
+              className="font-semibold text-blue-800 hover:underline whitespace-nowrap shrink-0"
+            >
+              แสดงทั้งหมด
+            </button>
+          </div>
+        )}
         {records.length === 0 ? (
           <div className="p-4 space-y-2.5 text-xs text-slate-600">
             <p className="font-semibold text-slate-800">ยังไม่มีใบเยี่ยมที่บันทึกไว้</p>
@@ -328,13 +366,7 @@ export function CaseFolderSidebar({
             {hasActiveFilters && (
               <button
                 type="button"
-                onClick={() => {
-                  setSearchQuery('');
-                  setDateFilter('');
-                  setSurgeonFilter('ALL');
-                  setWardFilter('ALL');
-                  setStatusFilter('ALL');
-                }}
+                onClick={resetSidebarFilters}
                 className="text-xs font-medium text-blue-800 hover:underline"
               >
                 ล้างตัวกรองทั้งหมด

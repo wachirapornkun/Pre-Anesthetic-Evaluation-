@@ -1666,6 +1666,17 @@ export function sanitizeEvaluationForFirestore(
     },
   });
 
+  const sanitizeTri = (v: unknown): TriStatus => (v === 'no' || v === 'yes' ? v : 'none');
+  const sanitizeNormalLimited = (v: unknown): NormalLimited =>
+    v === 'normal' || v === 'limited' ? v : '';
+  const sanitizeTmd = (v: unknown): ThyromentalDist => (v === '<6' || v === '>=6' ? v : '');
+  const sanitizeMallampati = (v: unknown): MallampatiClass =>
+    v === 'I' || v === 'II' || v === 'III' || v === 'IV' ? v : '';
+  const sanitizeNormalAbnormal = (v: unknown): NormalAbnormal =>
+    v === 'normal' || v === 'abnormal' ? v : '';
+  const sanitizeAsa = (v: unknown): AsaClass =>
+    v === 'I' || v === 'II' || v === 'III' || v === 'IV' || v === 'V' || v === 'VI' ? v : '';
+
   return {
     id: sanitizedId,
     ownerId: clampStr(ownerId, FIELD_LIMITS.ownerId),
@@ -1689,7 +1700,7 @@ export function sanitizeEvaluationForFirestore(
     surgeon: clampStr((evalRecord.surgeon ?? '').trim(), FIELD_LIMITS.surgeon),
     diagnosis: clampStr(evalRecord.diagnosis, FIELD_LIMITS.diagnosis),
     operation: clampStr(evalRecord.operation, FIELD_LIMITS.operation),
-    asaClass: evalRecord.asaClass,
+    asaClass: sanitizeAsa(evalRecord.asaClass),
     asaEmergency: Boolean(evalRecord.asaEmergency),
     expectedDifficultAirway: expectedDiff,
     hasComplication: hasComp,
@@ -1698,9 +1709,9 @@ export function sanitizeEvaluationForFirestore(
       history: {
         presentIllness: clampStr(fd.history.presentIllness, 1000),
         pastIllness: clampStr(fd.history.pastIllness, 1000),
-        allergyStatus: fd.history.allergyStatus,
+        allergyStatus: sanitizeTri(fd.history.allergyStatus),
         allergyDetail: clampStr(fd.history.allergyDetail, 300),
-        underlyingStatus: fd.history.underlyingStatus,
+        underlyingStatus: sanitizeTri(fd.history.underlyingStatus),
         dm: Boolean(fd.history.dm),
         dmYears: clampStr(fd.history.dmYears, 20),
         dmDetail: clampStr(fd.history.dmDetail ?? '', 200),
@@ -1721,21 +1732,21 @@ export function sanitizeEvaluationForFirestore(
         medication: clampStr(formatMedicationMultiline(fd.history.medication), 1000),
         previousOps: clampStrArray(fd.history.previousOps, 8, 250),
         previousOpComplication: clampStr(fd.history.previousOpComplication, 500),
-        drinkingStatus: fd.history.drinkingStatus,
+        drinkingStatus: sanitizeTri(fd.history.drinkingStatus),
         drinkingDaysPerWeek: clampStr(fd.history.drinkingDaysPerWeek, 20),
         drinkingYears: clampStr(fd.history.drinkingYears, 20),
         drinkingDurationUnit: fd.history.drinkingDurationUnit === 'months' ? 'months' : 'years',
         drinkingQuit: Boolean(fd.history.drinkingQuit),
         drinkingQuitDuration: clampStr(fd.history.drinkingQuitDuration, 20),
         drinkingQuitUnit: fd.history.drinkingQuitUnit === 'months' ? 'months' : 'years',
-        smokingStatus: fd.history.smokingStatus,
+        smokingStatus: sanitizeTri(fd.history.smokingStatus),
         smokingCigsPerDay: clampStr(fd.history.smokingCigsPerDay, 20),
         smokingYears: clampStr(fd.history.smokingYears, 20),
         smokingDurationUnit: fd.history.smokingDurationUnit === 'months' ? 'months' : 'years',
         smokingQuit: Boolean(fd.history.smokingQuit),
         smokingQuitDuration: clampStr(fd.history.smokingQuitDuration, 20),
         smokingQuitUnit: fd.history.smokingQuitUnit === 'months' ? 'months' : 'years',
-        drugAddictionStatus: fd.history.drugAddictionStatus,
+        drugAddictionStatus: sanitizeTri(fd.history.drugAddictionStatus),
         drugAddictionTypes: clampStrArray(fd.history.drugAddictionTypes, 10, 60),
         drugAddictionOther: clampStr(fd.history.drugAddictionOther, 120),
         drugAddictionAmount: clampStr(fd.history.drugAddictionAmount, 120),
@@ -1799,24 +1810,24 @@ export function sanitizeEvaluationForFirestore(
             ),
           ).slice(0, 18);
         })(),
-        mouthOpening: fd.physicalExam.mouthOpening,
+        mouthOpening: sanitizeNormalLimited(fd.physicalExam.mouthOpening),
         mouthOpeningDetail: clampStr(fd.physicalExam.mouthOpeningDetail ?? '', 200),
-        neckMovement: fd.physicalExam.neckMovement,
+        neckMovement: sanitizeNormalLimited(fd.physicalExam.neckMovement),
         neckMovementDetail: clampStr(fd.physicalExam.neckMovementDetail ?? '', 200),
-        thyromentalDistance: fd.physicalExam.thyromentalDistance,
+        thyromentalDistance: sanitizeTmd(fd.physicalExam.thyromentalDistance),
         thyromentalDistanceDetail: clampStr(fd.physicalExam.thyromentalDistanceDetail ?? '', 200),
-        mallampatiClass: fd.physicalExam.mallampatiClass,
-        expectedDifficultAirway: fd.physicalExam.expectedDifficultAirway,
-        breathSound: fd.physicalExam.breathSound,
+        mallampatiClass: sanitizeMallampati(fd.physicalExam.mallampatiClass),
+        expectedDifficultAirway: sanitizeTri(fd.physicalExam.expectedDifficultAirway),
+        breathSound: sanitizeNormalAbnormal(fd.physicalExam.breathSound),
         breathSoundDetail: clampStr(fd.physicalExam.breathSoundDetail, 300),
-        heartSound: fd.physicalExam.heartSound,
+        heartSound: sanitizeNormalAbnormal(fd.physicalExam.heartSound),
         heartSoundDetail: clampStr(fd.physicalExam.heartSoundDetail, 300),
         functionalCapacity: clampStr(fd.physicalExam.functionalCapacity, 200),
       },
       investigation: {
-        cxrStatus: fd.investigation.cxrStatus,
+        cxrStatus: sanitizeNormalAbnormal(fd.investigation.cxrStatus),
         cxrDetail: clampStr(fd.investigation.cxrDetail, 400),
-        ekgStatus: fd.investigation.ekgStatus,
+        ekgStatus: sanitizeNormalAbnormal(fd.investigation.ekgStatus),
         ekgDetail: clampStr(fd.investigation.ekgDetail, 400),
         other: clampStr(fd.investigation.other, 600),
       },
@@ -1889,7 +1900,7 @@ export function sanitizeEvaluationForFirestore(
         temp: clampStr(fd.postAnesthesia.temp, 20),
         spo2: clampStr(fd.postAnesthesia.spo2, 20),
         painScore: clampStr(fd.postAnesthesia.painScore, 20),
-        complicationStatus: fd.postAnesthesia.complicationStatus,
+        complicationStatus: sanitizeTri(fd.postAnesthesia.complicationStatus),
         complicationDetail: clampStr(fd.postAnesthesia.complicationDetail, 500),
         visitBy: clampStr(fd.postAnesthesia.visitBy, 120),
         visitDate: clampStr(fd.postAnesthesia.visitDate, 32),

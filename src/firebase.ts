@@ -57,12 +57,12 @@ export interface FirestoreErrorInfo {
   };
 }
 
-export function handleFirestoreError(
+export function buildFirestoreErrorInfo(
   error: unknown,
   operationType: OperationType,
   path: string | null,
-): never {
-  const errInfo: FirestoreErrorInfo = {
+): FirestoreErrorInfo {
+  return {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
       userId: auth.currentUser?.uid,
@@ -79,7 +79,54 @@ export function handleFirestoreError(
     operationType,
     path,
   };
+}
+
+export function logFirestoreError(
+  error: unknown,
+  operationType: OperationType,
+  path: string | null,
+): FirestoreErrorInfo {
+  const errInfo = buildFirestoreErrorInfo(error, operationType, path);
   console.error('Firestore Error: ', JSON.stringify(errInfo));
+  return errInfo;
+}
+
+export function getFirestoreErrorCode(error: unknown): string {
+  if (error && typeof error === 'object' && 'code' in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === 'string') return code;
+  }
+  const msg = error instanceof Error ? error.message : String(error);
+  if (msg.includes('permission-denied') || msg.includes('PERMISSION_DENIED')) return 'permission-denied';
+  if (msg.includes('not-found') || msg.includes('NOT_FOUND')) return 'not-found';
+  if (msg.includes('unavailable') || msg.includes('offline')) return 'unavailable';
+  return 'unknown';
+}
+
+export function getFriendlyFirestoreErrorMessage(error: unknown): string {
+  const code = getFirestoreErrorCode(error);
+  if (code === 'permission-denied') {
+    if (auth.currentUser && auth.currentUser.emailVerified === false) {
+      return 'บัญชีผู้ใช้ยังไม่ได้ยืนยันอีเมล จึงยังบันทึกขึ้น Cloud ไม่ได้';
+    }
+    return 'สิทธิ์การบันทึกขึ้น Cloud ถูกปฏิเสธ (permission-denied)';
+  }
+  if (code === 'unavailable' || code === 'deadline-exceeded') {
+    return 'ไม่สามารถเชื่อมต่อฐานข้อมูล Cloud ได้ชั่วคราว (ออฟไลน์หรืออินเทอร์เน็ตขัดข้อง)';
+  }
+  if (code === 'unauthenticated') {
+    return 'เซสชันเข้าสู่ระบบหมดอายุ กรุณาเข้าสู่ระบบใหม่อีกครั้ง';
+  }
+  const raw = error instanceof Error ? error.message : String(error);
+  return raw ? `ข้อผิดพลาดฐานข้อมูล: ${raw}` : 'เกิดข้อผิดพลาดในการบันทึกข้อมูลขึ้นฐานข้อมูล';
+}
+
+export function handleFirestoreError(
+  error: unknown,
+  operationType: OperationType,
+  path: string | null,
+): never {
+  const errInfo = logFirestoreError(error, operationType, path);
   throw new Error(JSON.stringify(errInfo));
 }
 

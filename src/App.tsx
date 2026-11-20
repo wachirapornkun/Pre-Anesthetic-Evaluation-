@@ -13,6 +13,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import {
+  AlertCircle,
   Calendar,
   CheckCircle2,
   Download,
@@ -22,6 +23,7 @@ import {
   LogIn,
   LogOut,
   Printer,
+  RefreshCw,
   Save,
   UploadCloud,
   X,
@@ -35,7 +37,16 @@ import { PostOpA4PrintSheet } from './components/PostOpA4PrintSheet';
 import { PostOpEvaluationForm } from './components/PostOpEvaluationForm';
 import { PreAnestheticForm } from './components/PreAnestheticForm';
 import { RegistryView } from './components/RegistryView';
-import { auth, db, googleProvider, handleFirestoreError, OperationType } from './firebase';
+import {
+  auth,
+  db,
+  getFirestoreErrorCode,
+  getFriendlyFirestoreErrorMessage,
+  googleProvider,
+  handleFirestoreError,
+  logFirestoreError,
+  OperationType,
+} from './firebase';
 import {
   addDaysToIsoDate,
   compareByDateAndSurgeon,
@@ -118,8 +129,11 @@ export default function App() {
   );
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncingLocal, setIsSyncingLocal] = useState(false);
+  const [cloudError, setCloudError] = useState<string | null>(null);
+  const [cloudRetryNonce, setCloudRetryNonce] = useState(0);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const purgedSampleIdsRef = useRef<Set<string>>(new Set());
+  const knownCloudIdsRef = useRef<Set<string>>(new Set());
   const [isNewFormModalOpen, setIsNewFormModalOpen] = useState(false);
   const [newFormDraft, setNewFormDraft] = useState<NewFormScheduleDraft>(() => ({
     hn: '',
@@ -223,7 +237,8 @@ export default function App() {
 
   useEffect(() => {
     if (!notice) return;
-    const timer = setTimeout(() => setNotice(null), 3600);
+    const duration = notice.type === 'error' ? 7000 : 3800;
+    const timer = setTimeout(() => setNotice(null), duration);
     return () => clearTimeout(timer);
   }, [notice]);
 
@@ -242,7 +257,9 @@ export default function App() {
       setUser(nextUser);
       setAuthReady(true);
       if (!nextUser) {
+        knownCloudIdsRef.current.clear();
         setCloudRecords([]);
+        setCloudError(null);
         setIsLoadingRecords(false);
       }
     });
@@ -254,6 +271,7 @@ export default function App() {
     if (!authReady || !user) return;
 
     setIsLoadingRecords(true);
+    setCloudError(null);
     const path = 'evaluations';
     const q = query(collection(db, path), where('ownerId', '==', user.uid));
 
@@ -364,8 +382,19 @@ export default function App() {
           });
         });
         items.sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
+        const nextCloudIds = new Set(items.map((item) => item.id));
+        knownCloudIdsRef.current = nextCloudIds;
         setCloudRecords(items);
+        setCloudError(null);
         setIsLoadingRecords(false);
+        // Remove any local backup copies that are now confirmed in Cloud
+        if (nextCloudIds.size > 0) {
+          setLocalRecords((prev) =>
+            prev.some((r) => nextCloudIds.has(r.id))
+              ? prev.filter((r) => !nextCloudIds.has(r.id))
+              : prev,
+          );
+        }
 
         if (sampleIdsToDelete.length > 0) {
           sampleIdsToDelete.forEach((id) => purgedSampleIdsRef.current.add(id));
@@ -386,18 +415,21 @@ export default function App() {
             })
             .catch((error) => {
               sampleIdsToDelete.forEach((id) => purgedSampleIdsRef.current.delete(id));
-              handleFirestoreError(error, OperationType.DELETE, path);
+              logFirestoreError(error, OperationType.DELETE, path);
             });
         }
       },
       (error) => {
         setIsLoadingRecords(false);
-        handleFirestoreError(error, OperationType.LIST, path);
+        logFirestoreError(error, OperationType.LIST, path);
+        const friendly = getFriendlyFirestoreErrorMessage(error);
+        setCloudError(friendly);
+        showNotice('error', `โหลดข้อมูลจาก Cloud ไม่สำเร็จ: ${friendly}`);
       },
     );
 
     return () => unsubscribe();
-  }, [authReady, user]);
+  }, [authReady, user, cloudRetryNonce]);
 
   // Attach Firestore listener for customizable medication catalog when authenticated
   useEffect(() => {
@@ -940,8 +972,86 @@ export default function App() {
     }
   };
 
-  const records = user ? cloudRecords : localRecords;
+  // Always keep unsynced local records visible alongside Cloud records so saved visits never disappear
+  const records = useMemo(() => {
+    if (!user) return localRecords;
+    const cloudIdSet = new Set(cloudRecords.map((r) => r.id));
+    const unsyncedLocal = localRecords.filter((r) => !cloudIdSet.has(r.id));
+    if (unsyncedLocal.length === 0) return cloudRecords;
+    return [...cloudRecords, ...unsyncedLocal].sort((a, b) =>
+      compareByDateAndSurgeon(a, b, 'asc'),
+    );
+  }, [user, cloudRecords, localRecords]);
   const savedIdSet = useMemo(() => new Set(records.map((r) => r.id)), [records]);
+
+  const buildCloudUpdatePayload = (sanitized: PreAnestheticEvaluation) => ({
+    status: sanitized.status,
+    patientName: sanitized.patientName,
+    hn: sanitized.hn,
+    an: sanitized.an,
+    age: sanitized.age,
+    gender: sanitized.gender ?? '',
+    ward: sanitized.ward,
+    specialty: sanitized.specialty,
+    dateOfVisit: sanitized.dateOfVisit,
+    dateOfOperation: sanitized.dateOfOperation,
+    operationTime: sanitized.operationTime,
+    scheduleType: sanitized.scheduleType,
+    orRoom: sanitized.orRoom,
+    caseOrder: sanitized.caseOrder,
+    surgeon: sanitized.surgeon,
+    diagnosis: sanitized.diagnosis,
+    operation: sanitized.operation,
+    asaClass: sanitized.asaClass,
+    asaEmergency: sanitized.asaEmergency,
+    expectedDifficultAirway: sanitized.expectedDifficultAirway,
+    hasComplication: sanitized.hasComplication,
+    anesthesiaType: sanitized.anesthesiaType,
+    formData: sanitized.formData,
+    updatedAt: serverTimestamp(),
+  });
+
+  const upsertEvaluationToCloud = async (sanitized: PreAnestheticEvaluation): Promise<void> => {
+    const docRef = doc(db, 'evaluations', sanitized.id);
+    const isKnownExisting =
+      knownCloudIdsRef.current.has(sanitized.id) ||
+      cloudRecords.some((r) => r.id === sanitized.id);
+    const updatePayload = buildCloudUpdatePayload(sanitized);
+
+    if (isKnownExisting) {
+      try {
+        await updateDoc(docRef, updatePayload);
+      } catch (error) {
+        if (getFirestoreErrorCode(error) === 'not-found') {
+          await setDoc(docRef, {
+            ...sanitized,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      try {
+        await setDoc(docRef, {
+          ...sanitized,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (error) {
+        // If the document already exists on Cloud (e.g. before onSnapshot refreshed),
+        // setDoc triggers update rules and fails createdAt immutability — retry with updateDoc.
+        if (getFirestoreErrorCode(error) === 'permission-denied') {
+          await updateDoc(docRef, updatePayload);
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    knownCloudIdsRef.current.add(sanitized.id);
+  };
 
   const handleSignIn = async () => {
     try {
@@ -966,23 +1076,48 @@ export default function App() {
   const handleSyncLocalToCloud = async () => {
     if (!user || localRecords.length === 0) return;
     setIsSyncingLocal(true);
+    const syncedRecords: PreAnestheticEvaluation[] = [];
+    const failedRecords: PreAnestheticEvaluation[] = [];
+    let lastError: unknown = null;
+
     try {
-      const batch = writeBatch(db);
-      localRecords.forEach((rec) => {
+      for (const rec of localRecords) {
         const sanitized = sanitizeEvaluationForFirestore(rec, user.uid);
-        const ref = doc(db, 'evaluations', sanitized.id);
-        batch.set(ref, {
-          ...sanitized,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
+        try {
+          await upsertEvaluationToCloud(sanitized);
+          syncedRecords.push(sanitized);
+        } catch (error) {
+          lastError = error;
+          logFirestoreError(error, OperationType.WRITE, `evaluations/${sanitized.id}`);
+          failedRecords.push(rec);
+        }
+      }
+
+      if (syncedRecords.length > 0) {
+        const syncedMap = new Map(syncedRecords.map((r) => [r.id, r]));
+        setCloudRecords((prev) => {
+          const merged = prev.filter((r) => !syncedMap.has(r.id));
+          return [...merged, ...syncedRecords].sort((a, b) =>
+            compareByDateAndSurgeon(a, b, 'asc'),
+          );
         });
-      });
-      await batch.commit();
-      const count = localRecords.length;
-      setLocalRecords([]);
-      showNotice('success', `ซิงค์ข้อมูลจากเครื่องขึ้นฐานข้อมูล Cloud เรียบร้อย (${count} ราย)`);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'evaluations');
+        setCloudError(null);
+      }
+
+      setLocalRecords(failedRecords);
+
+      if (failedRecords.length === 0) {
+        showNotice(
+          'success',
+          `ซิงค์ข้อมูลจากเครื่องขึ้นฐานข้อมูล Cloud เรียบร้อย (${syncedRecords.length} ราย)`,
+        );
+      } else {
+        const friendly = getFriendlyFirestoreErrorMessage(lastError);
+        showNotice(
+          'error',
+          `ซิงค์ขึ้น Cloud สำเร็จ ${syncedRecords.length} ราย · คงค้างในเครื่อง ${failedRecords.length} ราย (${friendly})`,
+        );
+      }
     } finally {
       setIsSyncingLocal(false);
     }
@@ -1039,17 +1174,20 @@ export default function App() {
       operationTime: newFormDraft.operationTime.trim(),
     });
 
-    const saved = await saveEvaluationRecord(created);
-    if (!saved) return;
+    const result = await saveEvaluationRecord(created, { silentSuccess: true });
+    if (!result) return;
 
-    setCurrentForm(saved);
+    setCurrentForm(result.record);
     setIsNewFormModalOpen(false);
     setActiveTab('form');
-    const dateMeta = formatThaiScheduleDate(chosenDate);
-    showNotice(
-      'success',
-      `สร้างฟอร์มและเก็บลงทะเบียนแล้ว (${saved.hn ? `HN ${saved.hn} · ` : ''}${saved.patientName} · ${dateMeta.label})`,
-    );
+    setShowFolderSidebar(true);
+    if (!result.savedToLocalFallback) {
+      const dateMeta = formatThaiScheduleDate(chosenDate);
+      showNotice(
+        'success',
+        `สร้างฟอร์มและเก็บลงแฟ้ม/ทะเบียนแล้ว (${result.record.hn ? `HN ${result.record.hn} · ` : ''}${result.record.patientName} · ${dateMeta.label})`,
+      );
+    }
   };
 
   const handleCreateNewForDate = (
@@ -1075,7 +1213,8 @@ export default function App() {
 
   const saveEvaluationRecord = async (
     recordToSave: PreAnestheticEvaluation,
-  ): Promise<PreAnestheticEvaluation | null> => {
+    options?: { silentSuccess?: boolean },
+  ): Promise<{ record: PreAnestheticEvaluation; savedToLocalFallback: boolean } | null> => {
     if (!recordToSave.patientName.trim()) {
       showNotice('error', 'กรุณาระบุชื่อผู้ป่วย (Name) ก่อนบันทึกข้อมูล');
       return null;
@@ -1095,69 +1234,74 @@ export default function App() {
         if (currentForm.id === sanitized.id) {
           setCurrentForm(sanitized);
         }
-        showNotice(
-          'success',
-          `บันทึกใบเยี่ยมของ ${sanitized.patientName} เก็บไว้ในแฟ้มวันผ่าตัด ${sanitized.dateOfOperation || 'ยังไม่ระบุ'} เรียบร้อย`,
-        );
-        return sanitized;
+        if (!options?.silentSuccess) {
+          showNotice(
+            'success',
+            `บันทึกใบเยี่ยมของ ${sanitized.patientName} เก็บไว้ในแฟ้มวันผ่าตัด ${sanitized.dateOfOperation || 'ยังไม่ระบุ'} เรียบร้อย`,
+          );
+        }
+        return { record: sanitized, savedToLocalFallback: false };
       }
 
       const sanitized = sanitizeEvaluationForFirestore(recordToSave, user.uid);
       const docPath = `evaluations/${sanitized.id}`;
-      const docRef = doc(db, 'evaluations', sanitized.id);
-      const isExisting = cloudRecords.some((r) => r.id === sanitized.id);
+      const isExisting =
+        knownCloudIdsRef.current.has(sanitized.id) ||
+        cloudRecords.some((r) => r.id === sanitized.id);
 
-      if (isExisting) {
-        try {
-          await updateDoc(docRef, {
-            status: sanitized.status,
-            patientName: sanitized.patientName,
-            hn: sanitized.hn,
-            an: sanitized.an,
-            age: sanitized.age,
-            gender: sanitized.gender ?? '',
-            ward: sanitized.ward,
-            specialty: sanitized.specialty,
-            dateOfVisit: sanitized.dateOfVisit,
-            dateOfOperation: sanitized.dateOfOperation,
-            operationTime: sanitized.operationTime,
-            scheduleType: sanitized.scheduleType,
-            orRoom: sanitized.orRoom,
-            caseOrder: sanitized.caseOrder,
-            surgeon: sanitized.surgeon,
-            diagnosis: sanitized.diagnosis,
-            operation: sanitized.operation,
-            asaClass: sanitized.asaClass,
-            asaEmergency: sanitized.asaEmergency,
-            expectedDifficultAirway: sanitized.expectedDifficultAirway,
-            hasComplication: sanitized.hasComplication,
-            anesthesiaType: sanitized.anesthesiaType,
-            formData: sanitized.formData,
-            updatedAt: serverTimestamp(),
-          });
-        } catch (error) {
-          handleFirestoreError(error, OperationType.UPDATE, docPath);
+      try {
+        await upsertEvaluationToCloud(sanitized);
+      } catch (error) {
+        logFirestoreError(
+          error,
+          isExisting ? OperationType.UPDATE : OperationType.CREATE,
+          docPath,
+        );
+        // Save safe local copy so the visit still appears immediately in folders & registry
+        const localBackup = sanitizeEvaluationForFirestore(recordToSave, 'local');
+        setLocalRecords((prev) => {
+          const exists = prev.some((r) => r.id === localBackup.id);
+          const next = exists
+            ? prev.map((r) => (r.id === localBackup.id ? localBackup : r))
+            : [...prev, localBackup];
+          return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
+        });
+        if (currentForm.id === localBackup.id) {
+          setCurrentForm(localBackup);
         }
-      } else {
-        try {
-          await setDoc(docRef, {
-            ...sanitized,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-        } catch (error) {
-          handleFirestoreError(error, OperationType.CREATE, docPath);
-        }
+        const friendly = getFriendlyFirestoreErrorMessage(error);
+        showNotice(
+          'error',
+          `บันทึกขึ้น Cloud ไม่สำเร็จ (${friendly}) — สำรองเก็บในเครื่องและแสดงในแฟ้มจัดเก็บแล้ว สามารถกดซิงค์ขึ้น Cloud ภายหลังได้`,
+        );
+        return { record: localBackup, savedToLocalFallback: true };
       }
+
+      // Immediately reflect saved record in cloudRecords so it appears in folders & registry right away
+      setCloudRecords((prev) => {
+        const exists = prev.some((r) => r.id === sanitized.id);
+        const next = exists
+          ? prev.map((r) => (r.id === sanitized.id ? sanitized : r))
+          : [...prev, sanitized];
+        return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
+      });
+      setLocalRecords((prev) =>
+        prev.some((r) => r.id === sanitized.id)
+          ? prev.filter((r) => r.id !== sanitized.id)
+          : prev,
+      );
+      setCloudError(null);
 
       if (currentForm.id === sanitized.id) {
         setCurrentForm(sanitized);
       }
-      showNotice(
-        'success',
-        `บันทึกข้อมูลของ ${sanitized.patientName}${sanitized.dateOfOperation ? ` (วันผ่าตัด ${sanitized.dateOfOperation})` : ''} เรียงตามวันที่ผ่าตัดเรียบร้อย`,
-      );
-      return sanitized;
+      if (!options?.silentSuccess) {
+        showNotice(
+          'success',
+          `บันทึกข้อมูลของ ${sanitized.patientName}${sanitized.dateOfOperation ? ` (วันผ่าตัด ${sanitized.dateOfOperation})` : ''} เก็บในแฟ้มจัดเก็บเรียบร้อย`,
+        );
+      }
+      return { record: sanitized, savedToLocalFallback: false };
     } finally {
       setIsSaving(false);
     }
@@ -1169,17 +1313,20 @@ export default function App() {
       setActiveTab('form');
       return;
     }
-    const saved = await saveEvaluationRecord(currentForm);
-    if (saved) {
-      setCurrentForm(saved);
+    const result = await saveEvaluationRecord(currentForm);
+    if (result) {
+      setCurrentForm(result.record);
     }
   };
 
   const handleDelete = async (recordId: string) => {
-    if (!user) {
+    const isInCloud =
+      knownCloudIdsRef.current.has(recordId) || cloudRecords.some((r) => r.id === recordId);
+
+    if (!user || !isInCloud) {
       setLocalRecords((prev) => prev.filter((r) => r.id !== recordId));
       if (currentForm.id === recordId) {
-        setCurrentForm(createEmptyEvaluation('local'));
+        setCurrentForm(createEmptyEvaluation(user?.uid || 'local'));
       }
       showNotice('success', 'ลบข้อมูลเรียบร้อย');
       return;
@@ -1188,12 +1335,16 @@ export default function App() {
     const docPath = `evaluations/${recordId}`;
     try {
       await deleteDoc(doc(db, 'evaluations', recordId));
+      knownCloudIdsRef.current.delete(recordId);
+      setCloudRecords((prev) => prev.filter((r) => r.id !== recordId));
+      setLocalRecords((prev) => prev.filter((r) => r.id !== recordId));
       if (currentForm.id === recordId) {
         setCurrentForm(createEmptyEvaluation(user.uid));
       }
       showNotice('success', 'ลบข้อมูลออกจากฐานข้อมูลเรียบร้อย');
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, docPath);
+      logFirestoreError(error, OperationType.DELETE, docPath);
+      showNotice('error', `ลบข้อมูลไม่สำเร็จ: ${getFriendlyFirestoreErrorMessage(error)}`);
     }
   };
 
@@ -1482,6 +1633,27 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 py-5 space-y-5">
+        {cloudError && user && (
+          <div
+            role="alert"
+            className="no-print flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-900"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertCircle className="w-4 h-4 text-red-700 shrink-0" />
+              <span className="font-medium">
+                การเชื่อมต่อฐานข้อมูล Cloud ขัดข้อง: {cloudError} (ข้อมูลที่บันทึกใหม่จะถูกสำรองในเครื่องและแสดงในแฟ้มจัดเก็บโดยอัตโนมัติ)
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCloudRetryNonce((n) => n + 1)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-red-900 bg-white border border-red-300 rounded-md hover:bg-red-100 whitespace-nowrap"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              ลองเชื่อมต่อใหม่
+            </button>
+          </div>
+        )}
         {(activeTab === 'form' || activeTab === 'post_op') && (
           <div
             className={
@@ -2039,15 +2211,31 @@ export default function App() {
       {/* Toast Notification */}
       {notice && (
         <div
-          role="status"
-          className={`no-print fixed bottom-5 right-5 z-50 flex items-center gap-2 px-4 py-2.5 rounded-lg border text-xs font-medium shadow-md ${
+          role={notice.type === 'error' ? 'alert' : 'status'}
+          className={`no-print fixed bottom-5 right-5 z-50 max-w-md flex items-start gap-2.5 px-4 py-3 rounded-lg border text-xs font-medium shadow-lg ${
             notice.type === 'error'
-              ? 'bg-red-50 border-red-200 text-red-800'
+              ? 'bg-red-50 border-red-300 text-red-900'
               : 'bg-slate-900 border-slate-800 text-white'
           }`}
         >
-          <CheckCircle2 className="w-4 h-4 shrink-0" />
-          <span>{notice.text}</span>
+          {notice.type === 'error' ? (
+            <AlertCircle className="w-4 h-4 text-red-700 shrink-0 mt-0.5" />
+          ) : (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+          )}
+          <span className="leading-relaxed">{notice.text}</span>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            aria-label="ปิดการแจ้งเตือน"
+            className={`p-0.5 rounded shrink-0 ${
+              notice.type === 'error'
+                ? 'text-red-500 hover:text-red-900'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
     </div>

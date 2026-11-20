@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  compareByDateAndSurgeon,
   compareElectiveSchedule,
   computeClinicalSummary,
   formatThaiScheduleDate,
@@ -34,18 +35,20 @@ function getUpdatedMillis(ts: unknown): number {
 interface RegistryViewProps {
   records: PreAnestheticEvaluation[];
   activeId: string;
+  surgeonOptions: string[];
   onEdit: (record: PreAnestheticEvaluation) => void;
   onDuplicate: (record: PreAnestheticEvaluation) => void;
   onDelete: (recordId: string) => Promise<void>;
   onPrintRecord: (record: PreAnestheticEvaluation) => void;
   onCreateNew: () => void;
-  onCreateNewForDate?: (dateOfOperation: string, orRoom?: string) => void;
+  onCreateNewForDate?: (dateOfOperation: string, orRoom?: string, surgeon?: string) => void;
   onLoadSamples: () => void;
 }
 
 export function RegistryView({
   records,
   activeId,
+  surgeonOptions,
   onEdit,
   onDuplicate,
   onDelete,
@@ -57,16 +60,31 @@ export function RegistryView({
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'draft' | 'evaluated' | 'post_op_completed'>('ALL');
   const [scheduleFilter, setScheduleFilter] = useState<'ALL' | 'elective' | 'emergency'>('ALL');
+  const [surgeonFilter, setSurgeonFilter] = useState('ALL');
   const [operationDateFilter, setOperationDateFilter] = useState('');
-  const [sortMode, setSortMode] = useState<'op_asc' | 'op_desc' | 'updated'>('op_asc');
+  const [sortMode, setSortMode] = useState<'op_surgeon_asc' | 'op_asc' | 'op_desc' | 'updated'>(
+    'op_surgeon_asc',
+  );
   const [confirmDeleteRecord, setConfirmDeleteRecord] = useState<PreAnestheticEvaluation | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  const availableSurgeons = useMemo(() => {
+    const set = new Set<string>(surgeonOptions);
+    records.forEach((r) => {
+      if (r.surgeon?.trim()) set.add(r.surgeon.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'th'));
+  }, [records, surgeonOptions]);
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     const list = records.filter((r) => {
       if (statusFilter !== 'ALL' && r.status !== statusFilter) return false;
       if (scheduleFilter !== 'ALL' && getEffectiveScheduleType(r) !== scheduleFilter) return false;
+      if (surgeonFilter !== 'ALL') {
+        const s = (r.surgeon || '').trim() || '__NONE__';
+        if (s !== surgeonFilter) return false;
+      }
       if (operationDateFilter && (r.dateOfOperation || '').trim() !== operationDateFilter) {
         return false;
       }
@@ -82,14 +100,17 @@ export function RegistryView({
         r.operation.toLowerCase().includes(q)
       );
     });
+    if (sortMode === 'op_surgeon_asc') {
+      return [...list].sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
+    }
     if (sortMode === 'op_asc') {
       return [...list].sort((a, b) => compareElectiveSchedule(a, b, 'asc'));
     }
     if (sortMode === 'op_desc') {
-      return [...list].sort((a, b) => compareElectiveSchedule(a, b, 'desc'));
+      return [...list].sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
     }
     return [...list].sort((a, b) => getUpdatedMillis(b.updatedAt) - getUpdatedMillis(a.updatedAt));
-  }, [records, searchQuery, statusFilter, scheduleFilter, operationDateFilter, sortMode]);
+  }, [records, searchQuery, statusFilter, scheduleFilter, surgeonFilter, operationDateFilter, sortMode]);
 
   const groupedByDate = useMemo(() => {
     if (sortMode === 'updated') return null;
@@ -195,12 +216,30 @@ export function RegistryView({
           </div>
 
           <select
-            aria-label="เรียงลำดับข้อมูล"
-            value={sortMode}
-            onChange={(e) => setSortMode(e.target.value as 'op_asc' | 'op_desc' | 'updated')}
+            aria-label="กรองตามแพทย์ผ่าตัด"
+            value={surgeonFilter}
+            onChange={(e) => setSurgeonFilter(e.target.value)}
             className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
           >
-            <option value="op_asc">เรียงตามวันผ่าตัด (ใกล้ → ไกล)</option>
+            <option value="ALL">ทุกแพทย์ผ่าตัด</option>
+            {availableSurgeons.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+            <option value="__NONE__">ยังไม่ระบุแพทย์</option>
+          </select>
+
+          <select
+            aria-label="เรียงลำดับข้อมูล"
+            value={sortMode}
+            onChange={(e) =>
+              setSortMode(e.target.value as 'op_surgeon_asc' | 'op_asc' | 'op_desc' | 'updated')
+            }
+            className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
+          >
+            <option value="op_surgeon_asc">เรียงตามวันผ่าตัด → แพทย์ผ่าตัด</option>
+            <option value="op_asc">เรียงตามวันผ่าตัด → ห้อง OR</option>
             <option value="op_desc">เรียงตามวันผ่าตัด (ล่าสุด → เก่า)</option>
             <option value="updated">เรียงตามแก้ไขล่าสุด</option>
           </select>

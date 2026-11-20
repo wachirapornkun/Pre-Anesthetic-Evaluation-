@@ -1004,9 +1004,48 @@ export function compareElectiveSchedule(
   return (a.patientName || '').localeCompare(b.patientName || '', 'th');
 }
 
+export function compareByDateAndSurgeon(
+  a: PreAnestheticEvaluation,
+  b: PreAnestheticEvaluation,
+  direction: 'asc' | 'desc' = 'asc',
+): number {
+  const dateA = (a.dateOfOperation || '').trim();
+  const dateB = (b.dateOfOperation || '').trim();
+
+  if (dateA !== dateB) {
+    if (!dateA) return 1;
+    if (!dateB) return -1;
+    return direction === 'asc' ? dateA.localeCompare(dateB) : dateB.localeCompare(dateA);
+  }
+
+  const surgA = (a.surgeon || '').trim();
+  const surgB = (b.surgeon || '').trim();
+  if (surgA !== surgB) {
+    if (!surgA) return 1;
+    if (!surgB) return -1;
+    const surgCmp = surgA.localeCompare(surgB, 'th');
+    if (surgCmp !== 0) return surgCmp;
+  }
+
+  return compareElectiveSchedule(a, b, direction);
+}
+
 export function createEmptyEvaluation(
   ownerId = 'local',
-  overrides?: Partial<Pick<PreAnestheticEvaluation, 'dateOfOperation' | 'dateOfVisit' | 'orRoom' | 'caseOrder' | 'operationTime' | 'scheduleType' | 'asaEmergency'>>,
+  overrides?: Partial<
+    Pick<
+      PreAnestheticEvaluation,
+      | 'dateOfOperation'
+      | 'dateOfVisit'
+      | 'orRoom'
+      | 'caseOrder'
+      | 'operationTime'
+      | 'scheduleType'
+      | 'asaEmergency'
+      | 'surgeon'
+      | 'ward'
+    >
+  >,
 ): PreAnestheticEvaluation {
   const today = getTodayIsoDate();
   const scheduleType: ScheduleType =
@@ -1019,18 +1058,18 @@ export function createEmptyEvaluation(
     hn: '',
     an: '',
     age: '',
-    ward: '',
+    ward: overrides?.ward ?? '',
     dateOfVisit: overrides?.dateOfVisit ?? today,
     dateOfOperation: overrides?.dateOfOperation ?? today,
     operationTime: overrides?.operationTime ?? '',
     scheduleType,
     orRoom: overrides?.orRoom ?? '',
     caseOrder: overrides?.caseOrder ?? '',
-    surgeon: '',
+    surgeon: overrides?.surgeon ?? '',
     diagnosis: '',
     operation: '',
     asaClass: '',
-    asaEmergency: false,
+    asaEmergency: overrides?.asaEmergency ?? false,
     expectedDifficultAirway: false,
     hasComplication: false,
     anesthesiaType: '',

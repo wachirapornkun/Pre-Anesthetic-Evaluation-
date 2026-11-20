@@ -18,14 +18,17 @@ import {
   Download,
   FileCode2,
   FilePlus2,
+  FolderOpen,
   LogIn,
   LogOut,
   Printer,
   Save,
   Sparkles,
+  UploadCloud,
   X,
 } from 'lucide-react';
 import { A4PrintSheet } from './components/A4PrintSheet';
+import { CaseFolderSidebar } from './components/CaseFolderSidebar';
 import { ClinicalSummaryBar } from './components/ClinicalSummaryBar';
 import { DashboardView } from './components/DashboardView';
 import { ElectiveScheduleView } from './components/ElectiveScheduleView';
@@ -34,7 +37,7 @@ import { RegistryView } from './components/RegistryView';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from './firebase';
 import {
   addDaysToIsoDate,
-  compareElectiveSchedule,
+  compareByDateAndSurgeon,
   createEmptyEvaluation,
   createEmptyOxygenSupport,
   createSampleEvaluations,
@@ -63,10 +66,28 @@ type ActiveTab = 'form' | 'schedule' | 'dashboard' | 'registry' | 'print_preview
 
 interface NewFormScheduleDraft {
   dateOfOperation: string;
+  surgeon: string;
   scheduleType: ScheduleType;
   orRoom: string;
   caseOrder: string;
   operationTime: string;
+}
+
+const LOCAL_RECORDS_STORAGE_KEY = 'bph_local_evaluations_v1';
+
+function loadSavedLocalRecords(): PreAnestheticEvaluation[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_RECORDS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is PreAnestheticEvaluation => Boolean(item && typeof item === 'object' && item.id))
+      .map((item) => sanitizeEvaluationForFirestore(item, 'local'))
+      .sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
+  } catch {
+    return [];
+  }
 }
 
 export default function App() {
@@ -74,16 +95,21 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [cloudRecords, setCloudRecords] = useState<PreAnestheticEvaluation[]>([]);
-  const [localRecords, setLocalRecords] = useState<PreAnestheticEvaluation[]>([]);
+  const [localRecords, setLocalRecords] = useState<PreAnestheticEvaluation[]>(() =>
+    loadSavedLocalRecords(),
+  );
   const [isLoadingRecords, setIsLoadingRecords] = useState(true);
+  const [showFolderSidebar, setShowFolderSidebar] = useState(true);
   const [currentForm, setCurrentForm] = useState<PreAnestheticEvaluation>(() =>
     createEmptyEvaluation('local'),
   );
   const [isSaving, setIsSaving] = useState(false);
+  const [isSyncingLocal, setIsSyncingLocal] = useState(false);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isNewFormModalOpen, setIsNewFormModalOpen] = useState(false);
   const [newFormDraft, setNewFormDraft] = useState<NewFormScheduleDraft>(() => ({
     dateOfOperation: getTodayIsoDate(),
+    surgeon: '',
     scheduleType: 'elective',
     orRoom: '',
     caseOrder: '',
@@ -174,6 +200,15 @@ export default function App() {
     const timer = setTimeout(() => setNotice(null), 3600);
     return () => clearTimeout(timer);
   }, [notice]);
+
+  // Persist local evaluations to browser localStorage so saved pre-visit drafts survive refresh
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOCAL_RECORDS_STORAGE_KEY, JSON.stringify(localRecords));
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [localRecords]);
 
   // Listen to Firebase Auth state
   useEffect(() => {
@@ -270,7 +305,7 @@ export default function App() {
             },
           });
         });
-        items.sort((a, b) => compareElectiveSchedule(a, b, 'asc'));
+        items.sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
         setCloudRecords(items);
         setIsLoadingRecords(false);
       },
@@ -771,6 +806,31 @@ export default function App() {
     }
   };
 
+  const handleSyncLocalToCloud = async () => {
+    if (!user || localRecords.length === 0) return;
+    setIsSyncingLocal(true);
+    try {
+      const batch = writeBatch(db);
+      localRecords.forEach((rec) => {
+        const sanitized = sanitizeEvaluationForFirestore(rec, user.uid);
+        const ref = doc(db, 'evaluations', sanitized.id);
+        batch.set(ref, {
+          ...sanitized,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      });
+      await batch.commit();
+      const count = localRecords.length;
+      setLocalRecords([]);
+      showNotice('success', `ซิงค์ข้อมูลจากเครื่องขึ้นฐานข้อมูล Cloud เรียบร้อย (${count} ราย)`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'evaluations');
+    } finally {
+      setIsSyncingLocal(false);
+    }
+  };
+
   const countCasesOnDate = (targetDate: string, targetRoom?: string): number =>
     records.filter(
       (r) =>
@@ -782,6 +842,7 @@ export default function App() {
     const defaultDate = currentForm.dateOfOperation?.trim() || getTodayIsoDate();
     setNewFormDraft({
       dateOfOperation: defaultDate,
+      surgeon: '',
       scheduleType: 'elective',
       orRoom: '',
       caseOrder: '',
@@ -799,7 +860,8 @@ export default function App() {
     }
     const created = createEmptyEvaluation(user?.uid || 'local', {
       dateOfOperation: chosenDate,
-      dateOfVisit: getTodayIsoDate(),
+      dateOfVisit: '',
+      surgeon: newFormDraft.surgeon.trim(),
       scheduleType: newFormDraft.scheduleType,
       asaEmergency: newFormDraft.scheduleType === 'emergency',
       orRoom: newFormDraft.orRoom.trim(),
@@ -812,11 +874,15 @@ export default function App() {
     const dateMeta = formatThaiScheduleDate(chosenDate);
     showNotice(
       'success',
-      `เปิดแบบฟอร์มใหม่สำหรับวันผ่าตัด ${dateMeta.label} (${chosenDate}) เรียบร้อย`,
+      `เปิดฟอร์มเต็มสำหรับวันผ่าตัด ${dateMeta.label}${newFormDraft.surgeon.trim() ? ` · ${newFormDraft.surgeon.trim()}` : ''} กรอกข้อมูลบางส่วนแล้วกดบันทึกข้อมูลไว้รอเยี่ยมได้เลย`,
     );
   };
 
-  const handleCreateNewForDate = (dateOfOperation: string, orRoom?: string) => {
+  const handleCreateNewForDate = (
+    dateOfOperation: string,
+    orRoom?: string,
+    surgeon?: string,
+  ) => {
     const nextOrder = orRoom
       ? String(countCasesOnDate(dateOfOperation, orRoom) + 1)
       : '';
@@ -824,13 +890,17 @@ export default function App() {
       createEmptyEvaluation(user?.uid || 'local', {
         dateOfOperation,
         dateOfVisit: '',
+        surgeon: surgeon ?? '',
         scheduleType: 'elective',
         orRoom: orRoom ?? '',
         caseOrder: nextOrder,
       }),
     );
     setActiveTab('form');
-    showNotice('success', `เปิดแบบฟอร์มเตรียมเยี่ยม Pre-Op สำหรับวันผ่าตัด ${dateOfOperation}`);
+    showNotice(
+      'success',
+      `เปิดฟอร์มเต็มสำหรับวันผ่าตัด ${dateOfOperation}${surgeon ? ` · ${surgeon}` : ''}`,
+    );
   };
 
   const saveEvaluationRecord = async (
@@ -850,14 +920,14 @@ export default function App() {
           const next = exists
             ? prev.map((r) => (r.id === sanitized.id ? sanitized : r))
             : [...prev, sanitized];
-          return next.sort((a, b) => compareElectiveSchedule(a, b, 'asc'));
+          return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
         });
         if (currentForm.id === sanitized.id) {
           setCurrentForm(sanitized);
         }
         showNotice(
           'success',
-          `บันทึกข้อมูลชั่วคราว (${sanitized.dateOfOperation ? `วันผ่าตัด ${sanitized.dateOfOperation}` : 'ยังไม่ระบุวันผ่าตัด'}) เรียงตามวันผ่าตัดแล้ว`,
+          `บันทึกใบเยี่ยมของ ${sanitized.patientName} เก็บไว้ในแฟ้มวันผ่าตัด ${sanitized.dateOfOperation || 'ยังไม่ระบุ'} เรียบร้อย`,
         );
         return sanitized;
       }
@@ -959,10 +1029,10 @@ export default function App() {
     const samples = createSampleEvaluations(user?.uid || 'local');
     if (!user) {
       setLocalRecords((prev) =>
-        [...samples, ...prev].sort((a, b) => compareElectiveSchedule(a, b, 'asc')),
+        [...samples, ...prev].sort((a, b) => compareByDateAndSurgeon(a, b, 'asc')),
       );
       setCurrentForm(samples[0]);
-      showNotice('success', 'โหลดข้อมูลตัวอย่าง 5 เคสเรียบร้อย (เรียงตามวันที่ผ่าตัด)');
+      showNotice('success', 'โหลดข้อมูลตัวอย่าง 5 เคสเรียบร้อย (เรียงตามวันผ่าตัดและแพทย์ผ่าตัด)');
       return;
     }
 
@@ -1048,7 +1118,7 @@ export default function App() {
                   : 'border-transparent hover:text-slate-900'
               }`}
             >
-              ตารางนัดผ่าตัด
+              แฟ้มวันผ่าตัด
             </button>
             <button
               type="button"
@@ -1085,28 +1155,21 @@ export default function App() {
             </button>
           </nav>
 
-          {/* Zone 3: 1 Primary Action */}
+          {/* Zone 3: 1 Primary Action — Always Save/Update directly */}
           <div className="flex items-center shrink-0">
-            {user ? (
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={isSaving}
-                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-blue-800 rounded-lg hover:bg-blue-900 disabled:opacity-60 transition-colors whitespace-nowrap shrink-0"
-              >
-                <Save className="w-3.5 h-3.5" />
-                {isSaving ? 'กำลังบันทึก...' : savedIdSet.has(currentForm.id) ? 'อัปเดตข้อมูล' : 'บันทึกข้อมูล'}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleSignIn}
-                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-blue-800 rounded-lg hover:bg-blue-900 transition-colors whitespace-nowrap shrink-0"
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                เข้าสู่ระบบ Google
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={isSaving}
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-blue-800 rounded-lg hover:bg-blue-900 disabled:opacity-60 transition-colors whitespace-nowrap shrink-0"
+            >
+              <Save className="w-3.5 h-3.5" />
+              {isSaving
+                ? 'กำลังบันทึก...'
+                : savedIdSet.has(currentForm.id)
+                ? 'อัปเดตข้อมูล'
+                : 'บันทึกข้อมูล'}
+            </button>
           </div>
         </div>
 
@@ -1115,7 +1178,7 @@ export default function App() {
           {(
             [
               { key: 'form', label: 'แบบฟอร์ม' },
-              { key: 'schedule', label: 'ตารางผ่าตัด' },
+              { key: 'schedule', label: 'แฟ้มวันผ่าตัด' },
               { key: 'dashboard', label: 'Dashboard' },
               { key: 'registry', label: `ทะเบียน (${records.length})` },
               { key: 'print_preview', label: 'พิมพ์ A4' },
@@ -1139,7 +1202,7 @@ export default function App() {
 
       {/* Secondary Workspace Toolbar (Below Header) */}
       <div className="no-print bg-slate-100/80 border-b border-slate-200 px-6 py-2.5">
-        <div className="max-w-[1360px] mx-auto flex flex-wrap items-center justify-between gap-3">
+        <div className="max-w-[1440px] mx-auto flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             <span className="font-semibold text-slate-800">
               {currentForm.patientName.trim()
@@ -1150,14 +1213,31 @@ export default function App() {
             <span className="font-mono tabular-nums text-blue-900 font-medium">
               วันผ่าตัด: {currentForm.dateOfOperation || 'ยังไม่ระบุ'}
             </span>
-            <span aria-hidden="true">·</span>
-            <span>แบบฟอร์มมาตรฐาน ANE-FM-002-03</span>
+            {currentForm.surgeon?.trim() && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="text-slate-700">{currentForm.surgeon.trim()}</span>
+              </>
+            )}
             {user ? (
               <>
                 <span aria-hidden="true">·</span>
                 <span className="text-emerald-800 font-medium">
                   ซิงค์ฐานข้อมูล ({user.email})
                 </span>
+                {localRecords.length > 0 && (
+                  <button
+                    type="button"
+                    disabled={isSyncingLocal}
+                    onClick={handleSyncLocalToCloud}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold text-blue-800 bg-white border border-blue-300 rounded hover:bg-blue-50 disabled:opacity-60"
+                  >
+                    <UploadCloud className="w-3 h-3" />
+                    {isSyncingLocal
+                      ? 'กำลังซิงค์...'
+                      : `ซิงค์จากเครื่องขึ้น Cloud (${localRecords.length} ราย)`}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleSignOut}
@@ -1170,33 +1250,43 @@ export default function App() {
             ) : (
               <>
                 <span aria-hidden="true">·</span>
-                <span className="text-amber-800">
-                  โหมดใช้งานชั่วคราว (กดเข้าสู่ระบบ Google ด้านบนเพื่อจัดเก็บถาวร)
-                </span>
+                <span className="text-slate-700">จัดเก็บในเครื่องนี้</span>
+                <button
+                  type="button"
+                  onClick={handleSignIn}
+                  className="inline-flex items-center gap-1 text-blue-800 hover:text-blue-950 font-semibold underline"
+                >
+                  <LogIn className="w-3 h-3" />
+                  เข้าสู่ระบบ Google (ซิงค์ข้ามเครื่อง)
+                </button>
               </>
             )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {activeTab === 'form' && (
+              <button
+                type="button"
+                onClick={() => setShowFolderSidebar((prev) => !prev)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors whitespace-nowrap shrink-0 ${
+                  showFolderSidebar
+                    ? 'bg-blue-50 border-blue-300 text-blue-900'
+                    : 'bg-white border-slate-300 text-slate-800 hover:bg-slate-50'
+                }`}
+              >
+                <FolderOpen className="w-3.5 h-3.5 text-blue-800" />
+                {showFolderSidebar ? `ซ่อนแฟ้ม (${records.length})` : `แสดงแฟ้มใบเยี่ยม (${records.length})`}
+              </button>
+            )}
+
             <button
               type="button"
               onClick={handleCreateNew}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-800 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0"
             >
               <FilePlus2 className="w-3.5 h-3.5 text-blue-800" />
-              สร้างฟอร์มใหม่
+              สร้างใบเยี่ยมใหม่
             </button>
-
-            {!user && (
-              <button
-                type="button"
-                onClick={handleSave}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-800 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0"
-              >
-                <Save className="w-3.5 h-3.5 text-blue-800" />
-                เก็บชั่วคราว
-              </button>
-            )}
 
             {records.length === 0 && (
               <button
@@ -1247,27 +1337,49 @@ export default function App() {
       </div>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-[1360px] w-full mx-auto px-4 sm:px-6 py-5 space-y-5">
+      <main className="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 py-5 space-y-5">
         {activeTab === 'form' && (
-          <>
-            <ClinicalSummaryBar evaluation={currentForm} />
-            <PreAnestheticForm
-              value={currentForm}
-              onChange={setCurrentForm}
-              medicationGroups={medicationGroups}
-              onUpdateMedicationGroups={handleUpdateMedicationGroups}
-              wardOptions={wardOptions}
-              onUpdateWardOptions={handleUpdateWardOptions}
-              surgeonOptions={surgeonOptions}
-              onUpdateSurgeonOptions={handleUpdateSurgeonOptions}
-              oxygenPresets={oxygenPresets}
-              onUpdateOxygenPresets={handleUpdateOxygenPresets}
-              summarizerOptions={summarizerOptions}
-              onUpdateSummarizerOptions={handleUpdateSummarizerOptions}
-              visitorOptions={visitorOptions}
-              onUpdateVisitorOptions={handleUpdateVisitorOptions}
-            />
-          </>
+          <div
+            className={
+              showFolderSidebar
+                ? 'grid grid-cols-1 xl:grid-cols-[290px_minmax(0,1fr)] gap-5 items-start'
+                : 'space-y-5'
+            }
+          >
+            {showFolderSidebar && (
+              <div className="xl:sticky xl:top-20">
+                <CaseFolderSidebar
+                  records={records}
+                  activeId={currentForm.id}
+                  surgeonOptions={surgeonOptions}
+                  wardOptions={wardOptions}
+                  onSelectRecord={handleEditRecord}
+                  onCreateNew={handleCreateNew}
+                  onCreateNewForDate={handleCreateNewForDate}
+                  onClose={() => setShowFolderSidebar(false)}
+                />
+              </div>
+            )}
+            <div className="min-w-0 space-y-5">
+              <ClinicalSummaryBar evaluation={currentForm} />
+              <PreAnestheticForm
+                value={currentForm}
+                onChange={setCurrentForm}
+                medicationGroups={medicationGroups}
+                onUpdateMedicationGroups={handleUpdateMedicationGroups}
+                wardOptions={wardOptions}
+                onUpdateWardOptions={handleUpdateWardOptions}
+                surgeonOptions={surgeonOptions}
+                onUpdateSurgeonOptions={handleUpdateSurgeonOptions}
+                oxygenPresets={oxygenPresets}
+                onUpdateOxygenPresets={handleUpdateOxygenPresets}
+                summarizerOptions={summarizerOptions}
+                onUpdateSummarizerOptions={handleUpdateSummarizerOptions}
+                visitorOptions={visitorOptions}
+                onUpdateVisitorOptions={handleUpdateVisitorOptions}
+              />
+            </div>
+          </div>
         )}
 
         {activeTab === 'schedule' && (
@@ -1277,11 +1389,11 @@ export default function App() {
             wardOptions={wardOptions}
             surgeonOptions={surgeonOptions}
             isLoading={isLoadingRecords}
-            onSaveRecord={saveEvaluationRecord}
             onEdit={handleEditRecord}
             onDuplicate={handleDuplicate}
             onDelete={handleDelete}
             onPrintRecord={handlePrintRecord}
+            onCreateNew={handleCreateNew}
             onCreateNewForDate={handleCreateNewForDate}
           />
         )}
@@ -1301,6 +1413,7 @@ export default function App() {
           <RegistryView
             records={records}
             activeId={currentForm.id}
+            surgeonOptions={surgeonOptions}
             onEdit={handleEditRecord}
             onDuplicate={handleDuplicate}
             onDelete={handleDelete}
@@ -1359,7 +1472,7 @@ export default function App() {
         )}
       </main>
 
-      {/* New Form — Select Operation Date Modal */}
+      {/* New Form — Select Operation Date & Surgeon Modal */}
       {isNewFormModalOpen && (
         <div
           role="dialog"
@@ -1379,10 +1492,10 @@ export default function App() {
                     id="new-form-date-modal-title"
                     className="text-sm font-bold text-slate-900"
                   >
-                    สร้างแบบฟอร์มใหม่ — เลือกวันที่ทำผ่าตัด
+                    สร้างใบเยี่ยมใหม่ (เปิดฟอร์มเต็ม)
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    ข้อมูลจะถูกจัดเก็บและเรียงลำดับตามวันที่ทำผ่าตัดโดยอัตโนมัติ
+                    เลือกวันที่ผ่าตัดและแพทย์ผ่าตัด เพื่อเปิดฟอร์มเต็มกรอกข้อมูลบางส่วนเก็บไว้รอไปเยี่ยมที่หอผู้ป่วย
                   </p>
                 </div>
               </div>
@@ -1465,8 +1578,51 @@ export default function App() {
                         ) : null}
                       </span>
                       <span className="text-slate-600 tabular-nums">
-                        เคสที่เก็บไว้ในวันนี้: <strong className="font-mono text-slate-900">{existingCount}</strong> ราย
+                        เคสที่เก็บไว้ในวันนี้:{' '}
+                        <strong className="font-mono text-slate-900">{existingCount}</strong> ราย
                       </span>
+                    </div>
+                  </div>
+
+                  {/* Surgeon selector */}
+                  <div className="space-y-1">
+                    <label
+                      htmlFor="new-form-surgeon"
+                      className="text-xs font-semibold text-slate-700"
+                    >
+                      แพทย์ผ่าตัด (Surgeon)
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <select
+                        id="new-form-surgeon"
+                        value={
+                          surgeonOptions.includes(newFormDraft.surgeon)
+                            ? newFormDraft.surgeon
+                            : ''
+                        }
+                        onChange={(e) =>
+                          setNewFormDraft((prev) => ({ ...prev, surgeon: e.target.value }))
+                        }
+                        className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
+                      >
+                        <option value="">-- เลือกรายชื่อแพทย์ผ่าตัด --</option>
+                        {surgeonOptions.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        aria-label="พิมพ์ชื่อแพทย์ผ่าตัด"
+                        value={newFormDraft.surgeon}
+                        onChange={(e) =>
+                          setNewFormDraft((prev) => ({ ...prev, surgeon: e.target.value }))
+                        }
+                        placeholder="หรือพิมพ์ชื่อแพทย์ผ่าตัด..."
+                        maxLength={120}
+                        className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
+                      />
                     </div>
                   </div>
 
@@ -1572,7 +1728,7 @@ export default function App() {
                 className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-blue-800 rounded-lg hover:bg-blue-900"
               >
                 <FilePlus2 className="w-3.5 h-3.5" />
-                เปิดแบบฟอร์มใหม่
+                เปิดฟอร์มเต็มเพื่อบันทึกข้อมูล
               </button>
             </div>
           </form>

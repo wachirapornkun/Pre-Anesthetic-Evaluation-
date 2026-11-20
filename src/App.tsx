@@ -368,6 +368,18 @@ export default function App() {
                       value: item?.value ?? '',
                     }))
                   : [],
+                bloodGroup:
+                  raw.formData?.laboratory?.bloodGroup === 'A' ||
+                  raw.formData?.laboratory?.bloodGroup === 'B' ||
+                  raw.formData?.laboratory?.bloodGroup === 'AB' ||
+                  raw.formData?.laboratory?.bloodGroup === 'O'
+                    ? raw.formData.laboratory.bloodGroup
+                    : '',
+                bloodRh:
+                  raw.formData?.laboratory?.bloodRh === 'positive' ||
+                  raw.formData?.laboratory?.bloodRh === 'negative'
+                    ? raw.formData.laboratory.bloodRh
+                    : '',
                 prepTs: Boolean(raw.formData?.laboratory?.prepTs),
                 prepStatuses: Array.isArray(raw.formData?.laboratory?.prepStatuses)
                   ? raw.formData.laboratory.prepStatuses

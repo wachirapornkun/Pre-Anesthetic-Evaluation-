@@ -16,6 +16,7 @@ import {
   applyAutoProblems,
   applyMissingAutoPremeds,
   AsaClass,
+  BLOOD_GROUP_OPTIONS,
   BLOOD_PREP_STATUS_OPTIONS,
   BloodPrepStatus,
   calculateBmi,
@@ -3730,8 +3731,54 @@ export function PreAnestheticForm({
               )}
             </div>
 
-            {/* Blood component prepare */}
-            <div className="space-y-2 pt-2 border-t border-slate-200">
+            {/* Blood group & Blood component prepare */}
+            <div className="space-y-2.5 pt-2 border-t border-slate-200">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-slate-700">Group เลือด</span>
+                <div className="inline-flex flex-wrap items-center gap-1">
+                  {BLOOD_GROUP_OPTIONS.map((grp) => {
+                    const active = lab.bloodGroup === grp;
+                    return (
+                      <button
+                        key={grp}
+                        type="button"
+                        onClick={() => updateLabPatch({ bloodGroup: active ? '' : grp })}
+                        className={`${radioBtn(active)} min-w-[2.25rem] justify-center font-mono`}
+                      >
+                        {grp}
+                      </button>
+                    );
+                  })}
+                </div>
+                <span className="text-xs text-slate-400">|</span>
+                <span className="text-xs font-medium text-slate-600">Rh</span>
+                <div className="inline-flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateLabPatch({ bloodRh: lab.bloodRh === 'positive' ? '' : 'positive' })
+                    }
+                    className={`${radioBtn(lab.bloodRh === 'positive')} font-mono`}
+                  >
+                    Rh+
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateLabPatch({ bloodRh: lab.bloodRh === 'negative' ? '' : 'negative' })
+                    }
+                    className={`${radioBtn(lab.bloodRh === 'negative', 'danger')} font-mono`}
+                  >
+                    Rh-
+                  </button>
+                </div>
+                {lab.bloodRh === 'negative' && (
+                  <span className="text-[11px] font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded">
+                    เลือดหายาก (Rh-)
+                  </span>
+                )}
+              </div>
+
               <div className="flex flex-wrap items-center gap-3">
                 <span className="text-xs font-semibold text-slate-700">
                   Blood component prepare

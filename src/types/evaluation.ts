@@ -25,7 +25,11 @@ export type DurationUnit = 'months' | 'years';
 export type OxygenSupportMode = '' | 'cannula' | 'mask_bag' | 'ett' | 'other';
 export type VentilatorMode = '' | 'vcv' | 'pcv';
 export type AntiHivStatus = '' | 'negative' | 'positive';
+export type BloodGroup = '' | 'A' | 'B' | 'AB' | 'O';
+export type BloodRh = '' | 'positive' | 'negative';
 export type BloodPrepStatus = 'no_blood' | 'ready' | 'not_ready' | 'waiting_red_cross' | 'other';
+
+export const BLOOD_GROUP_OPTIONS: readonly Exclude<BloodGroup, ''>[] = ['A', 'B', 'AB', 'O'] as const;
 
 export const BLOOD_PREP_STATUS_OPTIONS: readonly { value: BloodPrepStatus; label: string }[] = [
   { value: 'no_blood', label: 'ไม่มีจองเลือด' },
@@ -279,6 +283,8 @@ export interface LaboratoryData {
   tropI: string;
   other: string;
   customLabs?: CustomLabItem[];
+  bloodGroup?: BloodGroup;
+  bloodRh?: BloodRh;
   prepTs: boolean;
   prepPrc: string;
   prepFfp: string;
@@ -1436,6 +1442,8 @@ export function createEmptyEvaluation(
         tropI: '',
         other: '',
         customLabs: [],
+        bloodGroup: '',
+        bloodRh: '',
         prepTs: false,
         prepPrc: '',
         prepFfp: '',
@@ -1869,6 +1877,17 @@ export function sanitizeEvaluationForFirestore(
               }))
               .filter((item) => item.name.length > 0 || item.value.length > 0)
           : [],
+        bloodGroup:
+          fd.laboratory.bloodGroup === 'A' ||
+          fd.laboratory.bloodGroup === 'B' ||
+          fd.laboratory.bloodGroup === 'AB' ||
+          fd.laboratory.bloodGroup === 'O'
+            ? fd.laboratory.bloodGroup
+            : '',
+        bloodRh:
+          fd.laboratory.bloodRh === 'positive' || fd.laboratory.bloodRh === 'negative'
+            ? fd.laboratory.bloodRh
+            : '',
         prepTs: Boolean(fd.laboratory.prepTs),
         prepPrc: clampStr(fd.laboratory.prepPrc, 20),
         prepFfp: clampStr(fd.laboratory.prepFfp, 20),
@@ -2100,8 +2119,20 @@ export function formatToothMarksSummary(missingTeeth?: string[], looseTeeth?: st
   return parts.join(' · ');
 }
 
+export function formatBloodGroup(
+  bloodGroup?: BloodGroup,
+  bloodRh?: BloodRh,
+): string {
+  const grp = bloodGroup || '';
+  const rh = bloodRh === 'positive' ? 'Rh+' : bloodRh === 'negative' ? 'Rh-' : '';
+  if (grp && rh) return `${grp} (${rh})`;
+  return grp || rh;
+}
+
 export function formatBloodPrepSummary(lab: LaboratoryData): string {
   const parts: string[] = [];
+  const bg = formatBloodGroup(lab.bloodGroup, lab.bloodRh);
+  if (bg) parts.push(`Gr. ${bg}`);
   if (lab.prepTs) parts.push('T&S');
   if (lab.prepPrc.trim()) parts.push(`PRC ${lab.prepPrc.trim()}u`);
   if (lab.prepFfp.trim()) parts.push(`FFP ${lab.prepFfp.trim()}u`);
@@ -3248,9 +3279,14 @@ export function generateAutoProblemEntries(
     });
   }
 
-  // 9. Blood preparation not ready
+  // 9. Blood preparation not ready / Rh negative
   const bloodStatuses = Array.isArray(laboratory.prepStatuses) ? laboratory.prepStatuses : [];
   const bloodIssues: string[] = [];
+  if (laboratory.bloodRh === 'negative') {
+    bloodIssues.push(
+      laboratory.bloodGroup ? `เลือดหายาก (Gr. ${laboratory.bloodGroup} Rh-)` : 'เลือดหายาก (Rh-)',
+    );
+  }
   if (bloodStatuses.includes('not_ready')) bloodIssues.push('จองเลือดยังไม่พร้อมใช้');
   if (bloodStatuses.includes('waiting_red_cross')) bloodIssues.push('รอเลือดจากกาชาด');
   if (bloodIssues.length > 0) {

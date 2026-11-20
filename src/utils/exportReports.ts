@@ -1,6 +1,7 @@
 import {
   BLOOD_PREP_STATUS_OPTIONS,
   computeClinicalSummary,
+  formatBloodGroup,
   formatDrinkingDetail,
   formatDrugAddictionDetail,
   formatOxygenSupportSummary,
@@ -64,6 +65,7 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
     'Cr',
     'INR',
     'Anesthetic Plan',
+    'Blood Group',
     'Blood Prep (PRC/FFP/Plt)',
     'Post-Op Complication',
     'Status',
@@ -125,6 +127,7 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
       fd.laboratory.cr,
       fd.laboratory.inr,
       summary.planSummary,
+      formatBloodGroup(fd.laboratory.bloodGroup, fd.laboratory.bloodRh),
       summary.bloodPrepSummary,
       fd.postAnesthesia.complicationStatus === 'yes'
         ? fd.postAnesthesia.complicationDetail || summarizePostOpComplications(fd.postOpComplication) || 'Yes'
@@ -335,7 +338,7 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
                 .join(' · ')}</div>`
             : ''
         }
-        <div class="field"><strong>Blood component prepare:</strong> ${checkMark(Boolean(lab.prepTs), 'T&S')} PRC ${esc(lab.prepPrc || '-')} u · FFP ${esc(lab.prepFfp || '-')} u · Plt ${esc(lab.prepPlt || '-')} u<br/>${BLOOD_PREP_STATUS_OPTIONS.map((opt) =>
+        <div class="field"><strong>Group เลือด:</strong> ${esc(formatBloodGroup(lab.bloodGroup, lab.bloodRh) || '-')} · <strong>Blood component prepare:</strong> ${checkMark(Boolean(lab.prepTs), 'T&S')} PRC ${esc(lab.prepPrc || '-')} u · FFP ${esc(lab.prepFfp || '-')} u · Plt ${esc(lab.prepPlt || '-')} u<br/>${BLOOD_PREP_STATUS_OPTIONS.map((opt) =>
           checkMark(
             (lab.prepStatuses || []).includes(opt.value),
             opt.value === 'other' && lab.prepStatusDetail

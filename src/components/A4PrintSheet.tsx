@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   BLOOD_PREP_STATUS_OPTIONS,
+  formatBloodGroup,
   formatDrinkingDetail,
   formatDrugAddictionDetail,
   formatOxygenSupportSummary,
@@ -403,7 +404,9 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
               )}
               <div className="space-y-0.5">
                 <div className="font-mono">
-                  Blood component prepare: {box(Boolean(lab.prepTs), 'T&S')} PRC=
+                  Group เลือด:{' '}
+                  <strong>{formatBloodGroup(lab.bloodGroup, lab.bloodRh) || '—'}</strong> · Blood
+                  component prepare: {box(Boolean(lab.prepTs), 'T&S')} PRC=
                   <strong>{lab.prepPrc || '—'}</strong>u · FFP=
                   <strong>{lab.prepFfp || '—'}</strong>u · Plt=<strong>{lab.prepPlt || '—'}</strong>u
                 </div>

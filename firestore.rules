@@ -234,6 +234,7 @@ service cloud.firestore {
           'pt', 'ptt', 'inr',
           'sgot', 'sgpt', 'alp', 'alb',
           'glucose', 'hba1c', 'antiHiv', 'lactate', 'tropI', 'other', 'customLabs',
+          'bloodGroup', 'bloodRh',
           'prepTs', 'prepPrc', 'prepFfp', 'prepPlt',
           'prepStatuses', 'prepStatusDetail'
         ])
@@ -275,6 +276,8 @@ service cloud.firestore {
             )
           )
         ))
+        && (!('bloodGroup' in lab) || (lab.bloodGroup in ['', 'A', 'B', 'AB', 'O']))
+        && (!('bloodRh' in lab) || (lab.bloodRh in ['', 'positive', 'negative']))
         && (!('prepTs' in lab) || lab.prepTs is bool)
         && isStr(lab.prepPrc, 0, 20)
         && isStr(lab.prepFfp, 0, 20)

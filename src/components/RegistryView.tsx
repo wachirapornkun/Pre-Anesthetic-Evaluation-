@@ -18,7 +18,9 @@ import {
   compareElectiveSchedule,
   computeClinicalSummary,
   formatThaiScheduleDate,
+  getEffectiveEvaluationStatus,
   getEffectiveScheduleType,
+  getPostOpVisitCompleteness,
   PreAnestheticEvaluation,
 } from '../types/evaluation';
 import { exportEvaluationsCsv, exportSingleHtmlReport } from '../utils/exportReports';
@@ -58,7 +60,9 @@ export function RegistryView({
   onLoadSamples,
 }: RegistryViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'draft' | 'evaluated' | 'post_op_completed'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<
+    'ALL' | 'draft' | 'evaluated' | 'not_post_op' | 'post_op_completed'
+  >('ALL');
   const [scheduleFilter, setScheduleFilter] = useState<'ALL' | 'elective' | 'emergency'>('ALL');
   const [surgeonFilter, setSurgeonFilter] = useState('ALL');
   const [operationDateFilter, setOperationDateFilter] = useState('');
@@ -79,7 +83,16 @@ export function RegistryView({
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     const list = records.filter((r) => {
-      if (statusFilter !== 'ALL' && r.status !== statusFilter) return false;
+      const effStatus = getEffectiveEvaluationStatus(r);
+      const postOpCheck = getPostOpVisitCompleteness(r.formData?.postAnesthesia);
+      if (statusFilter === 'not_post_op' && postOpCheck.isComplete) return false;
+      if (
+        statusFilter !== 'ALL' &&
+        statusFilter !== 'not_post_op' &&
+        effStatus !== statusFilter
+      ) {
+        return false;
+      }
       if (scheduleFilter !== 'ALL' && getEffectiveScheduleType(r) !== scheduleFilter) return false;
       if (surgeonFilter !== 'ALL') {
         const s = (r.surgeon || '').trim() || '__NONE__';
@@ -164,6 +177,7 @@ export function RegistryView({
                 { key: 'ALL', label: 'ทั้งหมด' },
                 { key: 'draft', label: 'ฉบับร่าง' },
                 { key: 'evaluated', label: 'ประเมินแล้ว' },
+                { key: 'not_post_op', label: 'ยังไม่เยี่ยม Post-Op' },
                 { key: 'post_op_completed', label: 'Post-Op แล้ว' },
               ] as const
             ).map((tab) => (
@@ -364,8 +378,34 @@ export function RegistryView({
                             {summary.planSummary}
                           </div>
                         </td>
-                        <td className="py-2.5 px-4 whitespace-nowrap text-slate-700 font-medium">
-                          {statusText(r.status)}
+                        <td className="py-2.5 px-4 whitespace-nowrap">
+                          {(() => {
+                            const effStatus = getEffectiveEvaluationStatus(r);
+                            const postOp = getPostOpVisitCompleteness(r.formData?.postAnesthesia);
+                            return (
+                              <div>
+                                <div
+                                  className={`font-medium ${
+                                    effStatus === 'post_op_completed'
+                                      ? 'text-emerald-700'
+                                      : effStatus === 'evaluated'
+                                      ? 'text-blue-800'
+                                      : 'text-slate-700'
+                                  }`}
+                                >
+                                  {statusText(effStatus)}
+                                </div>
+                                {!postOp.isComplete && (
+                                  <div className="text-[11px] text-amber-700 font-medium">
+                                    ยังไม่ได้เยี่ยมหลังผ่าตัด
+                                    {postOp.hasAnyInput
+                                      ? ` (ข้อมูลไม่ครบ ${postOp.filledCount}/${postOp.totalRequired})`
+                                      : ''}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="py-2.5 px-4 text-right whitespace-nowrap">
                           <div className="inline-flex items-center gap-1">

@@ -6,6 +6,7 @@ import {
   formatOxygenSupportSummary,
   formatSmokingDetail,
   formatToothMarksSummary,
+  getMedicationLines,
   PreAnestheticEvaluation,
 } from '../types/evaluation';
 import {
@@ -29,7 +30,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
   const lab = fd.laboratory;
   const pm = fd.premedication;
   const ap = fd.anestheticPlan;
-  const pa = fd.postAnesthesia;
+  const medicationLines = getMedicationLines(h.medication);
 
   const mark = (active: boolean, text: string, keyProp?: string) => (
     <span key={keyProp} className="inline-flex items-center gap-0.5 mr-2 whitespace-nowrap">
@@ -82,6 +83,9 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
             </span>
             <span>
               Ward: <strong>{evaluation.ward || '________'}</strong>
+            </span>
+            <span>
+              สาขา: <strong>{evaluation.specialty || '________'}</strong>
             </span>
             <span>
               Date of visit: <strong className="font-mono">{evaluation.dateOfVisit || '________'}</strong>
@@ -141,30 +145,55 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                 <div className="grid grid-cols-2 gap-1.5 border border-slate-400 p-1">
                   <div className="space-y-0.5">
                     <div>
-                      {mark(h.dm, `DM ${h.dmYears ? `${h.dmYears} ปี` : ''}`)}
+                      {mark(
+                        h.dm,
+                        `DM ${h.dmYears ? `${h.dmYears} ปี` : ''}${h.dmDetail?.trim() ? ` (${h.dmDetail.trim()})` : ''}`.trim(),
+                      )}
                     </div>
                     <div>
-                      {mark(h.ht, `HT ${h.htYears ? `${h.htYears} ปี` : ''}`)}
+                      {mark(
+                        h.ht,
+                        `HT ${h.htYears ? `${h.htYears} ปี` : ''}${h.htDetail?.trim() ? ` (${h.htDetail.trim()})` : ''}`.trim(),
+                      )}
                     </div>
                     <div>
-                      {mark(Boolean(h.dlp), `DLP ${h.dlpYears ? `${h.dlpYears} ปี` : ''}`)}
+                      {mark(
+                        Boolean(h.dlp),
+                        `DLP ${h.dlpYears ? `${h.dlpYears} ปี` : ''}${h.dlpDetail?.trim() ? ` (${h.dlpDetail.trim()})` : ''}`.trim(),
+                      )}
                     </div>
                     <div>
-                      {mark(Boolean(h.ckd), `โรคไต ${h.ckdYears ? `${h.ckdYears} ปี` : ''}`)}
+                      {mark(
+                        Boolean(h.ckd),
+                        `โรคไต ${h.ckdYears ? `${h.ckdYears} ปี` : ''}${h.ckdDetail?.trim() ? ` (${h.ckdDetail.trim()})` : ''}`.trim(),
+                      )}
                     </div>
                     <div>
                       {mark(
                         h.heartDisease,
-                        `โรคหัวใจ ${h.heartDiseaseYears ? `${h.heartDiseaseYears} ปี` : ''}`,
+                        `โรคหัวใจ ${h.heartDiseaseYears ? `${h.heartDiseaseYears} ปี` : ''}${h.heartDiseaseDetail?.trim() ? ` (${h.heartDiseaseDetail.trim()})` : ''}`.trim(),
                       )}
                     </div>
                     {h.otherUnderlying.filter(Boolean).map((u, idx) => (
                       <div key={idx}>● {u}</div>
                     ))}
+                    {h.underlyingDetail?.trim() && (
+                      <div className="pt-0.5 text-[9.5px] whitespace-pre-wrap">
+                        <span className="font-semibold">รายละเอียด:</span> {h.underlyingDetail.trim()}
+                      </div>
+                    )}
                   </div>
                   <div className="border-l border-slate-400 pl-1.5">
                     <div className="font-semibold">Medication:</div>
-                    <div className="whitespace-pre-wrap">{h.medication || '—'}</div>
+                    {medicationLines.length > 0 ? (
+                      <div className="space-y-0.5 leading-snug">
+                        {medicationLines.map((med, idx) => (
+                          <div key={idx}>{med}</div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div>—</div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -242,8 +271,12 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
               ) : (
                 <div>—</div>
               )}
+              <div className="mt-1 px-2 py-1 border-[1.5px] border-slate-900 bg-amber-50/70">
+                <span className="text-[14px] font-extrabold tracking-wide text-red-800">
+                  NPO: {pm.npoTime || '__________________'}
+                </span>
+              </div>
               <div className="pt-0.5">
-                <span className="font-semibold">NPO time:</span> {pm.npoTime || '—'} &nbsp;
                 <span className="font-semibold">on IVF:</span> {pm.onIvf || '—'}
               </div>
             </div>
@@ -346,8 +379,28 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
               </div>
               <div>
                 Glucose: <strong className="font-mono">{lab.glucose || '—'}</strong> mg/dl · HbA1C:{' '}
-                <strong className="font-mono">{lab.hba1c || '—'}</strong> · Other: {lab.other || '—'}
+                <strong className="font-mono">{lab.hba1c || '—'}</strong> · Lactate:{' '}
+                <strong className="font-mono">{lab.lactate || '—'}</strong> · Trop I:{' '}
+                <strong className="font-mono">{lab.tropI || '—'}</strong>
               </div>
+              <div>
+                Anti-HIV:{' '}
+                {mark(lab.antiHiv === 'negative', 'Negative')}
+                {mark(lab.antiHiv === 'positive', 'Positive')}
+                {lab.other ? <> · Other: {lab.other}</> : ''}
+              </div>
+              {(lab.customLabs || []).some((c) => c.name.trim() || c.value.trim()) && (
+                <div className="font-mono">
+                  {(lab.customLabs || [])
+                    .filter((c) => c.name.trim() || c.value.trim())
+                    .map((c, i) => (
+                      <span key={i}>
+                        {i > 0 ? ' · ' : ''}
+                        {c.name.trim() || 'Lab'}: <strong>{c.value.trim() || '—'}</strong>
+                      </span>
+                    ))}
+                </div>
+              )}
               <div className="space-y-0.5">
                 <div className="font-mono">
                   Blood component prepare: {box(Boolean(lab.prepTs), 'T&S')} PRC=
@@ -381,7 +434,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
         </div>
 
         {/* Lower Sections 7-10 */}
-        <div className="p-2 space-y-1 border-b border-slate-900">
+        <div className="p-2 space-y-1">
           <div>
             <span className="font-bold">7. ASA Classification:</span>{' '}
             {(['I', 'II', 'III', 'IV', 'V', 'VI'] as const).map((cls) =>
@@ -413,6 +466,15 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
               )}
               {ap.raOther && <span>({ap.raOther})</span>}
             </span>
+            {ap.macSelected && (
+              <>
+                <br />
+                <span className="pl-24 inline-block">
+                  {box(Boolean(ap.macSelected), 'MAC (Monitored Anesthesia Care)')}
+                  {ap.macDetail && <span>({ap.macDetail})</span>}
+                </span>
+              </>
+            )}
           </div>
           <div>
             <span className="font-bold">10. สิ่งที่ต้องเตรียม (ตาม order วิสัญญีแพทย์):</span>{' '}
@@ -422,37 +484,6 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                   .map((ord, i) => `${i + 1}) ${ord}`)
                   .join(' · ')
               : '—'}
-          </div>
-        </div>
-
-        {/* Post Anesthesia Evaluation */}
-        <div className="p-2 space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="font-bold border border-slate-800 px-2 py-0.5">
-              Post Anesthesia Evaluation
-            </span>
-            <span>
-              Summarized by: <strong>{pa.summarizedBy || '________________'}</strong> &nbsp; date:{' '}
-              <strong className="font-mono">{pa.summarizedDate || '________'}</strong>
-            </span>
-          </div>
-          <div className="font-mono">
-            Vital signs: BP=<strong>{pa.bp || '_____'}</strong>mmHg · P=
-            <strong>{pa.pulse || '___'}</strong>bpm · RR=<strong>{pa.rr || '__'}</strong>bpm · T=
-            <strong>{pa.temp || '__._'}</strong>°C · SpO2=<strong>{pa.spo2 || '__'}</strong>% · PS=
-            <strong>{pa.painScore || '__'}</strong> คะแนน
-          </div>
-          <div className="flex items-center justify-between">
-            <span>
-              <span className="font-semibold">Post anesthesia complication:</span>{' '}
-              {mark(pa.complicationStatus === 'no', 'No')}
-              {mark(pa.complicationStatus === 'yes', 'Yes')}
-              {pa.complicationDetail}
-            </span>
-            <span>
-              visit by: <strong>{pa.visitBy || '________________'}</strong> &nbsp; date:{' '}
-              <strong className="font-mono">{pa.visitDate || '________'}</strong>
-            </span>
           </div>
         </div>
       </div>

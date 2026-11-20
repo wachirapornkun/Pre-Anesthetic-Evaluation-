@@ -54,9 +54,9 @@ service cloud.firestore {
         && h.keys().hasOnly([
           'presentIllness', 'pastIllness',
           'allergyStatus', 'allergyDetail',
-          'underlyingStatus', 'dm', 'dmYears', 'ht', 'htYears',
-          'dlp', 'dlpYears', 'ckd', 'ckdYears',
-          'heartDisease', 'heartDiseaseYears', 'otherUnderlying',
+          'underlyingStatus', 'dm', 'dmYears', 'dmDetail', 'ht', 'htYears', 'htDetail',
+          'dlp', 'dlpYears', 'dlpDetail', 'ckd', 'ckdYears', 'ckdDetail',
+          'heartDisease', 'heartDiseaseYears', 'heartDiseaseDetail', 'otherUnderlying', 'underlyingDetail',
           'medication',
           'previousOps', 'previousOpComplication',
           'drinkingStatus', 'drinkingDaysPerWeek', 'drinkingYears', 'drinkingDurationUnit',
@@ -74,15 +74,21 @@ service cloud.firestore {
         && (h.underlyingStatus in ['none', 'no', 'yes'])
         && h.dm is bool
         && isStr(h.dmYears, 0, 20)
+        && (!('dmDetail' in h) || isStr(h.dmDetail, 0, 200))
         && h.ht is bool
         && isStr(h.htYears, 0, 20)
+        && (!('htDetail' in h) || isStr(h.htDetail, 0, 200))
         && (!('dlp' in h) || h.dlp is bool)
         && (!('dlpYears' in h) || isStr(h.dlpYears, 0, 20))
+        && (!('dlpDetail' in h) || isStr(h.dlpDetail, 0, 200))
         && (!('ckd' in h) || h.ckd is bool)
         && (!('ckdYears' in h) || isStr(h.ckdYears, 0, 20))
+        && (!('ckdDetail' in h) || isStr(h.ckdDetail, 0, 200))
         && h.heartDisease is bool
         && isStr(h.heartDiseaseYears, 0, 20)
+        && (!('heartDiseaseDetail' in h) || isStr(h.heartDiseaseDetail, 0, 200))
         && isBoundedStringList(h.otherUnderlying, 8, 120)
+        && (!('underlyingDetail' in h) || isStr(h.underlyingDetail, 0, 500))
         && isStr(h.medication, 0, 1000)
         && isBoundedStringList(h.previousOps, 8, 250)
         && isStr(h.previousOpComplication, 0, 500)
@@ -227,7 +233,7 @@ service cloud.firestore {
           'na', 'k', 'cl', 'co2', 'bun', 'cr',
           'pt', 'ptt', 'inr',
           'sgot', 'sgpt', 'alp', 'alb',
-          'glucose', 'hba1c', 'other',
+          'glucose', 'hba1c', 'antiHiv', 'lactate', 'tropI', 'other', 'customLabs',
           'prepTs', 'prepPrc', 'prepFfp', 'prepPlt',
           'prepStatuses', 'prepStatusDetail'
         ])
@@ -252,7 +258,23 @@ service cloud.firestore {
         && isStr(lab.alb, 0, 20)
         && isStr(lab.glucose, 0, 20)
         && isStr(lab.hba1c, 0, 20)
+        && (!('antiHiv' in lab) || (lab.antiHiv in ['', 'negative', 'positive']))
+        && (!('lactate' in lab) || isStr(lab.lactate, 0, 20))
+        && (!('tropI' in lab) || isStr(lab.tropI, 0, 20))
         && isStr(lab.other, 0, 400)
+        && (!('customLabs' in lab) || (
+          lab.customLabs is list
+          && lab.customLabs.size() <= 15
+          && (
+            lab.customLabs.size() == 0 || (
+              lab.customLabs[0] is map
+              && lab.customLabs[0].keys().hasAll(['name', 'value'])
+              && lab.customLabs[0].keys().hasOnly(['name', 'value'])
+              && isStr(lab.customLabs[0].name, 0, 60)
+              && isStr(lab.customLabs[0].value, 0, 80)
+            )
+          )
+        ))
         && (!('prepTs' in lab) || lab.prepTs is bool)
         && isStr(lab.prepPrc, 0, 20)
         && isStr(lab.prepFfp, 0, 20)
@@ -282,7 +304,8 @@ service cloud.firestore {
         ])
         && ap.keys().hasOnly([
           'gaSelected', 'gaMethods', 'gaOther',
-          'raSelected', 'raMethods', 'raOther'
+          'raSelected', 'raMethods', 'raOther',
+          'macSelected', 'macDetail'
         ])
         && ap.gaSelected is bool
         && ap.gaMethods is list
@@ -293,7 +316,9 @@ service cloud.firestore {
         && ap.raMethods is list
         && ap.raMethods.size() <= 4
         && ap.raMethods.hasOnly(['Spinal block', 'Epidural', 'Nerve block', 'Other'])
-        && isStr(ap.raOther, 0, 200);
+        && isStr(ap.raOther, 0, 200)
+        && (!('macSelected' in ap) || ap.macSelected is bool)
+        && (!('macDetail' in ap) || isStr(ap.macDetail, 0, 200));
     }
 
     function isValidPostAnesthesia(pa) {
@@ -324,6 +349,78 @@ service cloud.firestore {
         && isStr(pa.visitDate, 0, 32);
     }
 
+    function isValidPostOpComplicationKeyList(arr) {
+      return arr is list
+        && arr.size() <= 47
+        && arr.hasOnly([
+          'airway_dental_injury', 'anaphylaxis', 'awareness',
+          'blood_mismatch_transfusion_reaction', 'bradycardia', 'bronchospasm',
+          'burn', 'cardiac_arrhythmia', 'cardiac_arrest',
+          'delayed_emergence', 'delirium_agitation', 'desaturation',
+          'difficult_intubation', 'drug_error', 'equipment_malfunction',
+          'esophageal_intubation', 'eye_injury', 'failed_intubation',
+          'hoarseness_of_voice', 'hypertension', 'hypotension', 'malignant_hyperthermia',
+          'massive_blood_loss', 'narcotic_overdose', 'nerve_injury',
+          'oliguria', 'hypothermia', 'hypovolemic_shock',
+          'itching', 'laryngospasm', 'myocardial_ischemia',
+          'nausea_vomiting', 'one_lung_intubation', 'pain_score_gt4',
+          'pdph',
+          'pneumothorax', 'prolong_nmb', 'pulmonary_aspiration',
+          'pulmonary_edema', 'pulmonary_embolism', 'reintubation',
+          'shivering', 'sore_throat', 'tachycardia',
+          'total_spinal_block', 'volume_overload', 'other_complication'
+        ]);
+    }
+
+    function isValidPostOpComplication(pc) {
+      return pc is map
+        && pc.keys().hasAll([
+          'periOpComplications', 'postOpComplications',
+          'difficultIntubationGrade', 'painScoreDetail',
+          'noneProblem', 'outcomes', 'incidentTypes',
+          'severityLevel', 'administrationErrors', 'remark',
+          'periOpRecorder', 'periOpDate', 'periOpTime',
+          'postOpRecorder', 'postOpDate', 'postOpTime'
+        ])
+        && pc.keys().hasOnly([
+          'periOpComplications', 'postOpComplications',
+          'difficultIntubationGrade', 'painScoreDetail', 'otherComplicationDetail',
+          'noneProblem', 'outcomes', 'incidentTypes',
+          'severityLevel', 'administrationErrors', 'remark',
+          'periOpRecorder', 'periOpDate', 'periOpTime',
+          'postOpRecorder', 'postOpDate', 'postOpTime'
+        ])
+        && isValidPostOpComplicationKeyList(pc.periOpComplications)
+        && isValidPostOpComplicationKeyList(pc.postOpComplications)
+        && isStr(pc.difficultIntubationGrade, 0, 30)
+        && isStr(pc.painScoreDetail, 0, 30)
+        && (!('otherComplicationDetail' in pc) || isStr(pc.otherComplicationDetail, 0, 200))
+        && pc.noneProblem is bool
+        && pc.outcomes is list
+        && pc.outcomes.size() <= 8
+        && pc.outcomes.hasOnly([
+          'cancelled_before_start', 'cancelled_after_start', 'dead_in_24hr',
+          'dot', 'refer', 'reintubation', 'plan_icu', 'unplan_icu'
+        ])
+        && pc.incidentTypes is list
+        && pc.incidentTypes.size() <= 2
+        && pc.incidentTypes.hasOnly(['clinical_risk', 'non_clinical_risk'])
+        && (pc.severityLevel in ['', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'])
+        && pc.administrationErrors is list
+        && pc.administrationErrors.size() <= 6
+        && pc.administrationErrors.hasOnly([
+          'right_patient', 'right_drug', 'right_dose',
+          'right_route', 'right_time', 'right_documentation'
+        ])
+        && isStr(pc.remark, 0, 1000)
+        && isStr(pc.periOpRecorder, 0, 120)
+        && isStr(pc.periOpDate, 0, 32)
+        && isStr(pc.periOpTime, 0, 32)
+        && isStr(pc.postOpRecorder, 0, 120)
+        && isStr(pc.postOpDate, 0, 32)
+        && isStr(pc.postOpTime, 0, 32);
+    }
+
     function isValidFormData(fd) {
       return fd is map
         && fd.keys().hasAll([
@@ -334,7 +431,7 @@ service cloud.firestore {
         && fd.keys().hasOnly([
           'history', 'physicalExam', 'investigation', 'laboratory',
           'premedication', 'consult', 'problemList', 'anestheticPlan',
-          'preparationOrders', 'postAnesthesia'
+          'preparationOrders', 'postAnesthesia', 'postOpComplication'
         ])
         && isValidHistory(fd.history)
         && isValidPhysicalExam(fd.physicalExam)
@@ -345,7 +442,8 @@ service cloud.firestore {
         && isBoundedStringList(fd.problemList, 12, 250)
         && isValidAnestheticPlan(fd.anestheticPlan)
         && isBoundedStringList(fd.preparationOrders, 12, 250)
-        && isValidPostAnesthesia(fd.postAnesthesia);
+        && isValidPostAnesthesia(fd.postAnesthesia)
+        && (!('postOpComplication' in fd) || isValidPostOpComplication(fd.postOpComplication));
     }
 
     function isValidEvaluation(data) {
@@ -356,7 +454,7 @@ service cloud.firestore {
           'hasComplication', 'anesthesiaType', 'formData', 'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'id', 'ownerId', 'status', 'patientName', 'hn', 'an', 'age', 'ward',
+          'id', 'ownerId', 'status', 'patientName', 'hn', 'an', 'age', 'gender', 'ward', 'specialty',
           'dateOfVisit', 'dateOfOperation', 'operationTime', 'scheduleType', 'orRoom', 'caseOrder',
           'surgeon', 'diagnosis', 'operation',
           'asaClass', 'asaEmergency', 'expectedDifficultAirway',
@@ -369,7 +467,9 @@ service cloud.firestore {
         && isStr(data.hn, 0, 40)
         && isStr(data.an, 0, 40)
         && isStr(data.age, 0, 16)
+        && (!('gender' in data) || (data.gender in ['', 'male', 'female']))
         && isStr(data.ward, 0, 80)
+        && (!('specialty' in data) || isStr(data.specialty, 0, 80))
         && isStr(data.dateOfVisit, 0, 32)
         && isStr(data.dateOfOperation, 0, 32)
         && (!('operationTime' in data) || isStr(data.operationTime, 0, 32))
@@ -383,7 +483,7 @@ service cloud.firestore {
         && data.asaEmergency is bool
         && data.expectedDifficultAirway is bool
         && data.hasComplication is bool
-        && (data.anesthesiaType in ['', 'GA', 'RA', 'GA+RA'])
+        && (data.anesthesiaType in ['', 'GA', 'RA', 'GA+RA', 'MAC'])
         && isValidFormData(data.formData)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -460,6 +560,16 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidSpecialtyCatalog(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'specialties', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerId', 'specialties', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && isValidId(data.ownerId)
+        && isBoundedStringList(data.specialties, 40, 80)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // 3. Collection Match Block: /evaluations/{evaluationId}
     match /evaluations/{evaluationId} {
       allow get: if isVerifiedUser()
@@ -489,7 +599,7 @@ service cloud.firestore {
         && (
           // Action 1: Edit evaluation content
           incoming().diff(existing()).affectedKeys().hasOnly([
-            'status', 'patientName', 'hn', 'an', 'age', 'ward',
+            'status', 'patientName', 'hn', 'an', 'age', 'gender', 'ward', 'specialty',
             'dateOfVisit', 'dateOfOperation', 'operationTime', 'scheduleType', 'orRoom', 'caseOrder',
             'surgeon', 'diagnosis', 'operation',
             'asaClass', 'asaEmergency', 'expectedDifficultAirway',
@@ -696,6 +806,39 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly(['visitors', 'updatedAt']);
+
+      allow delete: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && existing().ownerId == request.auth.uid;
+    }
+
+    // 10. Collection Match Block: /specialtyCatalogs/{catalogId}
+    match /specialtyCatalogs/{catalogId} {
+      allow get: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && (resource == null || existing().ownerId == request.auth.uid);
+
+      allow create: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && isValidSpecialtyCatalog(incoming())
+        && incoming().id == catalogId
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(catalogId)
+        && catalogId == request.auth.uid
+        && isValidSpecialtyCatalog(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().id == existing().id
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['specialties', 'updatedAt']);
 
       allow delete: if isVerifiedUser()
         && isValidId(catalogId)

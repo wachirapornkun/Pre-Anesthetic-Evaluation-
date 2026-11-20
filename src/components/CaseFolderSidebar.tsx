@@ -3,6 +3,8 @@ import { Calendar, ChevronDown, ChevronRight, FilePlus2, FolderOpen, Plus, Searc
 import {
   compareByDateAndSurgeon,
   formatThaiScheduleDate,
+  getEffectiveEvaluationStatus,
+  getPostOpVisitCompleteness,
   PreAnestheticEvaluation,
 } from '../types/evaluation';
 
@@ -60,12 +62,13 @@ export function CaseFolderSidebar({
         if (wardFilter !== 'ALL' && (r.ward || '').trim() !== wardFilter) {
           return false;
         }
-        if (statusFilter === 'draft' && r.status !== 'draft') return false;
+        const effStatus = getEffectiveEvaluationStatus(r);
+        if (statusFilter === 'draft' && effStatus !== 'draft') return false;
         if (
           statusFilter === 'evaluated' &&
-          r.status !== 'evaluated' &&
-          r.status !== 'post_op_completed' &&
-          r.status !== 'locked'
+          effStatus !== 'evaluated' &&
+          effStatus !== 'post_op_completed' &&
+          effStatus !== 'locked'
         ) {
           return false;
         }
@@ -119,12 +122,19 @@ export function CaseFolderSidebar({
     setCollapsedDates((prev) => ({ ...prev, [dateKey]: !prev[dateKey] }));
   };
 
-  const statusMeta = (status: PreAnestheticEvaluation['status']) => {
-    switch (status) {
+  const statusMeta = (item: PreAnestheticEvaluation) => {
+    const effStatus = getEffectiveEvaluationStatus(item);
+    const postOp = getPostOpVisitCompleteness(item.formData?.postAnesthesia);
+    switch (effStatus) {
       case 'post_op_completed':
-        return { label: 'Post-Op แล้ว', cls: 'text-emerald-700' };
+        return { label: 'เยี่ยม Post-Op แล้ว', cls: 'text-emerald-700' };
       case 'evaluated':
-        return { label: 'เยี่ยม Pre-Op แล้ว', cls: 'text-blue-800' };
+        return {
+          label: postOp.hasAnyInput
+            ? 'Pre-Op แล้ว · ยังไม่เยี่ยม Post-Op (ไม่ครบ)'
+            : 'Pre-Op แล้ว · ยังไม่เยี่ยม Post-Op',
+          cls: 'text-blue-800',
+        };
       case 'locked':
         return { label: 'ปิดบันทึก', cls: 'text-slate-600' };
       default:
@@ -372,7 +382,7 @@ export function CaseFolderSidebar({
                         <div className="divide-y divide-slate-100">
                           {sGroup.items.map((item) => {
                             const isActive = item.id === activeId;
-                            const st = statusMeta(item.status);
+                            const st = statusMeta(item);
                             return (
                               <button
                                 key={item.id}

@@ -18,7 +18,9 @@ import {
   compareElectiveSchedule,
   computeClinicalSummary,
   formatThaiScheduleDate,
+  getEffectiveEvaluationStatus,
   getEffectiveScheduleType,
+  getPostOpVisitCompleteness,
   getTodayIsoDate,
   OR_ROOM_OPTIONS,
   PreAnestheticEvaluation,
@@ -106,10 +108,11 @@ export function ElectiveScheduleView({
     const tomorrowCount = records.filter(
       (r) => (r.dateOfOperation || '').trim() === tomorrow,
     ).length;
-    const pendingCount = records.filter((r) => r.status === 'draft').length;
-    const evaluatedCount = records.filter(
-      (r) => r.status === 'evaluated' || r.status === 'post_op_completed' || r.status === 'locked',
-    ).length;
+    const pendingCount = records.filter((r) => getEffectiveEvaluationStatus(r) === 'draft').length;
+    const evaluatedCount = records.filter((r) => {
+      const st = getEffectiveEvaluationStatus(r);
+      return st === 'evaluated' || st === 'post_op_completed' || st === 'locked';
+    }).length;
     const uniqueDates = new Set(
       records.map((r) => (r.dateOfOperation || '').trim()).filter(Boolean),
     );
@@ -138,7 +141,7 @@ export function ElectiveScheduleView({
       if (dateScope === 'upcoming' && (!opDate || opDate < today)) return false;
       if (dateScope === 'today' && opDate !== today) return false;
       if (dateScope === 'tomorrow' && opDate !== tomorrow) return false;
-      if (dateScope === 'pending_preop' && r.status !== 'draft') return false;
+      if (dateScope === 'pending_preop' && getEffectiveEvaluationStatus(r) !== 'draft') return false;
       if (dateScope === 'past' && (!opDate || opDate >= today)) return false;
 
       if (surgeonFilter !== 'ALL') {
@@ -213,15 +216,25 @@ export function ElectiveScheduleView({
   }, [filteredAndSorted]);
 
   const statusLabel = (r: PreAnestheticEvaluation) => {
-    switch (r.status) {
+    const effStatus = getEffectiveEvaluationStatus(r);
+    const postOp = getPostOpVisitCompleteness(r.formData?.postAnesthesia);
+    switch (effStatus) {
       case 'post_op_completed':
-        return { text: 'เยี่ยม Post-Op แล้ว', cls: 'text-emerald-800' };
+        return { text: 'เยี่ยมหลังผ่าตัดแล้ว', cls: 'text-emerald-800' };
       case 'evaluated':
-        return { text: 'เยี่ยม Pre-Op แล้ว', cls: 'text-blue-800' };
+        return {
+          text: postOp.hasAnyInput
+            ? `เยี่ยม Pre-Op แล้ว · ยังไม่ได้เยี่ยมหลังผ่าตัด (ไม่ครบ ${postOp.filledCount}/${postOp.totalRequired})`
+            : 'เยี่ยม Pre-Op แล้ว · ยังไม่ได้เยี่ยมหลังผ่าตัด',
+          cls: 'text-blue-800',
+        };
       case 'locked':
         return { text: 'ปิดบันทึกแล้ว', cls: 'text-slate-700' };
       default:
-        return { text: 'บันทึกข้อมูลบางส่วน (รอไปเยี่ยมที่หอผู้ป่วย)', cls: 'text-amber-700' };
+        return {
+          text: 'บันทึกข้อมูลบางส่วน (รอไปเยี่ยมที่หอผู้ป่วย · ยังไม่ได้เยี่ยมหลังผ่าตัด)',
+          cls: 'text-amber-700',
+        };
     }
   };
 

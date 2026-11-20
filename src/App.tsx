@@ -32,6 +32,8 @@ import { CaseFolderSidebar } from './components/CaseFolderSidebar';
 import { ClinicalSummaryBar } from './components/ClinicalSummaryBar';
 import { DashboardView } from './components/DashboardView';
 import { ElectiveScheduleView } from './components/ElectiveScheduleView';
+import { PostOpA4PrintSheet } from './components/PostOpA4PrintSheet';
+import { PostOpEvaluationForm } from './components/PostOpEvaluationForm';
 import { PreAnestheticForm } from './components/PreAnestheticForm';
 import { RegistryView } from './components/RegistryView';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from './firebase';
@@ -43,11 +45,13 @@ import {
   createSampleEvaluations,
   DEFAULT_MEDICATION_GROUPS,
   DEFAULT_OXYGEN_OTHER_PRESETS,
+  DEFAULT_SPECIALTY_LIST,
   DEFAULT_SUMMARIZER_LIST,
   DEFAULT_SURGEON_LIST,
   DEFAULT_WARD_LIST,
   formatThaiScheduleDate,
   generateEvaluationId,
+  getEffectiveEvaluationStatus,
   getTodayIsoDate,
   MedicationGroup,
   OR_ROOM_OPTIONS,
@@ -55,6 +59,7 @@ import {
   sanitizeEvaluationForFirestore,
   sanitizeMedicationGroups,
   sanitizeOxygenPresets,
+  sanitizeSpecialtyList,
   sanitizeSummarizerList,
   sanitizeSurgeonList,
   sanitizeWardList,
@@ -62,7 +67,8 @@ import {
 } from './types/evaluation';
 import { exportEvaluationJson, exportEvaluationsCsv, exportSingleHtmlReport } from './utils/exportReports';
 
-type ActiveTab = 'form' | 'schedule' | 'dashboard' | 'registry' | 'print_preview';
+type ActiveTab = 'form' | 'post_op' | 'schedule' | 'dashboard' | 'registry' | 'print_preview';
+type PrintSheetMode = 'pre_op' | 'post_op' | 'both';
 
 interface NewFormScheduleDraft {
   dateOfOperation: string;
@@ -92,6 +98,7 @@ function loadSavedLocalRecords(): PreAnestheticEvaluation[] {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('form');
+  const [printSheetMode, setPrintSheetMode] = useState<PrintSheetMode>('both');
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [cloudRecords, setCloudRecords] = useState<PreAnestheticEvaluation[]>([]);
@@ -121,6 +128,7 @@ export default function App() {
   const [hasCloudOxygenCatalog, setHasCloudOxygenCatalog] = useState(false);
   const [hasCloudSummarizerCatalog, setHasCloudSummarizerCatalog] = useState(false);
   const [hasCloudVisitorCatalog, setHasCloudVisitorCatalog] = useState(false);
+  const [hasCloudSpecialtyCatalog, setHasCloudSpecialtyCatalog] = useState(false);
   const [wardOptions, setWardOptions] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('bph_ward_list_v1');
@@ -129,6 +137,15 @@ export default function App() {
       // ignore storage error
     }
     return [...DEFAULT_WARD_LIST];
+  });
+  const [specialtyOptions, setSpecialtyOptions] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('bph_specialty_list_v1');
+      if (saved) return sanitizeSpecialtyList(JSON.parse(saved));
+    } catch {
+      // ignore storage error
+    }
+    return [...DEFAULT_SPECIALTY_LIST];
   });
   const [surgeonOptions, setSurgeonOptions] = useState<string[]>(() => {
     try {
@@ -241,8 +258,9 @@ export default function App() {
           const phys = raw.formData?.physicalExam;
           const emptyOx = createEmptyOxygenSupport();
           const rawOx = phys?.oxygenSupport;
-          items.push({
+          const hydrated: PreAnestheticEvaluation = {
             ...raw,
+            specialty: raw.specialty ?? '',
             operationTime: raw.operationTime ?? '',
             scheduleType:
               raw.scheduleType === 'emergency' ||
@@ -256,10 +274,16 @@ export default function App() {
               ...raw.formData,
               history: {
                 ...hist,
+                dmDetail: hist?.dmDetail ?? '',
+                htDetail: hist?.htDetail ?? '',
                 dlp: Boolean(hist?.dlp),
                 dlpYears: hist?.dlpYears ?? '',
+                dlpDetail: hist?.dlpDetail ?? '',
                 ckd: Boolean(hist?.ckd),
                 ckdYears: hist?.ckdYears ?? '',
+                ckdDetail: hist?.ckdDetail ?? '',
+                heartDiseaseDetail: hist?.heartDiseaseDetail ?? '',
+                underlyingDetail: hist?.underlyingDetail ?? '',
                 drinkingDaysPerWeek: hist?.drinkingDaysPerWeek ?? '',
                 drinkingDurationUnit: hist?.drinkingDurationUnit === 'months' ? 'months' : 'years',
                 drinkingQuit: Boolean(hist?.drinkingQuit),
@@ -296,6 +320,19 @@ export default function App() {
               },
               laboratory: {
                 ...raw.formData?.laboratory,
+                antiHiv:
+                  raw.formData?.laboratory?.antiHiv === 'negative' ||
+                  raw.formData?.laboratory?.antiHiv === 'positive'
+                    ? raw.formData.laboratory.antiHiv
+                    : '',
+                lactate: raw.formData?.laboratory?.lactate ?? '',
+                tropI: raw.formData?.laboratory?.tropI ?? '',
+                customLabs: Array.isArray(raw.formData?.laboratory?.customLabs)
+                  ? raw.formData.laboratory.customLabs.map((item) => ({
+                      name: item?.name ?? '',
+                      value: item?.value ?? '',
+                    }))
+                  : [],
                 prepTs: Boolean(raw.formData?.laboratory?.prepTs),
                 prepStatuses: Array.isArray(raw.formData?.laboratory?.prepStatuses)
                   ? raw.formData.laboratory.prepStatuses
@@ -303,6 +340,10 @@ export default function App() {
                 prepStatusDetail: raw.formData?.laboratory?.prepStatusDetail ?? '',
               },
             },
+          };
+          items.push({
+            ...hydrated,
+            status: getEffectiveEvaluationStatus(hydrated),
           });
         });
         items.sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
@@ -783,6 +824,82 @@ export default function App() {
     }
   };
 
+  // Attach Firestore listener for customizable specialty catalog when authenticated
+  useEffect(() => {
+    if (!authReady || !user) {
+      setHasCloudSpecialtyCatalog(false);
+      return;
+    }
+
+    const specialtyCatalogPath = `specialtyCatalogs/${user.uid}`;
+    const specialtyCatalogRef = doc(db, 'specialtyCatalogs', user.uid);
+    const unsubscribe = onSnapshot(
+      specialtyCatalogRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          setHasCloudSpecialtyCatalog(true);
+          const data = docSnap.data();
+          const sanitized = sanitizeSpecialtyList(data?.specialties);
+          setSpecialtyOptions(sanitized);
+          try {
+            localStorage.setItem('bph_specialty_list_v1', JSON.stringify(sanitized));
+          } catch {
+            // ignore storage error
+          }
+        } else {
+          setHasCloudSpecialtyCatalog(false);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, specialtyCatalogPath);
+      },
+    );
+
+    return () => unsubscribe();
+  }, [authReady, user]);
+
+  const handleUpdateSpecialtyOptions = async (nextSpecialties: string[]) => {
+    const clean = sanitizeSpecialtyList(nextSpecialties);
+    setSpecialtyOptions(clean);
+    try {
+      localStorage.setItem('bph_specialty_list_v1', JSON.stringify(clean));
+    } catch {
+      // ignore storage error
+    }
+
+    if (!user) {
+      showNotice('success', 'อัปเดตรายการสาขาเรียบร้อย');
+      return;
+    }
+
+    const specialtyCatalogPath = `specialtyCatalogs/${user.uid}`;
+    const specialtyCatalogRef = doc(db, 'specialtyCatalogs', user.uid);
+    try {
+      if (hasCloudSpecialtyCatalog) {
+        await updateDoc(specialtyCatalogRef, {
+          specialties: clean,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await setDoc(specialtyCatalogRef, {
+          id: user.uid,
+          ownerId: user.uid,
+          specialties: clean,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        setHasCloudSpecialtyCatalog(true);
+      }
+      showNotice('success', 'อัปเดตรายการสาขาเรียบร้อย');
+    } catch (error) {
+      handleFirestoreError(
+        error,
+        hasCloudSpecialtyCatalog ? OperationType.UPDATE : OperationType.CREATE,
+        specialtyCatalogPath,
+      );
+    }
+  };
+
   const records = user ? cloudRecords : localRecords;
   const savedIdSet = useMemo(() => new Set(records.map((r) => r.id)), [records]);
 
@@ -945,7 +1062,9 @@ export default function App() {
             hn: sanitized.hn,
             an: sanitized.an,
             age: sanitized.age,
+            gender: sanitized.gender ?? '',
             ward: sanitized.ward,
+            specialty: sanitized.specialty,
             dateOfVisit: sanitized.dateOfVisit,
             dateOfOperation: sanitized.dateOfOperation,
             operationTime: sanitized.operationTime,
@@ -1093,7 +1212,7 @@ export default function App() {
             Bangplee Pre-Anesthetic
           </button>
 
-          {/* Zone 2: 5 concise single-line nav links */}
+          {/* Zone 2: Concise single-line nav links */}
           <nav
             aria-label="หลัก"
             className="hidden md:flex items-center gap-5 text-sm font-medium text-slate-600"
@@ -1107,7 +1226,18 @@ export default function App() {
                   : 'border-transparent hover:text-slate-900'
               }`}
             >
-              แบบฟอร์มประเมิน
+              Pre-op
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('post_op')}
+              className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+                activeTab === 'post_op'
+                  ? 'border-blue-800 text-slate-950 font-semibold'
+                  : 'border-transparent hover:text-slate-900'
+              }`}
+            >
+              Post-op
             </button>
             <button
               type="button"
@@ -1129,7 +1259,7 @@ export default function App() {
                   : 'border-transparent hover:text-slate-900'
               }`}
             >
-              Dashboard สรุปผล
+              Dashboard
             </button>
             <button
               type="button"
@@ -1140,7 +1270,7 @@ export default function App() {
                   : 'border-transparent hover:text-slate-900'
               }`}
             >
-              ทะเบียนผู้ป่วย ({records.length})
+              ทะเบียน ({records.length})
             </button>
             <button
               type="button"
@@ -1151,7 +1281,7 @@ export default function App() {
                   : 'border-transparent hover:text-slate-900'
               }`}
             >
-              ตัวอย่างพิมพ์ A4
+              พิมพ์ A4
             </button>
           </nav>
 
@@ -1177,7 +1307,8 @@ export default function App() {
         <div className="md:hidden flex items-center gap-2 mt-2.5 overflow-x-auto pb-0.5">
           {(
             [
-              { key: 'form', label: 'แบบฟอร์ม' },
+              { key: 'form', label: 'Pre-op' },
+              { key: 'post_op', label: 'Post-op' },
               { key: 'schedule', label: 'แฟ้มวันผ่าตัด' },
               { key: 'dashboard', label: 'Dashboard' },
               { key: 'registry', label: `ทะเบียน (${records.length})` },
@@ -1264,7 +1395,7 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {activeTab === 'form' && (
+            {(activeTab === 'form' || activeTab === 'post_op') && (
               <button
                 type="button"
                 onClick={() => setShowFolderSidebar((prev) => !prev)}
@@ -1338,7 +1469,7 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 py-5 space-y-5">
-        {activeTab === 'form' && (
+        {(activeTab === 'form' || activeTab === 'post_op') && (
           <div
             className={
               showFolderSidebar
@@ -1353,31 +1484,86 @@ export default function App() {
                   activeId={currentForm.id}
                   surgeonOptions={surgeonOptions}
                   wardOptions={wardOptions}
-                  onSelectRecord={handleEditRecord}
+                  onSelectRecord={(rec) => {
+                    const keepPostOp = activeTab === 'post_op';
+                    handleEditRecord(rec);
+                    if (keepPostOp) setActiveTab('post_op');
+                  }}
                   onCreateNew={handleCreateNew}
                   onCreateNewForDate={handleCreateNewForDate}
                   onClose={() => setShowFolderSidebar(false)}
                 />
               </div>
             )}
-            <div className="min-w-0 space-y-5">
+            <div className="min-w-0 space-y-4">
               <ClinicalSummaryBar evaluation={currentForm} />
-              <PreAnestheticForm
-                value={currentForm}
-                onChange={setCurrentForm}
-                medicationGroups={medicationGroups}
-                onUpdateMedicationGroups={handleUpdateMedicationGroups}
-                wardOptions={wardOptions}
-                onUpdateWardOptions={handleUpdateWardOptions}
-                surgeonOptions={surgeonOptions}
-                onUpdateSurgeonOptions={handleUpdateSurgeonOptions}
-                oxygenPresets={oxygenPresets}
-                onUpdateOxygenPresets={handleUpdateOxygenPresets}
-                summarizerOptions={summarizerOptions}
-                onUpdateSummarizerOptions={handleUpdateSummarizerOptions}
-                visitorOptions={visitorOptions}
-                onUpdateVisitorOptions={handleUpdateVisitorOptions}
-              />
+
+              {/* Unified Patient Form Switcher: Pre-op vs Post-op (Same Patient Record) */}
+              <div className="no-print flex flex-wrap items-center justify-between gap-2">
+                <div className="inline-flex items-center gap-1 p-1 bg-slate-200/70 rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('form')}
+                    className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                      activeTab === 'form'
+                        ? 'bg-white text-slate-950 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Pre-op Evaluation (ANE-FM-002-03)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('post_op')}
+                    className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                      activeTab === 'post_op'
+                        ? 'bg-white text-slate-950 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Post-op Evaluation (ANE-FM-006-01)
+                  </button>
+                </div>
+                <span className="text-xs text-slate-500">
+                  เชื่อมข้อมูลผู้ป่วยคนเดียวกัน · กดบันทึกครั้งเดียวจัดเก็บครบทั้ง Pre-op และ Post-op
+                </span>
+              </div>
+
+              {activeTab === 'form' ? (
+                <PreAnestheticForm
+                  value={currentForm}
+                  onChange={setCurrentForm}
+                  medicationGroups={medicationGroups}
+                  onUpdateMedicationGroups={handleUpdateMedicationGroups}
+                  wardOptions={wardOptions}
+                  onUpdateWardOptions={handleUpdateWardOptions}
+                  specialtyOptions={specialtyOptions}
+                  onUpdateSpecialtyOptions={handleUpdateSpecialtyOptions}
+                  surgeonOptions={surgeonOptions}
+                  onUpdateSurgeonOptions={handleUpdateSurgeonOptions}
+                  oxygenPresets={oxygenPresets}
+                  onUpdateOxygenPresets={handleUpdateOxygenPresets}
+                  onGoToPostOp={() => setActiveTab('post_op')}
+                />
+              ) : (
+                <PostOpEvaluationForm
+                  value={currentForm}
+                  onChange={setCurrentForm}
+                  records={records}
+                  onSelectPatient={(rec) => {
+                    handleEditRecord(rec);
+                    setActiveTab('post_op');
+                  }}
+                  wardOptions={wardOptions}
+                  summarizerOptions={summarizerOptions}
+                  onUpdateSummarizerOptions={handleUpdateSummarizerOptions}
+                  visitorOptions={visitorOptions}
+                  onUpdateVisitorOptions={handleUpdateVisitorOptions}
+                  onGoToPreOp={() => setActiveTab('form')}
+                  onSave={handleSave}
+                  isSaving={isSaving}
+                />
+              )}
             </div>
           </div>
         )}
@@ -1406,6 +1592,10 @@ export default function App() {
             onCreateNew={handleCreateNew}
             onLoadSamples={handleLoadSamples}
             onSelectRecord={handleEditRecord}
+            onSelectRecordPostOp={(rec) => {
+              handleEditRecord(rec);
+              setActiveTab('post_op');
+            }}
           />
         )}
 
@@ -1427,13 +1617,37 @@ export default function App() {
         {activeTab === 'print_preview' && (
           <div className="space-y-4">
             <div className="no-print bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-900">
-                  ตัวอย่างแบบฟอร์ม 1 หน้ากระดาษ A4 (ANE-FM-002-03)
-                </h2>
-                <p className="text-xs text-slate-500">
-                  จัดหน้ากระดาษให้ครบทุกหัวข้อใน 1 หน้า A4 พร้อมสั่งพิมพ์หรือบันทึกเป็น PDF ได้ทันที
-                </p>
+              <div className="space-y-2">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-900">
+                    ตัวอย่างแบบฟอร์มกระดาษ A4 (Pre-op ANE-FM-002-03 &amp; Post-op ANE-FM-006-01)
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    เลือกแบบฟอร์มที่ต้องการดูตัวอย่าง สั่งพิมพ์ หรือบันทึกเป็น PDF ได้ทันที
+                  </p>
+                </div>
+                <div className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+                  {(
+                    [
+                      { key: 'pre_op', label: 'Pre-op (ANE-FM-002-03)' },
+                      { key: 'post_op', label: 'Post-op (ANE-FM-006-01)' },
+                      { key: 'both', label: 'ทั้ง 2 หน้า' },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => setPrintSheetMode(opt.key)}
+                      className={`px-3 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                        printSheetMode === opt.key
+                          ? 'bg-white text-slate-950 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -1462,14 +1676,26 @@ export default function App() {
                 </button>
               </div>
             </div>
-            <A4PrintSheet evaluation={currentForm} previewMode />
+            {(printSheetMode === 'pre_op' || printSheetMode === 'both') && (
+              <A4PrintSheet evaluation={currentForm} previewMode />
+            )}
+            {(printSheetMode === 'post_op' || printSheetMode === 'both') && (
+              <PostOpA4PrintSheet
+                evaluation={currentForm}
+                previewMode
+                pageBreakBefore={printSheetMode === 'both'}
+              />
+            )}
           </div>
         )}
 
-        {/* Always-present hidden print sheet for 1-page A4 printing from any tab */}
-        {activeTab !== 'print_preview' && (
-          <A4PrintSheet evaluation={currentForm} previewMode={false} />
-        )}
+        {/* Always-present hidden print sheet matching active view */}
+        {activeTab !== 'print_preview' &&
+          (activeTab === 'post_op' ? (
+            <PostOpA4PrintSheet evaluation={currentForm} previewMode={false} />
+          ) : (
+            <A4PrintSheet evaluation={currentForm} previewMode={false} />
+          ))}
       </main>
 
       {/* New Form — Select Operation Date & Surgeon Modal */}

@@ -5,8 +5,13 @@ import {
   formatDrugAddictionDetail,
   formatOxygenSupportSummary,
   formatSmokingDetail,
+  formatThousandsWithCommas,
   formatToothMarksSummary,
+  formatUnderlyingDiseaseTag,
+  getEffectiveEvaluationStatus,
+  getMedicationLines,
   PreAnestheticEvaluation,
+  summarizePostOpComplications,
 } from '../types/evaluation';
 
 function escapeCsvCell(val: string | number | boolean): string {
@@ -24,6 +29,7 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
     'Name',
     'Age (yr)',
     'Ward',
+    'Specialty (สาขา)',
     'Date of Visit',
     'Date of Operation',
     'Operation Time',
@@ -72,6 +78,7 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
       r.patientName,
       r.age,
       r.ward,
+      r.specialty || '',
       r.dateOfVisit,
       r.dateOfOperation,
       r.operationTime || '',
@@ -110,8 +117,8 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
         : '',
       fd.laboratory.hb,
       fd.laboratory.hct,
-      fd.laboratory.wbc,
-      fd.laboratory.plt,
+      formatThousandsWithCommas(fd.laboratory.wbc),
+      formatThousandsWithCommas(fd.laboratory.plt),
       fd.laboratory.na,
       fd.laboratory.k,
       fd.laboratory.bun,
@@ -120,11 +127,13 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
       summary.planSummary,
       summary.bloodPrepSummary,
       fd.postAnesthesia.complicationStatus === 'yes'
-        ? fd.postAnesthesia.complicationDetail || 'Yes'
+        ? fd.postAnesthesia.complicationDetail || summarizePostOpComplications(fd.postOpComplication) || 'Yes'
+        : summarizePostOpComplications(fd.postOpComplication)
+        ? summarizePostOpComplications(fd.postOpComplication)
         : fd.postAnesthesia.complicationStatus === 'no'
         ? 'No'
         : '',
-      r.status,
+      getEffectiveEvaluationStatus(r),
     ]
       .map(escapeCsvCell)
       .join(',');
@@ -226,6 +235,7 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
         HN: <span class="val">${esc(record.hn || '-')}</span> &nbsp;
         AN: <span class="val">${esc(record.an || '-')}</span> &nbsp;
         Ward: <span class="val">${esc(record.ward || '-')}</span> &nbsp;
+        สาขา: <span class="val">${esc(record.specialty || '-')}</span> &nbsp;
         Date of visit: <span class="val">${esc(record.dateOfVisit || '-')}</span>
       </div>
       <div class="field">
@@ -245,14 +255,25 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
         <div class="field"><strong>1.3 Allergy:</strong> ${radioMark(h.allergyStatus === 'no', 'No')} ${radioMark(h.allergyStatus === 'yes', 'Yes')} <span class="val">${esc(h.allergyDetail)}</span></div>
         <div class="field"><strong>1.4 Underlying:</strong> ${radioMark(h.underlyingStatus === 'no', 'No')} ${radioMark(h.underlyingStatus === 'yes', 'Yes')}</div>
         <div class="field">
-          ${checkMark(h.dm, `DM ${h.dmYears ? `(${h.dmYears} ปี)` : ''}`)}
-          ${checkMark(h.ht, `HT ${h.htYears ? `(${h.htYears} ปี)` : ''}`)}
-          ${checkMark(Boolean(h.dlp), `DLP ${h.dlpYears ? `(${h.dlpYears} ปี)` : ''}`)}
-          ${checkMark(Boolean(h.ckd), `โรคไต ${h.ckdYears ? `(${h.ckdYears} ปี)` : ''}`)}
-          ${checkMark(h.heartDisease, `โรคหัวใจ ${h.heartDiseaseYears ? `(${h.heartDiseaseYears} ปี)` : ''}`)}
+          ${checkMark(h.dm, esc(formatUnderlyingDiseaseTag('DM', h.dmYears, h.dmDetail, 'ปี')))}
+          ${checkMark(h.ht, esc(formatUnderlyingDiseaseTag('HT', h.htYears, h.htDetail, 'ปี')))}
+          ${checkMark(Boolean(h.dlp), esc(formatUnderlyingDiseaseTag('DLP', h.dlpYears, h.dlpDetail, 'ปี')))}
+          ${checkMark(Boolean(h.ckd), esc(formatUnderlyingDiseaseTag('โรคไต', h.ckdYears, h.ckdDetail, 'ปี')))}
+          ${checkMark(h.heartDisease, esc(formatUnderlyingDiseaseTag('โรคหัวใจ', h.heartDiseaseYears, h.heartDiseaseDetail, 'ปี')))}
           ${h.otherUnderlying.filter(Boolean).map((u) => esc(u)).join(', ')}
         </div>
-        <div class="field"><strong>Medication:</strong> ${esc(h.medication || '-')}</div>
+        ${
+          h.underlyingDetail?.trim()
+            ? `<div class="field"><strong>รายละเอียดโรคประจำตัว:</strong> ${esc(h.underlyingDetail.trim())}</div>`
+            : ''
+        }
+        <div class="field"><strong>Medication:</strong>${
+          getMedicationLines(h.medication).length > 0
+            ? `<div style="margin-top:2px;padding-left:10px;line-height:1.35;">${getMedicationLines(h.medication)
+                .map((m) => `<div>${esc(m)}</div>`)
+                .join('')}</div>`
+            : ' -'
+        }</div>
         <div class="field"><strong>1.5 Previous operation / anesthesia:</strong> ${h.previousOps.filter(Boolean).map((op, i) => `${i + 1}) ${esc(op)}`).join(' ; ') || '-'}</div>
         <div class="field"><strong>Complication:</strong> ${esc(h.previousOpComplication || '-')}</div>
         <div class="field"><strong>1.6 Drinking:</strong> ${radioMark(h.drinkingStatus === 'no', 'No')} ${radioMark(h.drinkingStatus === 'yes', `Yes (${esc(formatDrinkingDetail(h))})`)}</div>
@@ -266,7 +287,8 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
 
         <div class="sec-title" style="margin-top:6px;">5. Premedication</div>
         <div class="field">${pm.items.filter(Boolean).map((item, i) => `${i + 1}. ${esc(item)}`).join('<br/>') || '-'}</div>
-        <div class="field"><strong>NPO time:</strong> ${esc(pm.npoTime || '-')} &nbsp; <strong>on IVF:</strong> ${esc(pm.onIvf || '-')}</div>
+        <div class="field" style="margin-top:4px;padding:4px 6px;border:1.5px solid #0f172a;background:#fffbeb;font-size:14px;font-weight:800;color:#991b1b;">NPO: ${esc(pm.npoTime || '__________________')}</div>
+        <div class="field"><strong>on IVF:</strong> ${esc(pm.onIvf || '-')}</div>
       </div>
 
       <div class="col-right">
@@ -293,17 +315,26 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
         <div class="sec-title" style="margin-top:6px;">4. Laboratory Evaluation</div>
         <table class="fish">
           <tr>
-            <td>Hb: ${esc(lab.hb || '-')}</td><td>WBC: ${esc(lab.wbc || '-')}</td><td>N: ${esc(lab.neutrophil || '-')}%</td>
+            <td>Hb: ${esc(lab.hb || '-')}</td><td>WBC: ${esc(formatThousandsWithCommas(lab.wbc) || '-')}</td><td>N: ${esc(lab.neutrophil || '-')}%</td>
             <td>Na: ${esc(lab.na || '-')}</td><td>K: ${esc(lab.k || '-')}</td><td>BUN: ${esc(lab.bun || '-')}</td>
           </tr>
           <tr>
-            <td>Hct: ${esc(lab.hct || '-')}</td><td>Plt: ${esc(lab.plt || '-')}</td><td>L: ${esc(lab.lymphocyte || '-')}%</td>
+            <td>Hct: ${esc(lab.hct || '-')}</td><td>Plt: ${esc(formatThousandsWithCommas(lab.plt) || '-')}</td><td>L: ${esc(lab.lymphocyte || '-')}%</td>
             <td>Cl: ${esc(lab.cl || '-')}</td><td>CO2: ${esc(lab.co2 || '-')}</td><td>Cr: ${esc(lab.cr || '-')}</td>
           </tr>
         </table>
         <div class="field"><strong>Coag:</strong> PT ${esc(lab.pt || '-')} s · PTT ${esc(lab.ptt || '-')} s · INR ${esc(lab.inr || '-')}</div>
         <div class="field"><strong>LFT:</strong> SGOT ${esc(lab.sgot || '-')} · SGPT ${esc(lab.sgpt || '-')} · ALP ${esc(lab.alp || '-')} · Alb ${esc(lab.alb || '-')}</div>
-        <div class="field"><strong>Glucose:</strong> ${esc(lab.glucose || '-')} mg/dl · <strong>HbA1C:</strong> ${esc(lab.hba1c || '-')} · <strong>Other:</strong> ${esc(lab.other || '-')}</div>
+        <div class="field"><strong>Glucose:</strong> ${esc(lab.glucose || '-')} mg/dl · <strong>HbA1C:</strong> ${esc(lab.hba1c || '-')} · <strong>Lactate:</strong> ${esc(lab.lactate || '-')} · <strong>Trop I:</strong> ${esc(lab.tropI || '-')}</div>
+        <div class="field"><strong>Anti-HIV:</strong> ${radioMark(lab.antiHiv === 'negative', 'Negative')} ${radioMark(lab.antiHiv === 'positive', 'Positive')}${lab.other ? ` · <strong>Other:</strong> ${esc(lab.other)}` : ''}</div>
+        ${
+          (lab.customLabs || []).some((c) => c.name.trim() || c.value.trim())
+            ? `<div class="field"><strong>Lab เพิ่มเติม:</strong> ${(lab.customLabs || [])
+                .filter((c) => c.name.trim() || c.value.trim())
+                .map((c) => `${esc(c.name.trim() || 'Lab')}: <span class="val">${esc(c.value.trim() || '-')}</span>`)
+                .join(' · ')}</div>`
+            : ''
+        }
         <div class="field"><strong>Blood component prepare:</strong> ${checkMark(Boolean(lab.prepTs), 'T&S')} PRC ${esc(lab.prepPrc || '-')} u · FFP ${esc(lab.prepFfp || '-')} u · Plt ${esc(lab.prepPlt || '-')} u<br/>${BLOOD_PREP_STATUS_OPTIONS.map((opt) =>
           checkMark(
             (lab.prepStatuses || []).includes(opt.value),
@@ -329,13 +360,20 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
     </div>
 
     <div class="row" style="border-bottom:none;">
+      <div class="field"><strong>Post-op Evaluation (ANE-FM-006-01):</strong> ${
+        fd.postOpComplication?.noneProblem
+          ? 'None problem'
+          : esc(summarizePostOpComplications(fd.postOpComplication) || '-')
+      }${fd.postOpComplication?.severityLevel ? ` · ระดับความรุนแรง: ${esc(fd.postOpComplication.severityLevel)}` : ''}${
+        fd.postOpComplication?.remark?.trim() ? ` · Remark: ${esc(fd.postOpComplication.remark.trim())}` : ''
+      }</div>
       <div class="field"><strong>Post Anesthesia Evaluation</strong> &nbsp; Summarized by: <span class="val">${esc(pa.summarizedBy || '-')}</span> Date: <span class="val">${esc(pa.summarizedDate || '-')}</span></div>
       <div class="field">Vital signs: BP ${esc(pa.bp || '-')} mmHg · P ${esc(pa.pulse || '-')} bpm · RR ${esc(pa.rr || '-')} bpm · T ${esc(pa.temp || '-')} °C · SpO2 ${esc(pa.spo2 || '-')} % · PS ${esc(pa.painScore || '-')} คะแนน</div>
       <div class="field"><strong>Post anesthesia complication:</strong> ${radioMark(pa.complicationStatus === 'no', 'No')} ${radioMark(pa.complicationStatus === 'yes', 'Yes')} ${esc(pa.complicationDetail)}</div>
       <div class="field" style="text-align:right;">visit by: <span class="val">${esc(pa.visitBy || '-')}</span> Date: <span class="val">${esc(pa.visitDate || '-')}</span></div>
     </div>
   </div>
-  <div class="footer-code">ANE-FM-002-03 อนุมัติใช้วันที่ 21 มิถุนายน 2564</div>
+  <div class="footer-code">ANE-FM-002-03 &amp; ANE-FM-006-01</div>
 </body>
 </html>`;
 

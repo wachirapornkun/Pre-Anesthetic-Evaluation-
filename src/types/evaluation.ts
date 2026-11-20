@@ -1,7 +1,8 @@
 export type EvaluationStatus = 'draft' | 'evaluated' | 'post_op_completed' | 'locked';
 export type ScheduleType = 'elective' | 'emergency';
 export type AsaClass = '' | 'I' | 'II' | 'III' | 'IV' | 'V' | 'VI';
-export type AnesthesiaSummaryType = '' | 'GA' | 'RA' | 'GA+RA';
+export type AnesthesiaSummaryType = '' | 'GA' | 'RA' | 'GA+RA' | 'MAC';
+export type PatientGender = '' | 'male' | 'female';
 
 export const OR_ROOM_OPTIONS = [
   'OR 1',
@@ -23,6 +24,7 @@ export type RaMethod = 'Spinal block' | 'Epidural' | 'Nerve block' | 'Other';
 export type DurationUnit = 'months' | 'years';
 export type OxygenSupportMode = '' | 'cannula' | 'mask_bag' | 'ett' | 'other';
 export type VentilatorMode = '' | 'vcv' | 'pcv';
+export type AntiHivStatus = '' | 'negative' | 'positive';
 export type BloodPrepStatus = 'no_blood' | 'ready' | 'not_ready' | 'waiting_red_cross' | 'other';
 
 export const BLOOD_PREP_STATUS_OPTIONS: readonly { value: BloodPrepStatus; label: string }[] = [
@@ -92,6 +94,21 @@ export const DEFAULT_WARD_LIST = [
 
 export const WARD_OPTIONS = [...DEFAULT_WARD_LIST, 'อื่นๆ'] as const;
 
+export const DEFAULT_SPECIALTY_LIST = [
+  'Sx',
+  'Obs',
+  'Ortho',
+  'Med',
+  'Maxillo',
+  'Plastic',
+  'GI med',
+  'Chest med',
+  'Neuro',
+  'Eye',
+  'ENT',
+  'Uro',
+] as const;
+
 export const DEFAULT_SURGEON_LIST = [
   'นพ.คริส ผลประเสริฐ',
   'นพ.ชยธร การุณวรรธนะ',
@@ -135,15 +152,21 @@ export interface HistoryData {
   underlyingStatus: TriStatus;
   dm: boolean;
   dmYears: string;
+  dmDetail: string;
   ht: boolean;
   htYears: string;
+  htDetail: string;
   dlp: boolean;
   dlpYears: string;
+  dlpDetail: string;
   ckd: boolean;
   ckdYears: string;
+  ckdDetail: string;
   heartDisease: boolean;
   heartDiseaseYears: string;
+  heartDiseaseDetail: string;
   otherUnderlying: string[];
+  underlyingDetail: string;
   medication: string;
   previousOps: string[];
   previousOpComplication: string;
@@ -224,6 +247,11 @@ export interface InvestigationData {
   other: string;
 }
 
+export interface CustomLabItem {
+  name: string;
+  value: string;
+}
+
 export interface LaboratoryData {
   hb: string;
   hct: string;
@@ -246,7 +274,11 @@ export interface LaboratoryData {
   alb: string;
   glucose: string;
   hba1c: string;
+  antiHiv: AntiHivStatus;
+  lactate: string;
+  tropI: string;
   other: string;
+  customLabs?: CustomLabItem[];
   prepTs: boolean;
   prepPrc: string;
   prepFfp: string;
@@ -268,6 +300,8 @@ export interface AnestheticPlanData {
   raSelected: boolean;
   raMethods: RaMethod[];
   raOther: string;
+  macSelected?: boolean;
+  macDetail?: string;
 }
 
 export interface PostAnesthesiaData {
@@ -285,6 +319,189 @@ export interface PostAnesthesiaData {
   visitDate: string;
 }
 
+export const POST_OP_LEFT_COMPLICATIONS = [
+  { key: 'airway_dental_injury', label: 'Air way / dental injury' },
+  { key: 'anaphylaxis', label: 'Anaphylaxis' },
+  { key: 'awareness', label: 'Awareness' },
+  { key: 'blood_mismatch_transfusion_reaction', label: 'Blood mismatch /Transfusion reaction' },
+  { key: 'bradycardia', label: 'Bradycardia' },
+  { key: 'bronchospasm', label: 'Bronchospasm' },
+  { key: 'burn', label: 'Burn' },
+  { key: 'cardiac_arrhythmia', label: 'Cardiac arrhythmia ( ต้อง Rx.)' },
+  { key: 'cardiac_arrest', label: 'Cardiac arrest' },
+  { key: 'delayed_emergence', label: 'Delayed emergence 30-60 นาที' },
+  { key: 'delirium_agitation', label: 'Delirium / agitation' },
+  { key: 'desaturation', label: 'Desaturation < 90% 3 นาที / PaO2/Fio2 < 300' },
+  { key: 'difficult_intubation', label: 'Difficult intubation', detailField: 'difficultIntubationGrade' as const },
+  { key: 'drug_error', label: 'Drug error' },
+  { key: 'equipment_malfunction', label: 'Equipment malfunction' },
+  { key: 'esophageal_intubation', label: 'Esophageal intubation' },
+  { key: 'eye_injury', label: 'Eye injury' },
+  { key: 'failed_intubation', label: 'Failed intubation' },
+  { key: 'hoarseness_of_voice', label: 'Hoarsness of voice' },
+  { key: 'hypertension', label: 'Hypertension' },
+  {
+    key: 'hypotension',
+    label:
+      'Hypotension (BP<90/60 mm.Hg และให้การรักษาด้วย Ephedrine>30 mg หรือ Levophed > 30 mcgหรือต้อง drip vassopressor /Inotrop drug เพิ่มจากระยะแรกที่ไม่ได้ drip )',
+  },
+  { key: 'malignant_hyperthermia', label: 'Malignant Hyperthermia' },
+  { key: 'massive_blood_loss', label: 'Massive blood loss' },
+  { key: 'narcotic_overdose', label: 'Narcotic overdose' },
+  { key: 'nerve_injury', label: 'Nerve injury' },
+  { key: 'oliguria', label: 'Oliguria' },
+  { key: 'hypothermia', label: 'Hypothermia ( T<36 °c )' },
+  { key: 'hypovolemic_shock', label: 'Hypovolemic shock' },
+  { key: 'itching', label: 'Itching' },
+  { key: 'laryngospasm', label: 'Laryngospasm' },
+  { key: 'myocardial_ischemia', label: 'Myocardial ishemia' },
+  { key: 'nausea_vomiting', label: 'Nausea & vomitting' },
+  { key: 'one_lung_intubation', label: 'One lung intubation' },
+  { key: 'pain_score_gt4', label: 'Pain score >4', detailField: 'painScoreDetail' as const },
+  { key: 'pdph', label: 'PDPH' },
+] as const;
+
+export const POST_OP_RIGHT_COMPLICATIONS = [
+  { key: 'pneumothorax', label: 'Pneumothorax' },
+  { key: 'prolong_nmb', label: 'Prolong NMB' },
+  { key: 'pulmonary_aspiration', label: 'Pulmonary aspiration' },
+  { key: 'pulmonary_edema', label: 'Pulmonary edema' },
+  { key: 'pulmonary_embolism', label: 'Pulmonary embolism' },
+  { key: 'reintubation', label: 'Reintubation' },
+  { key: 'shivering', label: 'Shivering' },
+  { key: 'sore_throat', label: 'Sore throat' },
+  { key: 'tachycardia', label: 'Tachycardia' },
+  { key: 'total_spinal_block', label: 'Total spinal block' },
+  { key: 'volume_overload', label: 'Volume overload' },
+  { key: 'other_complication', label: 'อื่นๆ', detailField: 'otherComplicationDetail' as const },
+] as const;
+
+export const POST_OP_ALL_COMPLICATIONS = [
+  ...POST_OP_LEFT_COMPLICATIONS,
+  ...POST_OP_RIGHT_COMPLICATIONS,
+] as const;
+
+export type PostOpComplicationKey = (typeof POST_OP_ALL_COMPLICATIONS)[number]['key'];
+
+export const POST_OP_COMPLICATION_KEY_LIST: PostOpComplicationKey[] = POST_OP_ALL_COMPLICATIONS.map(
+  (c) => c.key,
+);
+
+export const POST_OP_OUTCOME_OPTIONS = [
+  { key: 'cancelled_before_start', number: '1', label: 'Cancelled case ก่อนเริ่มเคส' },
+  { key: 'cancelled_after_start', number: '2', label: 'Cancelled เคส หลังเริ่มเคส' },
+  { key: 'dead_in_24hr', number: '3', label: 'Dead in 24 hr' },
+  { key: 'dot', number: '4', label: 'DOT' },
+  { key: 'refer', number: '5', label: 'Refer' },
+  { key: 'reintubation', number: '6', label: 'Reintubation' },
+  { key: 'plan_icu', number: '7', label: 'Plan ICU' },
+  { key: 'unplan_icu', number: '7', label: 'Unplan ICU' },
+] as const;
+
+export type PostOpOutcomeKey = (typeof POST_OP_OUTCOME_OPTIONS)[number]['key'];
+
+export const POST_OP_OUTCOME_KEY_LIST: PostOpOutcomeKey[] = POST_OP_OUTCOME_OPTIONS.map(
+  (o) => o.key,
+);
+
+export const POST_OP_INCIDENT_OPTIONS = [
+  { key: 'clinical_risk', label: 'Clinical risk' },
+  { key: 'non_clinical_risk', label: 'Non clinical risk' },
+] as const;
+
+export type PostOpIncidentType = (typeof POST_OP_INCIDENT_OPTIONS)[number]['key'];
+
+export const POST_OP_SEVERITY_LEVELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'] as const;
+export type PostOpSeverityLevel = '' | (typeof POST_OP_SEVERITY_LEVELS)[number];
+
+export const POST_OP_ADMIN_ERROR_OPTIONS = [
+  { key: 'right_patient', number: '1', label: 'Right Patient' },
+  { key: 'right_route', number: '4', label: 'Right Route' },
+  { key: 'right_drug', number: '2', label: 'Right Drug' },
+  { key: 'right_time', number: '5', label: 'Right Time' },
+  { key: 'right_dose', number: '3', label: 'Right Dose' },
+  { key: 'right_documentation', number: '6', label: 'Right Documentation' },
+] as const;
+
+export type AdministrationErrorKey = (typeof POST_OP_ADMIN_ERROR_OPTIONS)[number]['key'];
+
+export const POST_OP_ADMIN_ERROR_KEY_LIST: AdministrationErrorKey[] =
+  POST_OP_ADMIN_ERROR_OPTIONS.map((a) => a.key);
+
+export interface PostOpComplicationData {
+  periOpComplications: PostOpComplicationKey[];
+  postOpComplications: PostOpComplicationKey[];
+  difficultIntubationGrade: string;
+  painScoreDetail: string;
+  otherComplicationDetail?: string;
+  noneProblem: boolean;
+  outcomes: PostOpOutcomeKey[];
+  incidentTypes: PostOpIncidentType[];
+  severityLevel: PostOpSeverityLevel;
+  administrationErrors: AdministrationErrorKey[];
+  remark: string;
+  periOpRecorder: string;
+  periOpDate: string;
+  periOpTime: string;
+  postOpRecorder: string;
+  postOpDate: string;
+  postOpTime: string;
+}
+
+export function createEmptyPostOpComplication(): PostOpComplicationData {
+  return {
+    periOpComplications: [],
+    postOpComplications: [],
+    difficultIntubationGrade: '',
+    painScoreDetail: '',
+    otherComplicationDetail: '',
+    noneProblem: false,
+    outcomes: [],
+    incidentTypes: [],
+    severityLevel: '',
+    administrationErrors: [],
+    remark: '',
+    periOpRecorder: '',
+    periOpDate: '',
+    periOpTime: '',
+    postOpRecorder: '',
+    postOpDate: '',
+    postOpTime: '',
+  };
+}
+
+export function summarizePostOpComplications(
+  comp?: Partial<PostOpComplicationData> | null,
+): string {
+  if (!comp) return '';
+  const periSet = new Set(comp.periOpComplications ?? []);
+  const postSet = new Set(comp.postOpComplications ?? []);
+  const items: string[] = [];
+
+  for (const item of POST_OP_ALL_COMPLICATIONS) {
+    const inPeri = periSet.has(item.key);
+    const inPost = postSet.has(item.key);
+    if (!inPeri && !inPost) continue;
+
+    let label: string = item.label;
+    if (item.key === 'difficult_intubation' && comp.difficultIntubationGrade?.trim()) {
+      label = `Difficult intubation LV gr ${comp.difficultIntubationGrade.trim()}`;
+    } else if (item.key === 'pain_score_gt4' && comp.painScoreDetail?.trim()) {
+      label = `Pain score >4 (PS=${comp.painScoreDetail.trim()})`;
+    } else if (item.key === 'hypotension') {
+      label = 'Hypotension';
+    } else if (item.key === 'other_complication') {
+      const detail = comp.otherComplicationDetail?.trim();
+      label = detail ? `อื่นๆ (${detail})` : 'อื่นๆ';
+    }
+
+    const phase = inPeri && inPost ? 'Peri/Post-op' : inPeri ? 'Peri-op' : 'Post-op';
+    items.push(`${label} [${phase}]`);
+  }
+
+  return items.join(', ');
+}
+
 export interface EvaluationFormData {
   history: HistoryData;
   physicalExam: PhysicalExamData;
@@ -296,6 +513,7 @@ export interface EvaluationFormData {
   anestheticPlan: AnestheticPlanData;
   preparationOrders: string[];
   postAnesthesia: PostAnesthesiaData;
+  postOpComplication?: PostOpComplicationData;
 }
 
 export interface PreAnestheticEvaluation {
@@ -306,7 +524,9 @@ export interface PreAnestheticEvaluation {
   hn: string;
   an: string;
   age: string;
+  gender?: PatientGender;
   ward: string;
+  specialty?: string;
   dateOfVisit: string;
   dateOfOperation: string;
   operationTime: string;
@@ -430,6 +650,21 @@ export function sanitizeMedicationGroups(raw: unknown): MedicationGroup[] {
 
 export function sanitizeWardList(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [...DEFAULT_WARD_LIST];
+  const seen = new Set<string>();
+  const cleaned: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'string') continue;
+    const trimmed = entry.trim().slice(0, 80);
+    if (!trimmed || trimmed === 'อื่นๆ' || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    cleaned.push(trimmed);
+    if (cleaned.length >= 40) break;
+  }
+  return cleaned;
+}
+
+export function sanitizeSpecialtyList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [...DEFAULT_SPECIALTY_LIST];
   const seen = new Set<string>();
   const cleaned: string[] = [];
   for (const entry of raw) {
@@ -584,19 +819,27 @@ export function formatMedicationEntry(entry: SelectedMedicationEntry): string {
   return `${n}${d ? ` (${d})` : ''}${r ? ` ${r}` : ''}`;
 }
 
+export function getMedicationLines(medicationText: string | undefined): string[] {
+  if (!medicationText) return [];
+  const trimmed = medicationText.trim();
+  if (!trimmed) return [];
+  const parts = trimmed.includes('\n') ? trimmed.split(/\r?\n+/) : trimmed.split(/,/);
+  return parts.map((item) => item.trim()).filter(Boolean);
+}
+
+export function formatMedicationMultiline(medicationText: string | undefined): string {
+  return getMedicationLines(medicationText).join('\n');
+}
+
 export function parseMedicationList(medicationText: string): SelectedMedicationEntry[] {
-  return medicationText
-    .split(/[\n,]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .map(parseMedicationEntry);
+  return getMedicationLines(medicationText).map(parseMedicationEntry);
 }
 
 export function serializeMedicationList(entries: SelectedMedicationEntry[]): string {
   return entries
     .map(formatMedicationEntry)
     .filter(Boolean)
-    .join(', ');
+    .join('\n');
 }
 
 function entriesMatchPreset(entry: SelectedMedicationEntry, presetEntry: SelectedMedicationEntry): boolean {
@@ -872,6 +1115,7 @@ export const FIELD_LIMITS = {
   an: 40,
   age: 16,
   ward: 80,
+  specialty: 80,
   date: 32,
   operationTime: 32,
   orRoom: 32,
@@ -1044,6 +1288,7 @@ export function createEmptyEvaluation(
       | 'asaEmergency'
       | 'surgeon'
       | 'ward'
+      | 'specialty'
     >
   >,
 ): PreAnestheticEvaluation {
@@ -1058,7 +1303,9 @@ export function createEmptyEvaluation(
     hn: '',
     an: '',
     age: '',
+    gender: '',
     ward: overrides?.ward ?? '',
+    specialty: overrides?.specialty ?? '',
     dateOfVisit: overrides?.dateOfVisit ?? today,
     dateOfOperation: overrides?.dateOfOperation ?? today,
     operationTime: overrides?.operationTime ?? '',
@@ -1082,15 +1329,21 @@ export function createEmptyEvaluation(
         underlyingStatus: 'none',
         dm: false,
         dmYears: '',
+        dmDetail: '',
         ht: false,
         htYears: '',
+        htDetail: '',
         dlp: false,
         dlpYears: '',
+        dlpDetail: '',
         ckd: false,
         ckdYears: '',
+        ckdDetail: '',
         heartDisease: false,
         heartDiseaseYears: '',
+        heartDiseaseDetail: '',
         otherUnderlying: [''],
+        underlyingDetail: '',
         medication: '',
         previousOps: ['', '', ''],
         previousOpComplication: '',
@@ -1175,7 +1428,11 @@ export function createEmptyEvaluation(
         alb: '',
         glucose: '',
         hba1c: '',
+        antiHiv: '',
+        lactate: '',
+        tropI: '',
         other: '',
+        customLabs: [],
         prepTs: false,
         prepPrc: '',
         prepFfp: '',
@@ -1197,6 +1454,8 @@ export function createEmptyEvaluation(
         raSelected: false,
         raMethods: [],
         raOther: '',
+        macSelected: false,
+        macDetail: '',
       },
       preparationOrders: ['', '', '', ''],
       postAnesthesia: {
@@ -1213,6 +1472,7 @@ export function createEmptyEvaluation(
         visitBy: '',
         visitDate: '',
       },
+      postOpComplication: createEmptyPostOpComplication(),
     },
   };
 }
@@ -1233,7 +1493,68 @@ export function deriveAnesthesiaType(plan: AnestheticPlanData): AnesthesiaSummar
   if (plan.gaSelected && plan.raSelected) return 'GA+RA';
   if (plan.gaSelected) return 'GA';
   if (plan.raSelected) return 'RA';
+  if (plan.macSelected) return 'MAC';
   return '';
+}
+
+export function inferPatientGender(patientName: string, explicitGender?: PatientGender): PatientGender {
+  if (explicitGender === 'male' || explicitGender === 'female') return explicitGender;
+  const trimmed = (patientName || '').trim();
+  if (!trimmed) return '';
+  if (/^(?:นางสาว|น\.ส\.|นาง|ด\.ญ\.|เด็กหญิง|Mrs\.?|Ms\.?|Miss\b)/i.test(trimmed)) {
+    return 'female';
+  }
+  if (/^(?:นาย|ด\.ช\.|เด็กชาย|Mr\.?|Master\b)/i.test(trimmed)) {
+    return 'male';
+  }
+  return '';
+}
+
+export function parseAgeInYears(ageRaw: string): number | null {
+  const s = (ageRaw || '').trim();
+  if (!s) return null;
+
+  // Match compound forms like "1 ปี 6 เดือน" or "2 yr 3 mo"
+  const yrMatch = /(\d+(?:\.\d+)?)\s*(?:ปี|y(?:r|ear)?s?)/i.exec(s);
+  const moMatch = /(\d+(?:\.\d+)?)\s*(?:เดือน|m(?:o|onth)?s?)/i.exec(s);
+  const dayMatch = /(\d+(?:\.\d+)?)\s*(?:วัน|d(?:ay)?s?)/i.exec(s);
+
+  if (yrMatch || moMatch || dayMatch) {
+    const years = yrMatch ? parseFloat(yrMatch[1]) : 0;
+    const months = moMatch ? parseFloat(moMatch[1]) : 0;
+    const days = dayMatch ? parseFloat(dayMatch[1]) : 0;
+    const total = years + months / 12 + days / 365;
+    return Number.isFinite(total) && total >= 0 && total <= 150 ? total : null;
+  }
+
+  const plain = parseFloat(s.replace(/,/g, ''));
+  if (!Number.isFinite(plain) || plain < 0 || plain > 150) return null;
+  return plain;
+}
+
+export function isPreOpVisited(record: PreAnestheticEvaluation): boolean {
+  const plan = record.formData?.anestheticPlan;
+  return Boolean(
+    record.dateOfVisit?.trim() ||
+      record.asaClass ||
+      plan?.gaSelected ||
+      plan?.raSelected ||
+      plan?.macSelected ||
+      record.status === 'evaluated' ||
+      record.status === 'post_op_completed' ||
+      record.status === 'locked',
+  );
+}
+
+export function isPostOpVisited(record: PreAnestheticEvaluation): boolean {
+  const pa = record.formData?.postAnesthesia;
+  const pc = record.formData?.postOpComplication;
+  return Boolean(
+    getPostOpVisitCompleteness(pa).isComplete ||
+      Boolean(pa?.visitDate?.trim() && pa?.visitBy?.trim()) ||
+      Boolean(pc?.postOpDate?.trim() && pc?.postOpRecorder?.trim()) ||
+      record.status === 'post_op_completed',
+  );
 }
 
 function clampStr(val: unknown, maxLen: number): string {
@@ -1264,22 +1585,83 @@ export function sanitizeEvaluationForFirestore(
     raSelected: Boolean(fd.anestheticPlan.raSelected),
     raMethods: fd.anestheticPlan.raMethods.filter((m): m is RaMethod => raAllow.includes(m)).slice(0, 4),
     raOther: clampStr(fd.anestheticPlan.raOther, 200),
+    macSelected: Boolean(fd.anestheticPlan.macSelected),
+    macDetail: clampStr(fd.anestheticPlan.macDetail ?? '', 200),
   };
 
   const sanitizedId = /^[a-zA-Z0-9_-]+$/.test(evalRecord.id)
     ? evalRecord.id.slice(0, FIELD_LIMITS.id)
     : generateEvaluationId();
 
+  const rawPostOpComp = fd.postOpComplication ?? createEmptyPostOpComplication();
+  const sanitizedPeriOpComps = Array.from(
+    new Set(
+      (Array.isArray(rawPostOpComp.periOpComplications) ? rawPostOpComp.periOpComplications : []).filter(
+        (k): k is PostOpComplicationKey => POST_OP_COMPLICATION_KEY_LIST.includes(k),
+      ),
+    ),
+  ).slice(0, POST_OP_COMPLICATION_KEY_LIST.length);
+  const sanitizedPostOpComps = Array.from(
+    new Set(
+      (Array.isArray(rawPostOpComp.postOpComplications) ? rawPostOpComp.postOpComplications : []).filter(
+        (k): k is PostOpComplicationKey => POST_OP_COMPLICATION_KEY_LIST.includes(k),
+      ),
+    ),
+  ).slice(0, POST_OP_COMPLICATION_KEY_LIST.length);
+  const sanitizedPostOpComplication: PostOpComplicationData = {
+    periOpComplications: sanitizedPeriOpComps,
+    postOpComplications: sanitizedPostOpComps,
+    difficultIntubationGrade: clampStr(rawPostOpComp.difficultIntubationGrade ?? '', 30),
+    painScoreDetail: clampStr(rawPostOpComp.painScoreDetail ?? '', 30),
+    otherComplicationDetail: clampStr(rawPostOpComp.otherComplicationDetail ?? '', 200),
+    noneProblem: Boolean(rawPostOpComp.noneProblem) && sanitizedPeriOpComps.length === 0 && sanitizedPostOpComps.length === 0,
+    outcomes: Array.from(
+      new Set(
+        (Array.isArray(rawPostOpComp.outcomes) ? rawPostOpComp.outcomes : []).filter(
+          (k): k is PostOpOutcomeKey => POST_OP_OUTCOME_KEY_LIST.includes(k),
+        ),
+      ),
+    ).slice(0, 8),
+    incidentTypes: Array.from(
+      new Set(
+        (Array.isArray(rawPostOpComp.incidentTypes) ? rawPostOpComp.incidentTypes : []).filter(
+          (k): k is PostOpIncidentType => k === 'clinical_risk' || k === 'non_clinical_risk',
+        ),
+      ),
+    ).slice(0, 2),
+    severityLevel: POST_OP_SEVERITY_LEVELS.includes(
+      rawPostOpComp.severityLevel as (typeof POST_OP_SEVERITY_LEVELS)[number],
+    )
+      ? rawPostOpComp.severityLevel
+      : '',
+    administrationErrors: Array.from(
+      new Set(
+        (Array.isArray(rawPostOpComp.administrationErrors) ? rawPostOpComp.administrationErrors : []).filter(
+          (k): k is AdministrationErrorKey => POST_OP_ADMIN_ERROR_KEY_LIST.includes(k),
+        ),
+      ),
+    ).slice(0, 6),
+    remark: clampStr(rawPostOpComp.remark ?? '', 1000),
+    periOpRecorder: clampStr(rawPostOpComp.periOpRecorder ?? '', 120),
+    periOpDate: clampStr(rawPostOpComp.periOpDate ?? '', 32),
+    periOpTime: clampStr(rawPostOpComp.periOpTime ?? '', 32),
+    postOpRecorder: clampStr(rawPostOpComp.postOpRecorder ?? '', 120),
+    postOpDate: clampStr(rawPostOpComp.postOpDate ?? '', 32),
+    postOpTime: clampStr(rawPostOpComp.postOpTime ?? '', 32),
+  };
+
   const expectedDiff = fd.physicalExam.expectedDifficultAirway === 'yes';
-  const hasComp = fd.postAnesthesia.complicationStatus === 'yes';
-  const computedStatus: EvaluationStatus =
-    evalRecord.status === 'locked'
-      ? 'locked'
-      : fd.postAnesthesia.summarizedBy.trim() || fd.postAnesthesia.visitBy.trim() || fd.postAnesthesia.complicationStatus !== 'none'
-      ? 'post_op_completed'
-      : evalRecord.asaClass || sanitizedPlan.gaSelected || sanitizedPlan.raSelected
-      ? 'evaluated'
-      : 'draft';
+  const hasComp =
+    fd.postAnesthesia.complicationStatus === 'yes' ||
+    sanitizedPeriOpComps.length > 0 ||
+    sanitizedPostOpComps.length > 0;
+  const computedStatus: EvaluationStatus = getEffectiveEvaluationStatus({
+    ...evalRecord,
+    formData: {
+      ...fd,
+      anestheticPlan: sanitizedPlan,
+    },
+  });
 
   return {
     id: sanitizedId,
@@ -1289,7 +1671,9 @@ export function sanitizeEvaluationForFirestore(
     hn: clampStr(evalRecord.hn.trim(), FIELD_LIMITS.hn),
     an: clampStr(evalRecord.an.trim(), FIELD_LIMITS.an),
     age: clampStr(evalRecord.age.trim(), FIELD_LIMITS.age),
+    gender: inferPatientGender(evalRecord.patientName, evalRecord.gender),
     ward: clampStr(evalRecord.ward.trim(), FIELD_LIMITS.ward),
+    specialty: clampStr((evalRecord.specialty ?? '').trim(), FIELD_LIMITS.specialty),
     dateOfVisit: clampStr(evalRecord.dateOfVisit, FIELD_LIMITS.date),
     dateOfOperation: clampStr(evalRecord.dateOfOperation, FIELD_LIMITS.date),
     operationTime: clampStr(evalRecord.operationTime ?? '', FIELD_LIMITS.operationTime),
@@ -1316,16 +1700,22 @@ export function sanitizeEvaluationForFirestore(
         underlyingStatus: fd.history.underlyingStatus,
         dm: Boolean(fd.history.dm),
         dmYears: clampStr(fd.history.dmYears, 20),
+        dmDetail: clampStr(fd.history.dmDetail ?? '', 200),
         ht: Boolean(fd.history.ht),
         htYears: clampStr(fd.history.htYears, 20),
+        htDetail: clampStr(fd.history.htDetail ?? '', 200),
         dlp: Boolean(fd.history.dlp),
         dlpYears: clampStr(fd.history.dlpYears, 20),
+        dlpDetail: clampStr(fd.history.dlpDetail ?? '', 200),
         ckd: Boolean(fd.history.ckd),
         ckdYears: clampStr(fd.history.ckdYears, 20),
+        ckdDetail: clampStr(fd.history.ckdDetail ?? '', 200),
         heartDisease: Boolean(fd.history.heartDisease),
         heartDiseaseYears: clampStr(fd.history.heartDiseaseYears, 20),
+        heartDiseaseDetail: clampStr(fd.history.heartDiseaseDetail ?? '', 200),
         otherUnderlying: clampStrArray(fd.history.otherUnderlying, 8, 120),
-        medication: clampStr(fd.history.medication, 1000),
+        underlyingDetail: clampStr(fd.history.underlyingDetail ?? '', 500),
+        medication: clampStr(formatMedicationMultiline(fd.history.medication), 1000),
         previousOps: clampStrArray(fd.history.previousOps, 8, 250),
         previousOpComplication: clampStr(fd.history.previousOpComplication, 500),
         drinkingStatus: fd.history.drinkingStatus,
@@ -1430,8 +1820,8 @@ export function sanitizeEvaluationForFirestore(
       laboratory: {
         hb: clampStr(fd.laboratory.hb, 20),
         hct: clampStr(fd.laboratory.hct, 20),
-        wbc: clampStr(fd.laboratory.wbc, 20),
-        plt: clampStr(fd.laboratory.plt, 20),
+        wbc: clampStr(formatThousandsWithCommas(fd.laboratory.wbc), 20),
+        plt: clampStr(formatThousandsWithCommas(fd.laboratory.plt), 20),
         neutrophil: clampStr(fd.laboratory.neutrophil, 20),
         lymphocyte: clampStr(fd.laboratory.lymphocyte, 20),
         na: clampStr(fd.laboratory.na, 20),
@@ -1449,7 +1839,22 @@ export function sanitizeEvaluationForFirestore(
         alb: clampStr(fd.laboratory.alb, 20),
         glucose: clampStr(fd.laboratory.glucose, 20),
         hba1c: clampStr(fd.laboratory.hba1c, 20),
+        antiHiv:
+          fd.laboratory.antiHiv === 'negative' || fd.laboratory.antiHiv === 'positive'
+            ? fd.laboratory.antiHiv
+            : '',
+        lactate: clampStr(fd.laboratory.lactate ?? '', 20),
+        tropI: clampStr(fd.laboratory.tropI ?? '', 20),
         other: clampStr(fd.laboratory.other, 400),
+        customLabs: Array.isArray(fd.laboratory.customLabs)
+          ? fd.laboratory.customLabs
+              .slice(0, 15)
+              .map((item) => ({
+                name: clampStr(item?.name ?? '', 60),
+                value: clampStr(item?.value ?? '', 80),
+              }))
+              .filter((item) => item.name.length > 0 || item.value.length > 0)
+          : [],
         prepTs: Boolean(fd.laboratory.prepTs),
         prepPrc: clampStr(fd.laboratory.prepPrc, 20),
         prepFfp: clampStr(fd.laboratory.prepFfp, 20),
@@ -1486,8 +1891,99 @@ export function sanitizeEvaluationForFirestore(
         visitBy: clampStr(fd.postAnesthesia.visitBy, 120),
         visitDate: clampStr(fd.postAnesthesia.visitDate, 32),
       },
+      postOpComplication: sanitizedPostOpComplication,
     },
   };
+}
+
+export interface PostOpVisitCompleteness {
+  isComplete: boolean;
+  hasAnyInput: boolean;
+  filledCount: number;
+  totalRequired: number;
+  missingFields: string[];
+}
+
+export function getPostOpVisitCompleteness(
+  pa?: Partial<PostAnesthesiaData> | null,
+): PostOpVisitCompleteness {
+  const safe = pa ?? {};
+  const missingFields: string[] = [];
+
+  const hasBp = Boolean(safe.bp?.trim());
+  const hasPulse = Boolean(safe.pulse?.trim());
+  const hasRr = Boolean(safe.rr?.trim());
+  const hasTemp = Boolean(safe.temp?.trim());
+  const hasSpo2 = Boolean(safe.spo2?.trim());
+  const hasPainScore = Boolean(safe.painScore?.trim());
+  const compStatus = safe.complicationStatus ?? 'none';
+  const hasCompStatus = compStatus === 'no' || compStatus === 'yes';
+  const needsCompDetail = compStatus === 'yes';
+  const hasCompDetail = !needsCompDetail || Boolean(safe.complicationDetail?.trim());
+  const hasVisitBy = Boolean(safe.visitBy?.trim());
+  const hasVisitDate = Boolean(safe.visitDate?.trim());
+
+  if (!hasBp) missingFields.push('BP');
+  if (!hasPulse) missingFields.push('P');
+  if (!hasRr) missingFields.push('RR');
+  if (!hasTemp) missingFields.push('T');
+  if (!hasSpo2) missingFields.push('SpO2');
+  if (!hasPainScore) missingFields.push('PS');
+  if (!hasCompStatus) {
+    missingFields.push('Complication (No/Yes)');
+  } else if (!hasCompDetail) {
+    missingFields.push('รายละเอียดภาวะแทรกซ้อน');
+  }
+  if (!hasVisitBy) missingFields.push('ผู้เยี่ยม (visit by)');
+  if (!hasVisitDate) missingFields.push('วันที่เยี่ยม (date)');
+
+  const totalRequired = needsCompDetail ? 10 : 9;
+  const filledCount = totalRequired - missingFields.length;
+  const hasAnyInput =
+    hasBp ||
+    hasPulse ||
+    hasRr ||
+    hasTemp ||
+    hasSpo2 ||
+    hasPainScore ||
+    hasCompStatus ||
+    Boolean(safe.complicationDetail?.trim()) ||
+    hasVisitBy ||
+    hasVisitDate;
+
+  return {
+    isComplete: missingFields.length === 0,
+    hasAnyInput,
+    filledCount,
+    totalRequired,
+    missingFields,
+  };
+}
+
+export function getEffectiveEvaluationStatus(record: PreAnestheticEvaluation): EvaluationStatus {
+  if (record.status === 'locked') return 'locked';
+  if (getPostOpVisitCompleteness(record.formData?.postAnesthesia).isComplete) {
+    return 'post_op_completed';
+  }
+  const plan = record.formData?.anestheticPlan;
+  if (record.asaClass || plan?.gaSelected || plan?.raSelected || plan?.macSelected) {
+    return 'evaluated';
+  }
+  return 'draft';
+}
+
+export function formatUnderlyingDiseaseTag(
+  name: string,
+  years?: string,
+  detail?: string,
+  unit = 'ปี',
+): string {
+  const y = (years ?? '').trim();
+  const d = (detail ?? '').trim();
+  const parts: string[] = [];
+  if (y) parts.push(`${y} ${unit}`);
+  if (d) parts.push(d);
+  return parts.length > 0 ? `${name} (${parts.join(' · ')})` : name;
 }
 
 export function formatDurationLabel(value: string, unit: DurationUnit = 'years'): string {
@@ -1685,14 +2181,14 @@ export function computeClinicalSummary(record: PreAnestheticEvaluation): Clinica
 
   // Lab alerts
   const labAlerts: ClinicalAlert[] = [];
-  const hb = parseFloat(laboratory.hb);
-  const hct = parseFloat(laboratory.hct);
-  const plt = parseFloat(laboratory.plt);
-  const k = parseFloat(laboratory.k);
-  const na = parseFloat(laboratory.na);
-  const cr = parseFloat(laboratory.cr);
-  const inr = parseFloat(laboratory.inr);
-  const glucose = parseFloat(laboratory.glucose);
+  const hb = parseNumericValue(laboratory.hb);
+  const hct = parseNumericValue(laboratory.hct);
+  const plt = parseNumericValue(laboratory.plt);
+  const k = parseNumericValue(laboratory.k);
+  const na = parseNumericValue(laboratory.na);
+  const cr = parseNumericValue(laboratory.cr);
+  const inr = parseNumericValue(laboratory.inr);
+  const glucose = parseNumericValue(laboratory.glucose);
 
   if (Number.isFinite(hb) && hb < 10) {
     labAlerts.push({ level: hb < 8 ? 'critical' : 'warning', category: 'CBC', message: `Hb ต่ำ (${hb} g/dL)` });
@@ -1732,16 +2228,27 @@ export function computeClinicalSummary(record: PreAnestheticEvaluation): Clinica
       : null;
 
   const underlyingTags: string[] = [];
-  if (history.dm) underlyingTags.push(`DM${history.dmYears ? ` (${history.dmYears} yr)` : ''}`);
-  if (history.ht) underlyingTags.push(`HT${history.htYears ? ` (${history.htYears} yr)` : ''}`);
-  if (history.dlp) underlyingTags.push(`DLP${history.dlpYears ? ` (${history.dlpYears} yr)` : ''}`);
-  if (history.ckd) underlyingTags.push(`โรคไต${history.ckdYears ? ` (${history.ckdYears} yr)` : ''}`);
+  if (history.dm) {
+    underlyingTags.push(formatUnderlyingDiseaseTag('DM', history.dmYears, history.dmDetail, 'yr'));
+  }
+  if (history.ht) {
+    underlyingTags.push(formatUnderlyingDiseaseTag('HT', history.htYears, history.htDetail, 'yr'));
+  }
+  if (history.dlp) {
+    underlyingTags.push(formatUnderlyingDiseaseTag('DLP', history.dlpYears, history.dlpDetail, 'yr'));
+  }
+  if (history.ckd) {
+    underlyingTags.push(formatUnderlyingDiseaseTag('โรคไต', history.ckdYears, history.ckdDetail, 'yr'));
+  }
   if (history.heartDisease) {
     underlyingTags.push(
-      `โรคหัวใจ${history.heartDiseaseYears ? ` (${history.heartDiseaseYears} yr)` : ''}`,
+      formatUnderlyingDiseaseTag('โรคหัวใจ', history.heartDiseaseYears, history.heartDiseaseDetail, 'yr'),
     );
   }
   history.otherUnderlying.filter((x) => x.trim()).forEach((x) => underlyingTags.push(x.trim()));
+  if (history.underlyingDetail?.trim()) {
+    underlyingTags.push(history.underlyingDetail.trim());
+  }
 
   // Plan summary
   const planParts: string[] = [];
@@ -1809,6 +2316,1405 @@ export function computeClinicalSummary(record: PreAnestheticEvaluation): Clinica
     completenessPercent,
     clinicalBrief,
   };
+}
+
+export type AutoProblemCategory =
+  | 'vital'
+  | 'respiratory'
+  | 'airway'
+  | 'lab'
+  | 'renal'
+  | 'clinical'
+  | 'risk'
+  | 'bmi'
+  | 'underlying';
+export type ProblemSeverityLevel = 'critical' | 'high' | 'moderate' | 'mild';
+
+export interface AutoProblemEntry {
+  key: string;
+  category: AutoProblemCategory;
+  categoryLabel: string;
+  legacyPrefixes: string[];
+  text: string;
+  severityScore: number;
+  severityLevel: ProblemSeverityLevel;
+}
+
+const ANTITHROMBOTIC_DRUG_PATTERNS: readonly {
+  label: string;
+  re: RegExp;
+  highRisk: boolean;
+}[] = [
+  { label: 'Warfarin', re: /\b(?:warfarin|coumadin)\b/i, highRisk: true },
+  { label: 'Apixaban', re: /\b(?:apixaban|eliquis)\b/i, highRisk: true },
+  { label: 'Rivaroxaban', re: /\b(?:rivaroxaban|xarelto)\b/i, highRisk: true },
+  { label: 'Dabigatran', re: /\b(?:dabigatran|pradaxa)\b/i, highRisk: true },
+  { label: 'Heparin', re: /\bheparin\b/i, highRisk: true },
+  { label: 'Enoxaparin', re: /\b(?:enoxaparin|clexane)\b/i, highRisk: true },
+  { label: 'Clopidogrel', re: /\b(?:clopidogrel|plavix)\b/i, highRisk: true },
+  { label: 'Ticagrelor', re: /\b(?:ticagrelor|brilinta)\b/i, highRisk: true },
+  { label: 'ASA', re: /\b(?:asa|aspirin)\b/i, highRisk: false },
+];
+
+const VASOPRESSOR_DRUG_PATTERNS: readonly {
+  label: string;
+  re: RegExp;
+}[] = [
+  { label: 'Norepinephrine/Levophed', re: /\b(?:levophed|norepinephrine|noradrenaline)\b/i },
+  { label: 'Adrenaline/Epinephrine', re: /\b(?:adrenaline|epinephrine)\b/i },
+  { label: 'Dopamine', re: /\bdopamine\b/i },
+  { label: 'Dobutamine', re: /\bdobutamine\b/i },
+  { label: 'Vasopressin', re: /\bvasopressin\b/i },
+];
+
+export function formatThousandsWithCommas(raw: string | undefined): string {
+  if (!raw) return '';
+  const stripped = raw.replace(/,/g, '');
+  const match = stripped.match(/^(\s*)(\d+)(\.\d*)?(\s*)$/);
+  if (!match) return raw;
+  const [, lead, intPart, decPart = '', trail] = match;
+  const formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${lead}${formattedInt}${decPart}${trail}`;
+}
+
+function parseNumericValue(raw: string | undefined): number {
+  if (!raw) return Number.NaN;
+  const cleaned = raw.replace(/,/g, '').trim();
+  if (!cleaned) return Number.NaN;
+  return parseFloat(cleaned);
+}
+
+function parseBloodPressure(raw: string | undefined): { sbp: number; dbp: number; map: number } | null {
+  if (!raw) return null;
+  const match = raw.match(/(\d{2,3})\s*\/\s*(\d{2,3})/);
+  if (!match) return null;
+  const sbp = parseInt(match[1], 10);
+  const dbp = parseInt(match[2], 10);
+  if (!Number.isFinite(sbp) || !Number.isFinite(dbp)) return null;
+  if (sbp < 40 || sbp > 320 || dbp < 15 || dbp > 220 || sbp <= dbp) return null;
+  return { sbp, dbp, map: Math.round((sbp + 2 * dbp) / 3) };
+}
+
+function isMeaningfulClinicalNote(raw: string | undefined): boolean {
+  const trimmed = (raw || '').trim();
+  if (!trimmed) return false;
+  return !/^(?:-|—|no|none|nil|wnl|normal|unremarkable|negative|neg|ไม่มี|ปกติ|ไม่พบ)$/i.test(trimmed);
+}
+
+function hasPositiveClinicalMatch(text: string, re: RegExp): boolean {
+  if (!text) return false;
+  const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
+  const globalRe = new RegExp(re.source, flags);
+  let match: RegExpExecArray | null;
+  while ((match = globalRe.exec(text)) !== null) {
+    const before = text.slice(Math.max(0, match.index - 32), match.index);
+    const negated =
+      /(?:\b(?:no|not|without|denies|denied|non|negative\s+for|no\s+sign\s+of|no\s+evidence\s+of|no\s+history\s+of)\s*$|ไม่มี\s*$|ไม่พบ\s*$|ปฏิเสธ\s*$|ไม่เป็น\s*$)/i.test(
+        before,
+      );
+    if (!negated) return true;
+    if (match[0].length === 0) break;
+  }
+  return false;
+}
+
+function severityLevelFromScore(score: number): ProblemSeverityLevel {
+  if (score >= 90) return 'critical';
+  if (score >= 75) return 'high';
+  if (score >= 55) return 'moderate';
+  return 'mild';
+}
+
+function matchesLegacyPrefix(lowerLine: string, legacyPrefixes: string[]): boolean {
+  return legacyPrefixes.some((p) => p.length > 0 && lowerLine.startsWith(p.toLowerCase()));
+}
+
+function capitalizeFirst(str: string): string {
+  if (!str) return str;
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+export function generateAutoProblemEntries(
+  record: PreAnestheticEvaluation,
+): AutoProblemEntry[] {
+  const { history, physicalExam, laboratory, investigation, premedication, consult } =
+    record.formData;
+  const entries: AutoProblemEntry[] = [];
+  const ageVal = parseNumericValue(record.age);
+  const isPediatric = Number.isFinite(ageVal) && ageVal > 0 && ageVal < 15;
+
+  const ox = physicalExam.oxygenSupport;
+  const oxSummary = formatOxygenSupportSummary(ox);
+
+  const clinicalCorpus = [
+    record.diagnosis,
+    history.presentIllness,
+    history.pastIllness,
+    history.underlyingDetail,
+    ...history.otherUnderlying,
+    history.ckdDetail,
+    history.heartDiseaseDetail,
+    history.dmDetail,
+    history.htDetail,
+    history.dlpDetail,
+    physicalExam.breathSoundDetail,
+    physicalExam.heartSoundDetail,
+    physicalExam.functionalCapacity,
+    investigation.cxrDetail,
+    investigation.ekgDetail,
+    investigation.other,
+    laboratory.other,
+    consult,
+    ...(ox?.otherItems || []),
+  ]
+    .filter(Boolean)
+    .join(' | ');
+
+  const medAndIvfText = [
+    history.medication,
+    premedication.onIvf,
+    history.presentIllness,
+    consult,
+  ]
+    .filter(Boolean)
+    .join(' | ');
+
+  // Parse core numeric values up front so vital signs, sepsis, and lab checks can coordinate
+  const bpParsed = parseBloodPressure(physicalExam.bp);
+  const pulseVal = parseNumericValue(physicalExam.pulse);
+  const rrVal = parseNumericValue(physicalExam.rr);
+  const tempVal = parseNumericValue(physicalExam.temp);
+  const spo2Val = parseNumericValue(physicalExam.spo2);
+  const wbcVal = parseNumericValue(laboratory.wbc);
+  const normalizedWbc = Number.isFinite(wbcVal) && wbcVal > 0 ? (wbcVal >= 100 ? wbcVal : wbcVal * 1000) : Number.NaN;
+
+  // 1. Shock / Sepsis / Hemodynamic Instability (highest priority)
+  const shockSepsisItems: { text: string; score: number }[] = [];
+  const hasSepticShock = hasPositiveClinicalMatch(
+    clinicalCorpus,
+    /\bseptic\s+shock\b|ช็อกจากติดเชื้อ/i,
+  );
+  const hasHypovolemicShock = hasPositiveClinicalMatch(
+    clinicalCorpus,
+    /\b(?:hypovolemic|hemorrhagic)\s+shock\b/i,
+  );
+  const hasCardiogenicShock = hasPositiveClinicalMatch(
+    clinicalCorpus,
+    /\bcardiogenic\s+shock\b/i,
+  );
+  const hasGenericShock =
+    !hasSepticShock &&
+    !hasHypovolemicShock &&
+    !hasCardiogenicShock &&
+    hasPositiveClinicalMatch(clinicalCorpus, /\bshock\b|ภาวะช็อก/i);
+
+  if (hasSepticShock) {
+    shockSepsisItems.push({ text: 'Septic shock', score: 100 });
+  } else {
+    if (hasHypovolemicShock) {
+      shockSepsisItems.push({ text: 'Hypovolemic / Hemorrhagic shock', score: 99 });
+    }
+    if (hasCardiogenicShock) {
+      shockSepsisItems.push({ text: 'Cardiogenic shock', score: 99 });
+    }
+    if (hasGenericShock) {
+      shockSepsisItems.push({ text: 'Shock', score: 98 });
+    }
+  }
+
+  const hasExplicitSepsis =
+    !hasSepticShock &&
+    hasPositiveClinicalMatch(
+      clinicalCorpus,
+      /\b(?:sepsis|urosepsis|septicemia|bacteremia|septic)\b|ติดเชื้อในกระแสเลือด/i,
+    );
+  const isHypotensive = bpParsed
+    ? isPediatric
+      ? bpParsed.sbp < (ageVal < 1 ? 65 : 70 + 2 * Math.min(ageVal, 10))
+      : bpParsed.sbp < 90 || bpParsed.map < 65
+    : false;
+  const hasSuspectedSepsisTriad =
+    !hasSepticShock &&
+    !hasExplicitSepsis &&
+    Number.isFinite(tempVal) &&
+    tempVal >= 38.0 &&
+    isHypotensive &&
+    Number.isFinite(normalizedWbc) &&
+    (normalizedWbc > 12000 || normalizedWbc < 4000);
+
+  if (hasExplicitSepsis) {
+    shockSepsisItems.push({ text: 'Sepsis', score: 96 });
+  } else if (hasSuspectedSepsisTriad) {
+    shockSepsisItems.push({ text: 'Suspected Sepsis', score: 95 });
+  }
+
+  const matchedVasopressors = VASOPRESSOR_DRUG_PATTERNS.filter((v) =>
+    hasPositiveClinicalMatch(medAndIvfText, v.re),
+  );
+  if (matchedVasopressors.length > 0) {
+    shockSepsisItems.push({
+      text: `On Vasopressor/Inotrope (${matchedVasopressors.map((v) => v.label).join(', ')})`,
+      score: 97,
+    });
+  }
+
+  if (shockSepsisItems.length > 0) {
+    shockSepsisItems.sort((a, b) => b.score - a.score);
+    const maxScore = shockSepsisItems[0].score;
+    entries.push({
+      key: 'shock_sepsis',
+      category: 'clinical',
+      categoryLabel: 'Shock / Sepsis',
+      legacyPrefixes: [],
+      text: shockSepsisItems.map((i) => i.text).join(', ').slice(0, 250),
+      severityScore: maxScore,
+      severityLevel: severityLevelFromScore(maxScore),
+    });
+  }
+
+  // 2. Respiratory Failure / On ETT / Oxygen Support
+  const respItems: { text: string; score: number }[] = [];
+  const hasRespFailureText = hasPositiveClinicalMatch(
+    clinicalCorpus,
+    /\b(?:respiratory\s+failure|resp\.?\s+failure|acute\s+respiratory\s+distress|ards)\b|ภาวะหายใจล้มเหลว|หายใจล้มเหลว/i,
+  );
+  if (hasRespFailureText) {
+    const isArds = hasPositiveClinicalMatch(clinicalCorpus, /\bards\b/i);
+    respItems.push({
+      text: isArds ? 'ARDS / Respiratory failure' : 'Respiratory failure',
+      score: 97,
+    });
+  }
+
+  const oxLower = oxSummary.toLowerCase();
+  if (oxSummary && oxLower !== 'room air') {
+    const oxScore =
+      ox?.mode === 'ett'
+        ? 97
+        : ox?.mode === 'mask_bag' || /\b(?:hfnc|bipap|niv)\b/i.test(oxSummary)
+        ? 89
+        : /tracheo/i.test(oxSummary)
+        ? 90
+        : 78;
+    respItems.push({ text: capitalizeFirst(oxSummary), score: oxScore });
+  }
+  if (
+    ox?.mode !== 'ett' &&
+    !oxLower.includes('ett') &&
+    hasPositiveClinicalMatch(
+      clinicalCorpus,
+      /\b(?:on\s+ett|intubated|endotracheal\s+tube|mechanical\s+ventilat\w*)\b|ใส่ท่อช่วยหายใจ/i,
+    )
+  ) {
+    respItems.push({ text: 'On ETT', score: 96 });
+  }
+  if (
+    !oxLower.includes('tracheo') &&
+    hasPositiveClinicalMatch(
+      clinicalCorpus,
+      /\b(?:tracheostomy|tracheotomy)\b|เจาะคอ/i,
+    )
+  ) {
+    respItems.push({ text: 'On Tracheostomy', score: 90 });
+  }
+
+  if (respItems.length > 0) {
+    respItems.sort((a, b) => b.score - a.score);
+    const maxScore = respItems[0].score;
+    entries.push({
+      key: 'respiratory_support',
+      category: 'respiratory',
+      categoryLabel: 'Respiratory / O2',
+      legacyPrefixes: ['o2/vent:'],
+      text: respItems.map((i) => i.text).join(', ').slice(0, 250),
+      severityScore: maxScore,
+      severityLevel: severityLevelFromScore(maxScore),
+    });
+  }
+
+  // 3. Airway risk / findings
+  const airwayParts: string[] = [];
+  let airwayScore = 0;
+  let hardAirwayPredictors = 0;
+
+  if (physicalExam.expectedDifficultAirway === 'yes') {
+    airwayParts.push('Expected difficult airway');
+    airwayScore = Math.max(airwayScore, 99);
+    hardAirwayPredictors += 2;
+  }
+  if (physicalExam.mallampatiClass === 'IV') {
+    airwayParts.push('Mallampati IV');
+    airwayScore = Math.max(airwayScore, 94);
+    hardAirwayPredictors += 1;
+  } else if (physicalExam.mallampatiClass === 'III') {
+    airwayParts.push('Mallampati III');
+    airwayScore = Math.max(airwayScore, 78);
+    hardAirwayPredictors += 1;
+  }
+  if (physicalExam.mouthOpening === 'limited') {
+    airwayParts.push(
+      `Mouth opening limited${physicalExam.mouthOpeningDetail?.trim() ? ` (${physicalExam.mouthOpeningDetail.trim()})` : ''}`,
+    );
+    airwayScore = Math.max(airwayScore, 82);
+    hardAirwayPredictors += 1;
+  }
+  if (physicalExam.neckMovement === 'limited') {
+    airwayParts.push(
+      `Neck movement limited${physicalExam.neckMovementDetail?.trim() ? ` (${physicalExam.neckMovementDetail.trim()})` : ''}`,
+    );
+    airwayScore = Math.max(airwayScore, 80);
+    hardAirwayPredictors += 1;
+  }
+  if (physicalExam.thyromentalDistance === '<6') {
+    airwayParts.push(
+      `TMD < 6 cm${physicalExam.thyromentalDistanceDetail?.trim() ? ` (${physicalExam.thyromentalDistanceDetail.trim()})` : ''}`,
+    );
+    airwayScore = Math.max(airwayScore, 80);
+    hardAirwayPredictors += 1;
+  }
+  if (hardAirwayPredictors >= 2) {
+    airwayScore = Math.max(airwayScore, 95);
+  }
+  if (physicalExam.toothStatus.includes('Loose') || (physicalExam.looseTeeth?.length ?? 0) > 0) {
+    airwayParts.push('ฟันโยก (Loose tooth)');
+    airwayScore = Math.max(airwayScore, 46);
+  }
+  if (physicalExam.toothStatus.includes('Denture')) {
+    airwayParts.push('ฟันปลอม (Denture)');
+    airwayScore = Math.max(airwayScore, 36);
+  }
+  if (physicalExam.toothStatus.includes('Avulsion') || (physicalExam.missingTeeth?.length ?? 0) > 0) {
+    airwayParts.push('ฟันหลอ (Avulsion)');
+    airwayScore = Math.max(airwayScore, 34);
+  }
+
+  if (airwayParts.length > 0) {
+    entries.push({
+      key: 'airway',
+      category: 'airway',
+      categoryLabel: 'Airway',
+      legacyPrefixes: ['airway:'],
+      text: airwayParts.join(', ').slice(0, 250),
+      severityScore: airwayScore,
+      severityLevel: severityLevelFromScore(airwayScore),
+    });
+  }
+
+  // 4. Vital Signs ผิดปกติ (SpO2, BP, PR, RR, BT/มีไข้) — age-aware thresholds
+  const vitalItems: { text: string; score: number }[] = [];
+
+  if (Number.isFinite(spo2Val) && spo2Val > 40 && spo2Val < 95) {
+    vitalItems.push({
+      text: `Hypoxemia (SpO2 ${spo2Val}%)`,
+      score: spo2Val < 90 ? 98 : 88,
+    });
+  }
+
+  if (bpParsed) {
+    const bpText = `${bpParsed.sbp}/${bpParsed.dbp}`;
+    if (isHypotensive) {
+      vitalItems.push({
+        text: `Hypotension (BP ${bpText})`,
+        score: bpParsed.sbp < 80 ? 99 : 95,
+      });
+    } else if (isPediatric) {
+      const pediHighSbp = ageVal < 6 ? 120 : 130;
+      if (bpParsed.sbp >= pediHighSbp) {
+        vitalItems.push({ text: `BP สูง (${bpText})`, score: 75 });
+      }
+    } else {
+      if (bpParsed.sbp >= 180 || bpParsed.dbp >= 110) {
+        vitalItems.push({ text: `Hypertension (BP ${bpText})`, score: 89 });
+      } else if (bpParsed.sbp >= 160 || bpParsed.dbp >= 100) {
+        vitalItems.push({ text: `BP สูง (${bpText})`, score: 78 });
+      } else if (bpParsed.sbp >= 140 || bpParsed.dbp >= 90) {
+        vitalItems.push({ text: `BP สูง (${bpText})`, score: 62 });
+      }
+    }
+  }
+
+  if (Number.isFinite(pulseVal) && pulseVal > 0) {
+    const highHr = isPediatric ? (ageVal < 1 ? 160 : ageVal < 5 ? 140 : 120) : 100;
+    const lowHr = isPediatric ? (ageVal < 1 ? 100 : ageVal < 5 ? 70 : 60) : 55;
+    if (pulseVal < lowHr) {
+      vitalItems.push({
+        text: `Bradycardia (PR ${pulseVal})`,
+        score: pulseVal < lowHr - 10 ? 92 : 76,
+      });
+    } else if (pulseVal > highHr) {
+      vitalItems.push({
+        text: `Tachycardia (PR ${pulseVal})`,
+        score: pulseVal >= highHr + 30 ? 91 : pulseVal >= highHr + 15 ? 82 : 71,
+      });
+    }
+  }
+
+  if (Number.isFinite(rrVal) && rrVal > 0) {
+    const highRr = isPediatric ? (ageVal < 1 ? 50 : ageVal < 5 ? 36 : 28) : 24;
+    const lowRr = isPediatric ? (ageVal < 5 ? 14 : 12) : 10;
+    if (rrVal < lowRr) {
+      vitalItems.push({ text: `Bradypnea (RR ${rrVal})`, score: 93 });
+    } else if (rrVal >= highRr) {
+      vitalItems.push({
+        text: `Tachypnea (RR ${rrVal})`,
+        score: rrVal >= highRr + 4 ? 86 : 75,
+      });
+    }
+  }
+
+  let hasFeverVital = false;
+  if (Number.isFinite(tempVal) && tempVal > 30) {
+    if (tempVal >= 37.8) {
+      hasFeverVital = true;
+      vitalItems.push({
+        text: `มีไข้ (BT ${tempVal}°C)`,
+        score: tempVal >= 39 ? 86 : tempVal >= 38.3 ? 81 : 73,
+      });
+    } else if (tempVal < 36.0) {
+      vitalItems.push({
+        text: `Hypothermia (BT ${tempVal}°C)`,
+        score: tempVal < 35 ? 86 : 74,
+      });
+    }
+  }
+  if (
+    !hasFeverVital &&
+    hasPositiveClinicalMatch(clinicalCorpus, /\b(?:fever|febrile|high\s+grade\s+fever)\b|มีไข้|ไข้สูง/i)
+  ) {
+    vitalItems.push({ text: 'มีไข้', score: 74 });
+  }
+
+  if (vitalItems.length > 0) {
+    vitalItems.sort((a, b) => b.score - a.score);
+    const maxScore = vitalItems[0].score;
+    entries.push({
+      key: 'vital_signs',
+      category: 'vital',
+      categoryLabel: 'Vital signs',
+      legacyPrefixes: ['vital signs:'],
+      text: vitalItems.map((i) => i.text).join(', ').slice(0, 250),
+      severityScore: maxScore,
+      severityLevel: severityLevelFromScore(maxScore),
+    });
+  }
+
+  // 5. ผล Lab ผิดปกติ (ระบุผล/ภาวะปัญหาโดยตรง ไม่ใส่คำว่า "Lab ผิดปกติ")
+  const chemItems: { text: string; score: number }[] = [];
+  const k = parseNumericValue(laboratory.k);
+  const na = parseNumericValue(laboratory.na);
+  const cr = parseNumericValue(laboratory.cr);
+  const co2 = parseNumericValue(laboratory.co2);
+  const bun = parseNumericValue(laboratory.bun);
+  const cl = parseNumericValue(laboratory.cl);
+
+  if (Number.isFinite(k) && k > 0) {
+    if (k < 3.0) chemItems.push({ text: `Hypokalemia (K ${k})`, score: 97 });
+    else if (k > 5.5) chemItems.push({ text: `Hyperkalemia (K ${k})`, score: 98 });
+    else if (k < 3.5) chemItems.push({ text: `Hypokalemia (K ${k})`, score: 76 });
+    else if (k > 5.0) chemItems.push({ text: `Hyperkalemia (K ${k})`, score: 77 });
+  }
+  if (Number.isFinite(na) && na > 0) {
+    if (na < 128) chemItems.push({ text: `Hyponatremia (Na ${na})`, score: 92 });
+    else if (na > 152) chemItems.push({ text: `Hypernatremia (Na ${na})`, score: 92 });
+    else if (na < 135) chemItems.push({ text: `Hyponatremia (Na ${na})`, score: 70 });
+    else if (na > 145) chemItems.push({ text: `Hypernatremia (Na ${na})`, score: 70 });
+  }
+  if (Number.isFinite(cr) && cr > 1.5) {
+    chemItems.push({ text: `Cr สูง (${cr})`, score: cr > 2.5 ? 86 : 69 });
+  }
+  if (Number.isFinite(co2) && co2 > 0) {
+    if (co2 < 20) chemItems.push({ text: `CO2 ต่ำ (${co2})`, score: co2 < 15 ? 84 : 66 });
+    else if (co2 > 30) chemItems.push({ text: `CO2 สูง (${co2})`, score: co2 > 36 ? 84 : 66 });
+  }
+  if (Number.isFinite(bun) && bun > 25) {
+    chemItems.push({ text: `BUN สูง (${bun})`, score: bun > 50 ? 74 : 58 });
+  }
+  if (Number.isFinite(cl) && cl > 0) {
+    if (cl < 96) chemItems.push({ text: `Cl ต่ำ (${cl})`, score: 54 });
+    else if (cl > 108) chemItems.push({ text: `Cl สูง (${cl})`, score: 54 });
+  }
+  if (chemItems.length > 0) {
+    chemItems.sort((a, b) => b.score - a.score);
+    const maxScore = chemItems[0].score;
+    entries.push({
+      key: 'lab_chem',
+      category: 'lab',
+      categoryLabel: 'E-lyte/Renal',
+      legacyPrefixes: ['lab ผิดปกติ (e-lyte/renal):'],
+      text: chemItems.map((i) => i.text).join(', ').slice(0, 250),
+      severityScore: maxScore,
+      severityLevel: severityLevelFromScore(maxScore),
+    });
+  }
+
+  const cbcItems: { text: string; score: number }[] = [];
+  const hb = parseNumericValue(laboratory.hb);
+  const hct = parseNumericValue(laboratory.hct);
+  const plt = parseNumericValue(laboratory.plt);
+  const wbc = wbcVal;
+  const neutrophil = parseNumericValue(laboratory.neutrophil);
+
+  if (Number.isFinite(hb) && hb > 0) {
+    if (hb < 8) cbcItems.push({ text: `Anemia (Hb ${hb})`, score: 93 });
+    else if (hb < 10) cbcItems.push({ text: `Anemia (Hb ${hb})`, score: 73 });
+    else if (hb > 18) cbcItems.push({ text: `Hb สูง (${hb})`, score: 66 });
+  }
+  if (Number.isFinite(plt) && plt > 0) {
+    if (plt >= 1000) {
+      if (plt < 50000) cbcItems.push({ text: `Thrombocytopenia (Plt ${plt.toLocaleString()})`, score: 93 });
+      else if (plt < 100000) cbcItems.push({ text: `Plt ต่ำ (${plt.toLocaleString()})`, score: 75 });
+      else if (plt > 450000) cbcItems.push({ text: `Plt สูง (${plt.toLocaleString()})`, score: 56 });
+    } else {
+      if (plt < 50) cbcItems.push({ text: `Thrombocytopenia (Plt ${plt}k)`, score: 93 });
+      else if (plt < 100) cbcItems.push({ text: `Plt ต่ำ (${plt}k)`, score: 75 });
+      else if (plt > 450) cbcItems.push({ text: `Plt สูง (${plt}k)`, score: 56 });
+    }
+  }
+  if (Number.isFinite(hct) && hct > 0) {
+    if (hct < 24) cbcItems.push({ text: `Hct ต่ำ (${hct}%)`, score: 91 });
+    else if (hct < 30) cbcItems.push({ text: `Hct ต่ำ (${hct}%)`, score: 71 });
+    else if (hct > 54) cbcItems.push({ text: `Hct สูง (${hct}%)`, score: 64 });
+  }
+  if (Number.isFinite(wbc) && wbc > 0) {
+    if (wbc >= 100) {
+      if (wbc < 4000) cbcItems.push({ text: `WBC ต่ำ (${wbc.toLocaleString()})`, score: wbc < 2000 ? 78 : 60 });
+      else if (wbc > 12000) cbcItems.push({ text: `WBC สูง (${wbc.toLocaleString()})`, score: wbc > 20000 ? 76 : 58 });
+    } else {
+      if (wbc < 4) cbcItems.push({ text: `WBC ต่ำ (${wbc})`, score: wbc < 2 ? 78 : 60 });
+      else if (wbc > 12) cbcItems.push({ text: `WBC สูง (${wbc})`, score: wbc > 20 ? 76 : 58 });
+    }
+  }
+  if (Number.isFinite(neutrophil) && neutrophil > 80) {
+    cbcItems.push({ text: `PMN สูง (${neutrophil}%)`, score: 57 });
+  }
+  if (cbcItems.length > 0) {
+    cbcItems.sort((a, b) => b.score - a.score);
+    const maxScore = cbcItems[0].score;
+    entries.push({
+      key: 'lab_cbc',
+      category: 'lab',
+      categoryLabel: 'CBC',
+      legacyPrefixes: ['lab ผิดปกติ (cbc):'],
+      text: cbcItems.map((i) => i.text).join(', ').slice(0, 250),
+      severityScore: maxScore,
+      severityLevel: severityLevelFromScore(maxScore),
+    });
+  }
+
+  const otherLabItems: { text: string; score: number }[] = [];
+  const inr = parseNumericValue(laboratory.inr);
+  const pt = parseNumericValue(laboratory.pt);
+  const ptt = parseNumericValue(laboratory.ptt);
+  const glucose = parseNumericValue(laboratory.glucose);
+  const alb = parseNumericValue(laboratory.alb);
+  const sgot = parseNumericValue(laboratory.sgot);
+  const sgpt = parseNumericValue(laboratory.sgpt);
+  const alp = parseNumericValue(laboratory.alp);
+  const hba1c = parseNumericValue(laboratory.hba1c);
+
+  if (Number.isFinite(inr) && inr > 1.4) {
+    otherLabItems.push({
+      text: inr > 1.8 ? `Coagulopathy (INR ${inr})` : `INR สูง (${inr})`,
+      score: inr > 1.8 ? 91 : 74,
+    });
+  }
+  if (Number.isFinite(glucose) && glucose > 0) {
+    if (glucose < 60) otherLabItems.push({ text: `Hypoglycemia (DTX/Glu ${glucose})`, score: 94 });
+    else if (glucose > 300) otherLabItems.push({ text: `Hyperglycemia (DTX/Glu ${glucose})`, score: 90 });
+    else if (glucose < 70) otherLabItems.push({ text: `Hypoglycemia (DTX/Glu ${glucose})`, score: 77 });
+    else if (glucose > 200) otherLabItems.push({ text: `Hyperglycemia (DTX/Glu ${glucose})`, score: 69 });
+  }
+  if (Number.isFinite(pt) && pt > 15) {
+    otherLabItems.push({ text: `PT สูง (${pt})`, score: pt > 20 ? 82 : 70 });
+  }
+  if (Number.isFinite(ptt) && ptt > 40) {
+    otherLabItems.push({ text: `PTT สูง (${ptt})`, score: ptt > 55 ? 82 : 70 });
+  }
+  if (Number.isFinite(alb) && alb > 0 && alb < 3.0) {
+    otherLabItems.push({ text: `Alb ต่ำ (${alb})`, score: alb < 2.2 ? 72 : 60 });
+  }
+  if (Number.isFinite(sgot) && sgot > 80) {
+    otherLabItems.push({ text: `SGOT สูง (${sgot})`, score: sgot > 200 ? 74 : 59 });
+  }
+  if (Number.isFinite(sgpt) && sgpt > 80) {
+    otherLabItems.push({ text: `SGPT สูง (${sgpt})`, score: sgpt > 200 ? 74 : 59 });
+  }
+  if (Number.isFinite(alp) && alp > 150) {
+    otherLabItems.push({ text: `ALP สูง (${alp})`, score: 55 });
+  }
+  if (Number.isFinite(hba1c) && hba1c > 7.5) {
+    otherLabItems.push({ text: `HbA1c สูง (${hba1c}%)`, score: hba1c > 9.5 ? 72 : 62 });
+  }
+  const lactateVal = parseNumericValue(laboratory.lactate);
+  if (Number.isFinite(lactateVal) && lactateVal > 2.0) {
+    otherLabItems.push({
+      text: `Lactate สูง (${lactateVal} mmol/L)`,
+      score: lactateVal > 4.0 ? 92 : 80,
+    });
+  }
+  const tropIRaw = (laboratory.tropI ?? '').trim();
+  if (tropIRaw && !/^(?:-|—|neg|negative|normal|wnl|ปกติ|<)/i.test(tropIRaw)) {
+    const tropNum = parseNumericValue(tropIRaw);
+    const hasHighKeyword = /\b(?:pos|positive|high|elevated)\b|สูง|ผิดปกติ|\+/i.test(tropIRaw);
+    const isNgMl = /ng\s*\/\s*ml/i.test(tropIRaw);
+    const isElevatedNumeric =
+      Number.isFinite(tropNum) &&
+      (isNgMl ? tropNum > 0.04 : tropNum > 34 || (tropNum > 0.04 && tropNum < 1));
+    if (hasHighKeyword || isElevatedNumeric) {
+      otherLabItems.push({
+        text: `Trop I สูง (${tropIRaw})`,
+        score: 90,
+      });
+    }
+  }
+  if (laboratory.antiHiv === 'positive') {
+    otherLabItems.push({
+      text: 'Anti-HIV positive',
+      score: 72,
+    });
+  }
+  const customLabs = Array.isArray(laboratory.customLabs) ? laboratory.customLabs : [];
+  for (const clItem of customLabs) {
+    const cName = (clItem?.name ?? '').trim();
+    const cVal = (clItem?.value ?? '').trim();
+    if (!cName && !cVal) continue;
+    const combined = cName && cVal ? `${cName} ${cVal}` : cName || cVal;
+    const isBenignVal =
+      /^(?:-|—|neg|negative|non-?reactive|normal|wnl|ปกติ|ไม่พบ|none|no)$/i.test(cVal) ||
+      (!cVal && /^(?:-|—|normal|wnl|ปกติ)$/i.test(cName));
+    if (isBenignVal) continue;
+
+    const cNum = parseNumericValue(cVal);
+    const nameLower = cName.toLowerCase();
+    const hasPosOrAbn =
+      /\b(?:pos|positive|reactive|high|low|abnormal|elevated|critical|acidosis)\b|สูง|ต่ำ|ผิดปกติ|\+/i.test(
+        cVal,
+      );
+
+    let customScore: number | null = null;
+    if (hasPosOrAbn) {
+      customScore = /hiv|hbsag|hcv|covid|tb|vdrl|upt/i.test(nameLower) ? 74 : 80;
+    } else if (Number.isFinite(cNum)) {
+      if (/\begfr\b/i.test(nameLower) && cNum < 60) customScore = cNum < 30 ? 84 : 72;
+      else if (/\bph\b/i.test(nameLower) && (cNum < 7.35 || cNum > 7.45)) customScore = cNum < 7.25 ? 92 : 82;
+      else if (/\b(?:ca|calcium)\b/i.test(nameLower) && (cNum < 8.0 || cNum > 10.5)) customScore = cNum < 7.0 || cNum > 12.0 ? 86 : 70;
+      else if (/\b(?:mg|magnesium)\b/i.test(nameLower) && (cNum < 1.5 || cNum > 2.6)) customScore = 72;
+      else if (/\b(?:t\.?\s*bil|total\s+bil|bilirubin)\b/i.test(nameLower) && cNum > 2.0) customScore = 68;
+      else if (/\b(?:procalcitonin|pct)\b/i.test(nameLower) && cNum > 0.5) customScore = cNum > 2.0 ? 84 : 72;
+      else if (/\b(?:d-?dimer|bnp|nt-?probnp|ck-?mb)\b/i.test(nameLower) && cNum > 0) customScore = 76;
+    }
+    if (customScore !== null) {
+      otherLabItems.push({ text: combined, score: customScore });
+    }
+  }
+  if (isMeaningfulClinicalNote(laboratory.other)) {
+    const labOther = laboratory.other.trim();
+    const isCriticalLabOther =
+      /\b(?:troponin|trop|lactate|acidosis|abg|ph\s*7\.[012]|hyperkal|hypokal|coagul|dic|positive|pos|reactive)\b|สูง|ต่ำ|ผิดปกติ/i.test(
+        labOther,
+      );
+    const isBenignLabOther =
+      /\b(?:negative|neg|non-?reactive|normal|wnl)\b|ปกติ|ไม่พบ/i.test(labOther) &&
+      !isCriticalLabOther;
+    if (!isBenignLabOther) {
+      otherLabItems.push({
+        text: labOther,
+        score: isCriticalLabOther ? 83 : 65,
+      });
+    }
+  }
+  if (otherLabItems.length > 0) {
+    otherLabItems.sort((a, b) => b.score - a.score);
+    const maxScore = otherLabItems[0].score;
+    entries.push({
+      key: 'lab_other',
+      category: 'lab',
+      categoryLabel: 'Coag/LFT/Glu',
+      legacyPrefixes: ['lab ผิดปกติ (coag/lft/glu):'],
+      text: otherLabItems.map((i) => i.text).join(', ').slice(0, 250),
+      severityScore: maxScore,
+      severityLevel: severityLevelFromScore(maxScore),
+    });
+  }
+
+  // 6. Renal Failure / ESRD / AKI
+  const renalItems: { text: string; score: number }[] = [];
+  const hasEsrd = hasPositiveClinicalMatch(
+    clinicalCorpus,
+    /\b(?:esrd|end[\s-]stage\s+renal|on\s+hd|hemodialysis|haemodialysis|capd)\b|ฟอกไต|ไตวายเรื้อรังระยะสุดท้าย/i,
+  );
+  const hasAkiOrRenalFailure = hasPositiveClinicalMatch(
+    clinicalCorpus,
+    /\b(?:aki|acute\s+kidney\s+injury|acute\s+renal\s+failure|arf|renal\s+failure|kidney\s+failure)\b|ไตวาย/i,
+  );
+  if (hasEsrd) {
+    const dialysisMode = /\bcapd\b/i.test(clinicalCorpus)
+      ? ' (CAPD)'
+      : /\b(?:on\s+hd|hemodialysis|haemodialysis)\b|ฟอกไต/i.test(clinicalCorpus)
+      ? ' (on HD)'
+      : '';
+    renalItems.push({ text: `ESRD / Renal failure${dialysisMode}`, score: 88 });
+  } else if (hasAkiOrRenalFailure) {
+    renalItems.push({ text: 'Renal failure / AKI', score: 87 });
+  }
+  if (renalItems.length > 0) {
+    renalItems.sort((a, b) => b.score - a.score);
+    const maxScore = renalItems[0].score;
+    entries.push({
+      key: 'renal_failure',
+      category: 'renal',
+      categoryLabel: 'Renal',
+      legacyPrefixes: [],
+      text: renalItems.map((i) => i.text).join(', ').slice(0, 250),
+      severityScore: maxScore,
+      severityLevel: severityLevelFromScore(maxScore),
+    });
+  }
+
+  // 7. Cardiopulmonary / Investigation Findings
+  const cardiopulmItems: { text: string; score: number }[] = [];
+  if (physicalExam.heartSound === 'abnormal') {
+    cardiopulmItems.push({
+      text: `Heart sound abnormal${physicalExam.heartSoundDetail.trim() ? ` (${physicalExam.heartSoundDetail.trim()})` : ''}`,
+      score: 82,
+    });
+  }
+  if (investigation.ekgStatus === 'abnormal') {
+    cardiopulmItems.push({
+      text: `EKG abnormal${investigation.ekgDetail.trim() ? ` (${investigation.ekgDetail.trim()})` : ''}`,
+      score: 81,
+    });
+  }
+  if (physicalExam.breathSound === 'abnormal') {
+    cardiopulmItems.push({
+      text: `Breath sound abnormal${physicalExam.breathSoundDetail.trim() ? ` (${physicalExam.breathSoundDetail.trim()})` : ''}`,
+      score: 80,
+    });
+  }
+  if (investigation.cxrStatus === 'abnormal') {
+    cardiopulmItems.push({
+      text: `CXR abnormal${investigation.cxrDetail.trim() ? ` (${investigation.cxrDetail.trim()})` : ''}`,
+      score: 68,
+    });
+  }
+  if (isMeaningfulClinicalNote(investigation.other)) {
+    const invOther = investigation.other.trim();
+    const isCriticalInv =
+      /\b(?:low\s+ef|ef\s*<?\s*[1-4]\d|ich|sdh|edh|sah|herniation|ischemi|infarct|embolism|effusion|edema|pneumothorax|tamponade|stenosis|regurgitation|mass|aneurysm|dissection)\b|เลือดออกในสมอง|น้ำท่วมปอด/i.test(
+        invOther,
+      );
+    const isBenignInv =
+      /\b(?:normal|wnl|unremarkable|negative|no\s+acute)\b|ปกติ|ไม่พบความผิดปกติ/i.test(invOther) &&
+      !isCriticalInv;
+    if (!isBenignInv) {
+      cardiopulmItems.push({
+        text: invOther,
+        score: isCriticalInv ? 84 : 70,
+      });
+    }
+  }
+
+  if (cardiopulmItems.length > 0) {
+    cardiopulmItems.sort((a, b) => b.score - a.score);
+    const maxScore = cardiopulmItems[0].score;
+    entries.push({
+      key: 'risk_cardiopulm',
+      category: 'risk',
+      categoryLabel: 'ปอด/หัวใจ/CXR/EKG',
+      legacyPrefixes: ['risk (cardiopulm/inv):'],
+      text: cardiopulmItems.map((i) => i.text).join(', ').slice(0, 250),
+      severityScore: maxScore,
+      severityLevel: severityLevelFromScore(maxScore),
+    });
+  }
+
+  // 8. Additional Clinical Conditions discovered from Diagnosis / History / Functional Capacity / Consult
+  const conditionItems: { text: string; score: number }[] = [];
+  const otherUnderlyingJoined = [
+    ...history.otherUnderlying,
+    history.underlyingDetail,
+    history.heartDiseaseDetail,
+    history.ckdDetail,
+    history.dmDetail,
+    history.htDetail,
+    history.dlpDetail,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  const clinicalMatchers: readonly {
+    label: string;
+    re: RegExp;
+    score: number;
+    skipIfInUnderlying?: RegExp;
+  }[] = [
+    { label: 'Increased ICP / Brain herniation', re: /\b(?:increased\s+icp|iicp|brain\s+herniation|herniation)\b|ความดันในกะโหลกศีรษะสูง/i, score: 94 },
+    { label: 'ACS / MI', re: /\b(?:acs|stemi|nstemi|acute\s+coronary|myocardial\s+infarction)\b|กล้ามเนื้อหัวใจขาดเลือดเฉียบพลัน/i, score: 93 },
+    { label: 'ICH / SDH / EDH', re: /\b(?:ich|sdh|edh|sah|intracranial\s+hemorrhage|subdural\s+hematoma|epidural\s+hematoma)\b|เลือดออกในสมอง/i, score: 92 },
+    { label: 'Pneumothorax', re: /\bpneumothorax\b|ลมรั่วในช่องเยื่อหุ้มปอด/i, score: 92 },
+    { label: 'Pulmonary edema', re: /\b(?:pulmonary\s+edema|acute\s+pulmonary\s+edema)\b|น้ำท่วมปอด/i, score: 91 },
+    { label: 'DKA / HHS', re: /\b(?:dka|diabetic\s+ketoacidosis|hhs)\b/i, score: 91 },
+    { label: 'Active bleeding / UGIB', re: /\b(?:ugib|lgib|active\s+bleeding|massive\s+bleeding|hemorrhage|ruptured\s+aaa|ruptured\s+ectopic)\b|เลือดออกในทางเดินอาหาร/i, score: 90 },
+    { label: 'Alteration of consciousness / GCS ต่ำ', re: /\b(?:coma|stupor|drowsy|obtunded|alteration\s+of\s+consciousness|gcs\s*(?:<=?|<)?\s*(?:[3-9]|1[0-2])\b)\b|ซึมลง|ไม่รู้สึกตัว/i, score: 90 },
+    { label: 'Metabolic acidosis', re: /\b(?:metabolic\s+acidosis|lactic\s+acidosis|acidosis)\b/i, score: 88 },
+    { label: 'Eclampsia / Preeclampsia', re: /\b(?:eclampsia|preeclampsia|pre-?eclampsia|hellp|pih)\b|ครรภ์เป็นพิษ/i, score: 88 },
+    { label: 'Fetal distress', re: /\bfetal\s+distress\b|ทารกในครรภ์มีภาวะคับขัน/i, score: 88 },
+    { label: 'CHF / Heart failure', re: /\b(?:chf|heart\s+failure|congestive\s+heart\s+failure|hfref|hfpef)\b|หัวใจล้มเหลว|หัวใจวาย/i, score: 87 },
+    { label: 'Placenta previa / Abruption', re: /\b(?:placenta\s+previa|abruptio\s+placentae|placental\s+abruption)\b|รกเกาะต่ำ|รกลอกตัวก่อนกำหนด/i, score: 86 },
+    { label: 'Peritonitis / Perforated viscus', re: /\b(?:peritonitis|perforated|perforation|bowel\s+ischemia|necrotizing\s+fasciitis)\b|เยื่อบุช่องท้องอักเสบ/i, score: 86 },
+    { label: 'Gut obstruction (Full stomach risk)', re: /\b(?:gut\s+obstruction|bowel\s+obstruction|intestinal\s+obstruction|gastric\s+outlet\s+obstruction)\b|ลำไส้อุดตัน/i, score: 84 },
+    { label: 'Cirrhosis / Liver failure', re: /\b(?:cirrhosis|liver\s+failure|hepatic\s+failure|hepatic\s+encephalopathy)\b|ตับแข็ง|ตับวาย/i, score: 82, skipIfInUnderlying: /cirrhosis|ตับแข็ง/i },
+    { label: 'AF / Arrhythmia', re: /\b(?:atrial\s+fibrillation|af\s+with\s+rvr|svt|ventricular\s+tachycardia|arrhythmia|complete\s+heart\s+block|chb)\b/i, score: 82, skipIfInUnderlying: /\baf\b|arrhythmia/i },
+    { label: 'Pneumonia', re: /\b(?:pneumonia|aspiration\s+pneumonia|vap|hap)\b|ปอดอักเสบ|ปอดติดเชื้อ/i, score: 80 },
+    { label: 'Thyrotoxicosis / Hyperthyroidism', re: /\b(?:thyrotoxicosis|thyroid\s+storm|hyperthyroid\w*)\b|ไทรอยด์เป็นพิษ/i, score: 80, skipIfInUnderlying: /hyperthyroid|thyrotoxicosis|ไทรอยด์/i },
+    { label: 'Active TB', re: /\b(?:pulmonary\s+tb|active\s+tb|tuberculosis)\b|วัณโรคปอด/i, score: 80, skipIfInUnderlying: /\btb\b|วัณโรค/i },
+    { label: 'COVID-19', re: /\bcovid[\s-]?19\b|โควิด/i, score: 80 },
+    { label: 'Stroke / CVA', re: /\b(?:stroke|cva|cerebral\s+infarction|ischemic\s+stroke)\b|หลอดเลือดสมอง/i, score: 78, skipIfInUnderlying: /stroke|cva|หลอดเลือดสมอง/i },
+    { label: 'IHD / CAD', re: /\b(?:ihd|cad|coronary\s+artery\s+disease|ischemic\s+heart)\b/i, score: 78, skipIfInUnderlying: /\b(?:ihd|cad)\b/i },
+    { label: 'Pleural effusion', re: /\bpleural\s+effusion\b|น้ำในช่องเยื่อหุ้มปอด/i, score: 76 },
+    { label: 'COPD', re: /\bcopd\b|ถุงลมโป่งพอง/i, score: 74, skipIfInUnderlying: /copd|ถุงลมโป่งพอง/i },
+    { label: 'Pregnancy', re: /\b(?:pregnan\w*|g\d+p\d+|ga\s*\d+\s*wk|cesarean|caesarean)\b|ตั้งครรภ์/i, score: 74 },
+    { label: 'OSA', re: /\b(?:osa|obstructive\s+sleep\s+apnea)\b|หยุดหายใจขณะหลับ/i, score: 72, skipIfInUnderlying: /\bosa\b/i },
+    { label: 'Seizure / Epilepsy', re: /\b(?:seizure|epilepsy|status\s+epilepticus)\b|ลมชัก/i, score: 72, skipIfInUnderlying: /epilepsy|seizure|ลมชัก/i },
+    { label: 'Hypothyroidism', re: /\bhypothyroid\w*\b/i, score: 72, skipIfInUnderlying: /hypothyroid/i },
+    { label: 'Asthma', re: /\basthma\b|หอบหืด/i, score: 70, skipIfInUnderlying: /asthma|หอบหืด/i },
+    { label: 'HIV', re: /\b(?:hiv|anti-?hiv\s*(?:pos|reactive))\b/i, score: 70, skipIfInUnderlying: /\bhiv\b/i },
+    { label: 'HBV / HCV', re: /\b(?:hbv|hcv|hbsag\s*(?:pos|reactive)|hepatitis\s+[bc])\b/i, score: 68, skipIfInUnderlying: /\b(?:hbv|hcv)\b/i },
+  ];
+
+  for (const matcher of clinicalMatchers) {
+    if (matcher.label === 'HIV' && laboratory.antiHiv === 'positive') {
+      continue;
+    }
+    if (matcher.skipIfInUnderlying && matcher.skipIfInUnderlying.test(otherUnderlyingJoined)) {
+      continue;
+    }
+    if (hasPositiveClinicalMatch(clinicalCorpus, matcher.re)) {
+      conditionItems.push({ text: matcher.label, score: matcher.score });
+    }
+  }
+
+  // Poor functional capacity (< 4 METs, bedridden, NYHA III-IV)
+  const fc = physicalExam.functionalCapacity.trim();
+  if (
+    fc &&
+    /(?:<\s*4|\b[1-3]\s*met|poor|bedridden|nyha\s*(?:iii|iv|3|4)|ติดเตียง|ช่วยเหลือตัวเองไม่ได้)/i.test(
+      fc,
+    )
+  ) {
+    conditionItems.push({
+      text: `Poor functional capacity (${fc})`,
+      score: 76,
+    });
+  }
+
+  // Explicit Not NPO / Full stomach note
+  const npoCheckText = [premedication.npoTime, history.presentIllness].filter(Boolean).join(' | ');
+  if (
+    /\b(?:not\s+npo|non-?npo|full\s+stomach)\b|ไม่\s*npo|ไม่ได้\s*npo|งดน้ำงดอาหารไม่ครบ|เพิ่งทาน|เพิ่งรับประทาน/i.test(
+      npoCheckText,
+    ) &&
+    !(record.asaEmergency || record.scheduleType === 'emergency')
+  ) {
+    conditionItems.push({ text: 'Full stomach / Not NPO', score: 85 });
+  }
+
+  if (conditionItems.length > 0) {
+    conditionItems.sort((a, b) => b.score - a.score);
+    const maxScore = conditionItems[0].score;
+    entries.push({
+      key: 'clinical_conditions',
+      category: 'clinical',
+      categoryLabel: 'ภาวะโรค/ปัญหาที่พบ',
+      legacyPrefixes: [],
+      text: conditionItems.map((i) => i.text).join(', ').slice(0, 250),
+      severityScore: maxScore,
+      severityLevel: severityLevelFromScore(maxScore),
+    });
+  }
+
+  // 9. Blood preparation not ready
+  const bloodStatuses = Array.isArray(laboratory.prepStatuses) ? laboratory.prepStatuses : [];
+  const bloodIssues: string[] = [];
+  if (bloodStatuses.includes('not_ready')) bloodIssues.push('จองเลือดยังไม่พร้อมใช้');
+  if (bloodStatuses.includes('waiting_red_cross')) bloodIssues.push('รอเลือดจากกาชาด');
+  if (bloodIssues.length > 0) {
+    const detail = laboratory.prepStatusDetail.trim();
+    entries.push({
+      key: 'blood_prep',
+      category: 'risk',
+      categoryLabel: 'การจองเลือด',
+      legacyPrefixes: [],
+      text: `${bloodIssues.join(', ')}${detail ? ` (${detail})` : ''}`.slice(0, 250),
+      severityScore: 85,
+      severityLevel: severityLevelFromScore(85),
+    });
+  }
+
+  // 10. Allergy Risk (anaphylaxis safety critical)
+  if (history.allergyStatus === 'yes') {
+    const detail = history.allergyDetail.trim();
+    const score = 88;
+    entries.push({
+      key: 'risk_allergy',
+      category: 'risk',
+      categoryLabel: 'แพ้ยา/อาหาร',
+      legacyPrefixes: ['risk (allergy):'],
+      text: `แพ้ยา/อาหาร${detail ? ` (${detail})` : ''}`.slice(0, 250),
+      severityScore: score,
+      severityLevel: severityLevelFromScore(score),
+    });
+  }
+
+  // 11. General Clinical Risks (Emergency, Prev anesth comp, Anticoag/Antiplatelet, Age, Substance)
+  const generalRiskItems: { text: string; score: number }[] = [];
+  if (isMeaningfulClinicalNote(history.previousOpComplication)) {
+    generalRiskItems.push({
+      text: `Prev. anesth. complication (${history.previousOpComplication.trim()})`,
+      score: 85,
+    });
+  }
+  if (record.asaEmergency || record.scheduleType === 'emergency') {
+    generalRiskItems.push({ text: 'Emergency (Full stomach risk)', score: 84 });
+  }
+  if (history.medication.trim()) {
+    const matchedAnti = ANTITHROMBOTIC_DRUG_PATTERNS.filter((item) =>
+      item.re.test(history.medication),
+    );
+    if (matchedAnti.length > 0) {
+      const hasHighRisk = matchedAnti.some((m) => m.highRisk);
+      generalRiskItems.push({
+        text: `On Anticoagulant/Antiplatelet (${matchedAnti.map((m) => m.label).join(', ')})`,
+        score: hasHighRisk ? 80 : 66,
+      });
+    }
+  }
+  if (Number.isFinite(ageVal) && ageVal > 0) {
+    if (ageVal < 15) generalRiskItems.push({ text: `Pediatric (อายุ ${ageVal} ปี)`, score: 63 });
+    else if (ageVal >= 65) generalRiskItems.push({ text: `Elderly (อายุ ${ageVal} ปี)`, score: ageVal >= 80 ? 68 : 58 });
+  }
+
+  if (generalRiskItems.length > 0) {
+    generalRiskItems.sort((a, b) => b.score - a.score);
+    const maxScore = generalRiskItems[0].score;
+    entries.push({
+      key: 'risk_general',
+      category: 'risk',
+      categoryLabel: 'Risk',
+      legacyPrefixes: ['risk:'],
+      text: generalRiskItems.map((i) => i.text).join(', ').slice(0, 250),
+      severityScore: maxScore,
+      severityLevel: severityLevelFromScore(maxScore),
+    });
+  }
+
+  // 11b. Substance Use (Addiction, Smoking, Alcohol use) — dedicated clear entries
+  const hasAddictionData =
+    history.drugAddictionStatus === 'yes' ||
+    (history.drugAddictionStatus !== 'no' &&
+      ((history.drugAddictionTypes?.length ?? 0) > 0 ||
+        Boolean(history.drugAddictionOther?.trim()))) ||
+    (history.drugAddictionStatus !== 'no' &&
+      hasPositiveClinicalMatch(
+        clinicalCorpus,
+        /\b(?:drug\s+addiction|substance\s+abuse|substance\s+use|amphetamine|methamphetamine|opioid\s+dependence|kratom)\b|สารเสพติด|ติดยาเสพติด/i,
+      ));
+  if (hasAddictionData) {
+    const drugDetail = formatDrugAddictionDetail(history);
+    const addictionScore = history.drugAddictionQuit ? 45 : 61;
+    entries.push({
+      key: 'substance_addiction',
+      category: 'risk',
+      categoryLabel: 'Addiction',
+      legacyPrefixes: ['drug addiction'],
+      text: (drugDetail ? `Addiction (${drugDetail})` : 'Addiction').slice(0, 250),
+      severityScore: addictionScore,
+      severityLevel: severityLevelFromScore(addictionScore),
+    });
+  }
+
+  const hasSmokingData =
+    history.smokingStatus === 'yes' ||
+    (history.smokingStatus !== 'no' &&
+      (Boolean(history.smokingCigsPerDay?.trim()) || Boolean(history.smokingYears?.trim()))) ||
+    (history.smokingStatus !== 'no' &&
+      hasPositiveClinicalMatch(
+        clinicalCorpus,
+        /\b(?:smoking|smoker|ex-?smoker|heavy\s+smoker)\b|สูบบุหรี่/i,
+      ));
+  if (hasSmokingData) {
+    const smokeParts: string[] = [];
+    if (history.smokingCigsPerDay?.trim()) smokeParts.push(`${history.smokingCigsPerDay.trim()} มวน/วัน`);
+    if (history.smokingYears?.trim()) {
+      smokeParts.push(
+        `${history.smokingYears.trim()} ${history.smokingDurationUnit === 'months' ? 'เดือน' : 'ปี'}`,
+      );
+    }
+    if (history.smokingQuit || history.smokingQuitDuration?.trim()) {
+      smokeParts.push(
+        history.smokingQuitDuration?.trim()
+          ? `เลิก ${history.smokingQuitDuration.trim()} ${history.smokingQuitUnit === 'months' ? 'เดือน' : 'ปี'}`
+          : 'Ex-smoker',
+      );
+    }
+    const smokingScore = history.smokingQuit ? 38 : 52;
+    entries.push({
+      key: 'substance_smoking',
+      category: 'risk',
+      categoryLabel: 'Smoking',
+      legacyPrefixes: ['active smoking', 'ex-smoker'],
+      text: (smokeParts.length > 0 ? `Smoking (${smokeParts.join(' · ')})` : 'Smoking').slice(0, 250),
+      severityScore: smokingScore,
+      severityLevel: severityLevelFromScore(smokingScore),
+    });
+  }
+
+  const hasAlcoholWithdrawal = hasPositiveClinicalMatch(
+    clinicalCorpus,
+    /\b(?:alcohol\s+withdrawal|delirium\s+tremens|dt\s+from\s+alcohol)\b|ถอนสุรา|ลงแดง/i,
+  );
+  const hasAlcoholData =
+    history.drinkingStatus === 'yes' ||
+    hasAlcoholWithdrawal ||
+    (history.drinkingStatus !== 'no' &&
+      (Boolean(history.drinkingDaysPerWeek?.trim()) || Boolean(history.drinkingYears?.trim()))) ||
+    (history.drinkingStatus !== 'no' &&
+      hasPositiveClinicalMatch(
+        clinicalCorpus,
+        /\b(?:alcohol\s+use|alcoholism|alcoholic|alcohol\s+dependence|heavy\s+drinker)\b|ดื่มสุรา|ดื่มแอลกอฮอล์|ติดสุรา/i,
+      ));
+  if (hasAlcoholData) {
+    const drinkParts: string[] = [];
+    if (history.drinkingDaysPerWeek?.trim()) drinkParts.push(`${history.drinkingDaysPerWeek.trim()} วัน/wk`);
+    if (history.drinkingYears?.trim()) {
+      drinkParts.push(
+        `${history.drinkingYears.trim()} ${history.drinkingDurationUnit === 'months' ? 'เดือน' : 'ปี'}`,
+      );
+    }
+    if (history.drinkingQuit || history.drinkingQuitDuration?.trim()) {
+      drinkParts.push(
+        history.drinkingQuitDuration?.trim()
+          ? `เลิก ${history.drinkingQuitDuration.trim()} ${history.drinkingQuitUnit === 'months' ? 'เดือน' : 'ปี'}`
+          : 'เลิกแล้ว',
+      );
+    }
+    const alcoholScore = hasAlcoholWithdrawal ? 86 : history.drinkingQuit ? 36 : 50;
+    const baseLabel = hasAlcoholWithdrawal ? 'Alcohol withdrawal / Alcohol use' : 'Alcohol use';
+    entries.push({
+      key: 'substance_alcohol',
+      category: 'risk',
+      categoryLabel: 'Alcohol use',
+      legacyPrefixes: ['alcohol drinking', 'history of alcohol use'],
+      text: (drinkParts.length > 0 ? `${baseLabel} (${drinkParts.join(' · ')})` : baseLabel).slice(0, 250),
+      severityScore: alcoholScore,
+      severityLevel: severityLevelFromScore(alcoholScore),
+    });
+  }
+
+  // 12. BMI
+  const rawBmi = physicalExam.bmi.trim() || calculateBmi(physicalExam.bw, physicalExam.ht);
+  const bmiVal = parseNumericValue(rawBmi);
+  if (Number.isFinite(bmiVal) && bmiVal >= 10 && bmiVal <= 100) {
+    let bmiRiskDesc = '';
+    let bmiScore = 0;
+    if (bmiVal >= 40) {
+      bmiRiskDesc = `Morbid Obesity (BMI ${bmiVal.toFixed(1)})`;
+      bmiScore = 83;
+    } else if (bmiVal >= 35) {
+      bmiRiskDesc = `Obesity (BMI ${bmiVal.toFixed(1)})`;
+      bmiScore = 73;
+    } else if (bmiVal >= 30) {
+      bmiRiskDesc = `Obesity (BMI ${bmiVal.toFixed(1)})`;
+      bmiScore = 59;
+    } else if (bmiVal < 18.5) {
+      bmiRiskDesc = `Underweight (BMI ${bmiVal.toFixed(1)})`;
+      bmiScore = bmiVal < 16 ? 62 : 44;
+    } else if (bmiVal >= 25) {
+      bmiRiskDesc = `Overweight (BMI ${bmiVal.toFixed(1)})`;
+      bmiScore = 41;
+    }
+
+    if (bmiRiskDesc) {
+      entries.push({
+        key: 'bmi',
+        category: 'bmi',
+        categoryLabel: 'BMI',
+        legacyPrefixes: ['risk bmi:'],
+        text: bmiRiskDesc.slice(0, 250),
+        severityScore: bmiScore,
+        severityLevel: severityLevelFromScore(bmiScore),
+      });
+    }
+  }
+
+  // 13. โรคประจำตัว (ลงชื่อโรคโดยตรง ไม่ใส่คำว่า "โรคประจำตัว:")
+  const underlyingItems: { text: string; score: number }[] = [];
+  if (history.heartDisease) {
+    underlyingItems.push({
+      text: formatUnderlyingDiseaseTag('โรคหัวใจ', history.heartDiseaseYears, history.heartDiseaseDetail, 'ปี'),
+      score: 79,
+    });
+  }
+  if (history.ckd) {
+    underlyingItems.push({
+      text: formatUnderlyingDiseaseTag('CKD', history.ckdYears, history.ckdDetail, 'ปี'),
+      score: 75,
+    });
+  } else if (
+    !hasEsrd &&
+    !hasAkiOrRenalFailure &&
+    hasPositiveClinicalMatch(clinicalCorpus, /\b(?:ckd|chronic\s+kidney\s+disease)\b|โรคไตเรื้อรัง/i)
+  ) {
+    underlyingItems.push({ text: 'CKD', score: 75 });
+  }
+  if (history.dm) {
+    underlyingItems.push({
+      text: formatUnderlyingDiseaseTag('DM', history.dmYears, history.dmDetail, 'ปี'),
+      score: 60,
+    });
+  }
+  if (history.ht) {
+    underlyingItems.push({
+      text: formatUnderlyingDiseaseTag('HT', history.htYears, history.htDetail, 'ปี'),
+      score: 56,
+    });
+  }
+  history.otherUnderlying
+    .map((u) => u.trim())
+    .filter(Boolean)
+    .forEach((u) => underlyingItems.push({ text: u, score: 57 }));
+  if (history.dlp) {
+    underlyingItems.push({
+      text: formatUnderlyingDiseaseTag('DLP', history.dlpYears, history.dlpDetail, 'ปี'),
+      score: 38,
+    });
+  }
+  if (history.underlyingDetail?.trim()) {
+    underlyingItems.push({
+      text: history.underlyingDetail.trim(),
+      score: 37,
+    });
+  }
+
+  if (underlyingItems.length > 0) {
+    underlyingItems.sort((a, b) => b.score - a.score);
+    const maxScore = underlyingItems[0].score;
+    entries.push({
+      key: 'underlying',
+      category: 'underlying',
+      categoryLabel: 'โรคประจำตัว',
+      legacyPrefixes: ['โรคประจำตัว:'],
+      text: underlyingItems.map((i) => i.text).join(', ').slice(0, 250),
+      severityScore: maxScore,
+      severityLevel: severityLevelFromScore(maxScore),
+    });
+  }
+
+  // Sort all auto-generated Problem List entries strictly by clinical priority
+  entries.sort((a, b) => b.severityScore - a.severityScore);
+  return entries;
+}
+
+function insertProblemLine(items: string[], line: string): void {
+  const emptyIdx = items.findIndex((x) => !x.trim());
+  if (emptyIdx !== -1) {
+    items[emptyIdx] = line;
+  } else if (items.length < 12) {
+    items.push(line);
+  }
+}
+
+function normalizeProblemSlots(items: string[], compactNonEmpty: boolean): string[] {
+  const list = compactNonEmpty ? items.filter((x) => x.trim().length > 0) : [...items];
+  const minSlots = Math.max(6, list.length);
+  while (list.length < minSlots && list.length < 12) {
+    list.push('');
+  }
+  return list.slice(0, 12);
+}
+
+function getSeverityScoreForLine(line: string, autoEntries: AutoProblemEntry[]): number | null {
+  const lower = line.trim().toLowerCase();
+  if (!lower) return null;
+  const exact = autoEntries.find((e) => e.text.toLowerCase() === lower);
+  if (exact) return exact.severityScore;
+  const byLegacyPrefix = autoEntries.find((e) => matchesLegacyPrefix(lower, e.legacyPrefixes));
+  if (byLegacyPrefix) return byLegacyPrefix.severityScore;
+  return null;
+}
+
+export function sortProblemListBySeverity(
+  items: string[],
+  autoEntries: AutoProblemEntry[],
+): string[] {
+  const nonEmpty = items
+    .map((text, idx) => ({
+      text: text.trim(),
+      idx,
+      score: getSeverityScoreForLine(text, autoEntries),
+    }))
+    .filter((item) => item.text.length > 0);
+
+  if (nonEmpty.length <= 1) {
+    return normalizeProblemSlots(items, false);
+  }
+
+  nonEmpty.sort((a, b) => {
+    const aHasScore = a.score !== null;
+    const bHasScore = b.score !== null;
+    if (aHasScore && bHasScore && a.score !== b.score) {
+      return (b.score as number) - (a.score as number);
+    }
+    if (aHasScore !== bHasScore) return aHasScore ? -1 : 1;
+    return a.idx - b.idx;
+  });
+
+  return normalizeProblemSlots(
+    nonEmpty.map((item) => item.text),
+    false,
+  );
+}
+
+export function isProblemListSortedBySeverity(record: PreAnestheticEvaluation): boolean {
+  const autoEntries = generateAutoProblemEntries(record);
+  const currentNonEmpty = record.formData.problemList.map((s) => s.trim()).filter(Boolean);
+  if (currentNonEmpty.length <= 1) return true;
+  const sortedNonEmpty = sortProblemListBySeverity(
+    record.formData.problemList,
+    autoEntries,
+  )
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return (
+    currentNonEmpty.length === sortedNonEmpty.length &&
+    currentNonEmpty.every((val, i) => val === sortedNonEmpty[i])
+  );
+}
+
+export function syncProblemListWithPatientData(
+  prevRecord: PreAnestheticEvaluation,
+  nextRecord: PreAnestheticEvaluation,
+): string[] {
+  // Respect explicit direct edits to problemList
+  if (prevRecord.formData.problemList !== nextRecord.formData.problemList) {
+    return nextRecord.formData.problemList;
+  }
+
+  const prevAuto = generateAutoProblemEntries(prevRecord);
+  const nextAuto = generateAutoProblemEntries(nextRecord);
+
+  if (prevAuto.length === 0 && nextAuto.length === 0) {
+    return nextRecord.formData.problemList;
+  }
+
+  const isIdentical =
+    prevAuto.length === nextAuto.length &&
+    prevAuto.every(
+      (entry, i) =>
+        entry.key === nextAuto[i].key &&
+        entry.text === nextAuto[i].text &&
+        entry.severityScore === nextAuto[i].severityScore,
+    );
+  if (isIdentical) {
+    return nextRecord.formData.problemList;
+  }
+
+  const items = [...nextRecord.formData.problemList];
+  const prevByKey = new Map(prevAuto.map((e) => [e.key, e]));
+  const nextByKey = new Map(nextAuto.map((e) => [e.key, e]));
+  const handledKeys = new Set<string>();
+  let mutated = false;
+
+  // 1. Update in-place or remove previous auto-generated problem lines (also upgrades legacy prefixed lines)
+  for (const prevEntry of prevAuto) {
+    const prevLower = prevEntry.text.toLowerCase();
+    const existingIdx = items.findIndex((it) => {
+      const lower = it.trim().toLowerCase();
+      return lower === prevLower || matchesLegacyPrefix(lower, prevEntry.legacyPrefixes);
+    });
+    if (existingIdx === -1) continue;
+
+    const nextEntry = nextByKey.get(prevEntry.key);
+    if (nextEntry) {
+      if (items[existingIdx] !== nextEntry.text) {
+        items[existingIdx] = nextEntry.text;
+        mutated = true;
+      }
+      handledKeys.add(prevEntry.key);
+    } else {
+      items[existingIdx] = '';
+      mutated = true;
+    }
+  }
+
+  // 2. Insert brand-new auto-detected problems (skip keys the user previously deleted)
+  for (const nextEntry of nextAuto) {
+    if (handledKeys.has(nextEntry.key)) continue;
+    const existedBefore = prevByKey.has(nextEntry.key);
+    if (existedBefore) continue;
+
+    const nextLower = nextEntry.text.toLowerCase();
+    const legacyIdx = items.findIndex((it) =>
+      matchesLegacyPrefix(it.trim().toLowerCase(), nextEntry.legacyPrefixes),
+    );
+    if (legacyIdx !== -1) {
+      items[legacyIdx] = nextEntry.text;
+      mutated = true;
+      continue;
+    }
+
+    const alreadyPresent = items.some((it) => it.trim().toLowerCase() === nextLower);
+    if (alreadyPresent) continue;
+
+    insertProblemLine(items, nextEntry.text);
+    mutated = true;
+  }
+
+  if (!mutated) return nextRecord.formData.problemList;
+  return sortProblemListBySeverity(items, nextAuto);
+}
+
+export function getMissingAutoProblems(record: PreAnestheticEvaluation): AutoProblemEntry[] {
+  const autoEntries = generateAutoProblemEntries(record);
+  if (autoEntries.length === 0) return [];
+  const lowerItems = record.formData.problemList
+    .map((it) => it.trim().toLowerCase())
+    .filter(Boolean);
+
+  return autoEntries.filter((entry) => {
+    const exactLower = entry.text.toLowerCase();
+    return !lowerItems.some((it) => it === exactLower);
+  });
+}
+
+export function applyAutoProblems(
+  record: PreAnestheticEvaluation,
+  entriesToApply?: AutoProblemEntry[],
+): string[] {
+  const allAuto = generateAutoProblemEntries(record);
+  const targets = entriesToApply ?? getMissingAutoProblems(record);
+  if (targets.length === 0) {
+    return sortProblemListBySeverity(record.formData.problemList, allAuto);
+  }
+
+  const items = [...record.formData.problemList];
+  for (const entry of targets) {
+    const exactLower = entry.text.toLowerCase();
+    if (items.some((it) => it.trim().toLowerCase() === exactLower)) continue;
+
+    // Replace legacy prefixed slot if present, otherwise insert into empty slot
+    const legacyIdx = items.findIndex((it) =>
+      matchesLegacyPrefix(it.trim().toLowerCase(), entry.legacyPrefixes),
+    );
+    if (legacyIdx !== -1) {
+      items[legacyIdx] = entry.text;
+    } else {
+      insertProblemLine(items, entry.text);
+    }
+  }
+
+  return sortProblemListBySeverity(items, allAuto);
 }
 
 export function createSampleEvaluations(ownerId: string): PreAnestheticEvaluation[] {
@@ -1889,7 +3795,7 @@ export function createSampleEvaluations(ownerId: string): PreAnestheticEvaluatio
           dlp: true,
           dlpYears: '5',
           otherUnderlying: [''],
-          medication: 'Amlodipine (5) 1x1, MFM (500) 1x1, Simvastatin (10) 1x1',
+          medication: 'Amlodipine (5) 1x1\nMFM (500) 1x1\nSimvastatin (10) 1x1',
           previousOps: ['Appendectomy (2550) - Spinal block no complication', '', ''],
           drinkingStatus: 'no',
           smokingStatus: 'yes',
@@ -2075,7 +3981,7 @@ export function createSampleEvaluations(ownerId: string): PreAnestheticEvaluatio
           heartDisease: true,
           heartDiseaseYears: '4',
           otherUnderlying: ['CKD stage 3', 'AF on Warfarin (held 5 days)'],
-          medication: 'Isordil, Warfarin 3 mg (Off 5 วันแล้ว), Atenolol (50) 1x1',
+          medication: 'Isordil\nWarfarin 3 mg (Off 5 วันแล้ว)\nAtenolol (50) 1x1',
           drinkingStatus: 'no',
           smokingStatus: 'no',
           drugAddictionStatus: 'no',
@@ -2253,7 +4159,7 @@ export function createSampleEvaluations(ownerId: string): PreAnestheticEvaluatio
           underlyingStatus: 'yes',
           ht: true,
           htYears: '3',
-          medication: 'Amlodipine (5) 1x1, Ferrous fumarate 1x2',
+          medication: 'Amlodipine (5) 1x1\nFerrous fumarate 1x2',
           drinkingStatus: 'no',
           smokingStatus: 'no',
           drugAddictionStatus: 'no',

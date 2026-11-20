@@ -1,5 +1,11 @@
 import React, { useId } from 'react';
-import { LaboratoryData, MallampatiClass, TOOTH_LABELS, ToothId } from '../types/evaluation';
+import {
+  formatThousandsWithCommas,
+  LaboratoryData,
+  MallampatiClass,
+  TOOTH_LABELS,
+  ToothId,
+} from '../types/evaluation';
 
 export function BphLogo({ className = 'w-10 h-10' }: { className?: string }) {
   return (
@@ -616,23 +622,66 @@ interface LabFishboneProps {
 }
 
 type StringLabField = {
-  [K in keyof LaboratoryData]: LaboratoryData[K] extends string ? K : never;
+  [K in keyof LaboratoryData]-?: LaboratoryData[K] extends string ? K : never;
 }[keyof LaboratoryData];
 
 export function CbcFishbone({ lab, onChange, readOnly = false }: LabFishboneProps) {
   const renderInput = (field: StringLabField, title: string) => {
+    const isCountField = field === 'wbc' || field === 'plt';
+    const displayValue = isCountField ? formatThousandsWithCommas(lab[field]) : lab[field];
+
     if (readOnly) {
       return (
         <span className="font-mono tabular-nums text-[11px] font-medium text-slate-900">
-          {lab[field] || '—'}
+          {displayValue || '—'}
         </span>
       );
     }
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const rawVal = e.target.value;
+      if (!isCountField) {
+        onChange?.(field, rawVal);
+        return;
+      }
+      const inputEl = e.target;
+      const selectionStart = inputEl.selectionStart;
+      const formatted = formatThousandsWithCommas(rawVal);
+      onChange?.(field, formatted);
+
+      if (selectionStart !== null) {
+        const nonCommaBeforeCaret = rawVal.slice(0, selectionStart).replace(/,/g, '').length;
+        let targetPos = 0;
+        if (nonCommaBeforeCaret > 0) {
+          let count = 0;
+          for (let i = 0; i < formatted.length; i += 1) {
+            if (formatted[i] !== ',') {
+              count += 1;
+            }
+            if (count === nonCommaBeforeCaret) {
+              targetPos = i + 1;
+              break;
+            }
+          }
+          if (count < nonCommaBeforeCaret) {
+            targetPos = formatted.length;
+          }
+        }
+        requestAnimationFrame(() => {
+          if (document.activeElement === inputEl) {
+            inputEl.setSelectionRange(targetPos, targetPos);
+          }
+        });
+      }
+    };
+
     return (
       <input
         type="text"
-        value={lab[field]}
-        onChange={(e) => onChange?.(field, e.target.value)}
+        inputMode="decimal"
+        maxLength={20}
+        value={displayValue}
+        onChange={handleChange}
         title={title}
         aria-label={title}
         className="w-full text-center font-mono tabular-nums text-xs bg-white border border-slate-300 rounded px-1 py-0.5 text-slate-900 focus:outline-none focus:border-blue-700 focus:ring-1 focus:ring-blue-700"

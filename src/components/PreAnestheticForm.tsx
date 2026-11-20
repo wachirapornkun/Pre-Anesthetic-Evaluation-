@@ -1,7 +1,19 @@
 import React, { useRef, useState } from 'react';
-import { Check, Edit2, Plus, RotateCcw, Trash2, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowDownWideNarrow,
+  ArrowRight,
+  Check,
+  CheckCircle2,
+  Edit2,
+  Plus,
+  RotateCcw,
+  Trash2,
+  X,
+} from 'lucide-react';
 import {
   addDaysToIsoDate,
+  applyAutoProblems,
   applyMissingAutoPremeds,
   AsaClass,
   BLOOD_PREP_STATUS_OPTIONS,
@@ -9,7 +21,7 @@ import {
   calculateBmi,
   createEmptyOxygenSupport,
   DEFAULT_OXYGEN_OTHER_PRESETS,
-  DEFAULT_SUMMARIZER_LIST,
+  DEFAULT_SPECIALTY_LIST,
   DEFAULT_SURGEON_LIST,
   DEFAULT_WARD_LIST,
   deriveAnesthesiaType,
@@ -20,15 +32,23 @@ import {
   formatThaiScheduleDate,
   formatToothMarksSummary,
   GaMethod,
+  generateAutoProblemEntries,
   getEffectiveScheduleType,
   getMissingAutoPremedEntries,
+  getMissingAutoProblems,
+  getPostOpVisitCompleteness,
   getTodayIsoDate,
+  inferPatientGender,
+  isProblemListSortedBySeverity,
   MedicationGroup,
   OR_ROOM_OPTIONS,
   OxygenSupportData,
+  PatientGender,
   PreAnestheticEvaluation,
   RaMethod,
+  sortProblemListBySeverity,
   syncPremedicationWithMedications,
+  syncProblemListWithPatientData,
   ToothCondition,
   ToothId,
   ToothMarkMode,
@@ -50,49 +70,52 @@ interface PreAnestheticFormProps {
   onUpdateMedicationGroups: (nextGroups: MedicationGroup[]) => void;
   wardOptions: string[];
   onUpdateWardOptions: (nextWards: string[]) => void;
+  specialtyOptions: string[];
+  onUpdateSpecialtyOptions: (nextSpecialties: string[]) => void;
   surgeonOptions: string[];
   onUpdateSurgeonOptions: (nextSurgeons: string[]) => void;
   oxygenPresets: string[];
   onUpdateOxygenPresets: (nextPresets: string[]) => void;
-  summarizerOptions: string[];
-  onUpdateSummarizerOptions: (nextSummarizers: string[]) => void;
-  visitorOptions: string[];
-  onUpdateVisitorOptions: (nextVisitors: string[]) => void;
+  onGoToPostOp?: () => void;
 }
 
 export function PreAnestheticForm({
   value,
-  onChange,
+  onChange: emitChange,
   medicationGroups,
   onUpdateMedicationGroups,
   wardOptions,
   onUpdateWardOptions,
+  specialtyOptions,
+  onUpdateSpecialtyOptions,
   surgeonOptions,
   onUpdateSurgeonOptions,
   oxygenPresets,
   onUpdateOxygenPresets,
-  summarizerOptions,
-  onUpdateSummarizerOptions,
-  visitorOptions,
-  onUpdateVisitorOptions,
+  onGoToPostOp,
 }: PreAnestheticFormProps) {
+  const onChange = (next: PreAnestheticEvaluation) => {
+    const syncedProblems = syncProblemListWithPatientData(value, next);
+    if (syncedProblems !== next.formData.problemList) {
+      emitChange({
+        ...next,
+        formData: {
+          ...next.formData,
+          problemList: syncedProblems,
+        },
+      });
+    } else {
+      emitChange(next);
+    }
+  };
+
   const [isManagingWards, setIsManagingWards] = useState(false);
   const [newWardName, setNewWardName] = useState('');
+  const [isManagingSpecialties, setIsManagingSpecialties] = useState(false);
+  const [newSpecialtyName, setNewSpecialtyName] = useState('');
   const [isManagingSurgeons, setIsManagingSurgeons] = useState(false);
   const [newSurgeonName, setNewSurgeonName] = useState('');
   const [editingSurgeon, setEditingSurgeon] = useState<{
-    original: string;
-    text: string;
-  } | null>(null);
-  const [isManagingSummarizers, setIsManagingSummarizers] = useState(false);
-  const [newSummarizerName, setNewSummarizerName] = useState('');
-  const [editingSummarizer, setEditingSummarizer] = useState<{
-    original: string;
-    text: string;
-  } | null>(null);
-  const [isManagingVisitors, setIsManagingVisitors] = useState(false);
-  const [newVisitorName, setNewVisitorName] = useState('');
-  const [editingVisitor, setEditingVisitor] = useState<{
     original: string;
     text: string;
   } | null>(null);
@@ -128,6 +151,27 @@ export function PreAnestheticForm({
 
   const handleResetWardOptions = () => {
     onUpdateWardOptions([...DEFAULT_WARD_LIST]);
+  };
+
+  const handleAddSpecialtyOption = (rawName: string) => {
+    const trimmed = rawName.trim().slice(0, 80);
+    if (!trimmed || trimmed === 'อื่นๆ') return;
+    if (!specialtyOptions.includes(trimmed)) {
+      onUpdateSpecialtyOptions([...specialtyOptions, trimmed]);
+    }
+    onChange({ ...value, specialty: trimmed });
+    setNewSpecialtyName('');
+  };
+
+  const handleRemoveSpecialtyOption = (specialtyName: string) => {
+    onUpdateSpecialtyOptions(specialtyOptions.filter((s) => s !== specialtyName));
+    if ((value.specialty ?? '') === specialtyName) {
+      onChange({ ...value, specialty: '' });
+    }
+  };
+
+  const handleResetSpecialtyOptions = () => {
+    onUpdateSpecialtyOptions([...DEFAULT_SPECIALTY_LIST]);
   };
 
   const handleAddSurgeonOption = (rawName: string) => {
@@ -177,100 +221,6 @@ export function PreAnestheticForm({
     setEditingSurgeon(null);
   };
 
-  const handleAddSummarizerOption = (rawName: string) => {
-    const trimmed = rawName.trim().slice(0, 120);
-    if (!trimmed || trimmed === 'อื่นๆ') return;
-    if (!summarizerOptions.includes(trimmed)) {
-      onUpdateSummarizerOptions([...summarizerOptions, trimmed]);
-    }
-    updatePostOp({ summarizedBy: trimmed });
-    setNewSummarizerName('');
-  };
-
-  const handleSaveEditedSummarizer = () => {
-    if (!editingSummarizer) return;
-    const trimmed = editingSummarizer.text.trim().slice(0, 120);
-    if (!trimmed || trimmed === 'อื่นๆ') return;
-    const nextList = summarizerOptions.map((s) =>
-      s === editingSummarizer.original ? trimmed : s,
-    );
-    onUpdateSummarizerOptions(nextList);
-    if (pa.summarizedBy === editingSummarizer.original) {
-      updatePostOp({ summarizedBy: trimmed });
-    }
-    setEditingSummarizer(null);
-  };
-
-  const handleRemoveSummarizerOption = (name: string) => {
-    onUpdateSummarizerOptions(summarizerOptions.filter((s) => s !== name));
-    if (pa.summarizedBy === name) {
-      updatePostOp({ summarizedBy: '' });
-    }
-    if (editingSummarizer?.original === name) {
-      setEditingSummarizer(null);
-    }
-  };
-
-  const handleClearAllSummarizers = () => {
-    onUpdateSummarizerOptions([]);
-    if (summarizerOptions.includes(pa.summarizedBy ?? '')) {
-      updatePostOp({ summarizedBy: '' });
-    }
-    setEditingSummarizer(null);
-  };
-
-  const handleResetSummarizerOptions = () => {
-    onUpdateSummarizerOptions([...DEFAULT_SUMMARIZER_LIST]);
-    setEditingSummarizer(null);
-  };
-
-  const handleAddVisitorOption = (rawName: string) => {
-    const trimmed = rawName.trim().slice(0, 120);
-    if (!trimmed || trimmed === 'อื่นๆ') return;
-    if (!visitorOptions.includes(trimmed)) {
-      onUpdateVisitorOptions([...visitorOptions, trimmed]);
-    }
-    updatePostOp({ visitBy: trimmed });
-    setNewVisitorName('');
-  };
-
-  const handleSaveEditedVisitor = () => {
-    if (!editingVisitor) return;
-    const trimmed = editingVisitor.text.trim().slice(0, 120);
-    if (!trimmed || trimmed === 'อื่นๆ') return;
-    const nextList = visitorOptions.map((v) =>
-      v === editingVisitor.original ? trimmed : v,
-    );
-    onUpdateVisitorOptions(nextList);
-    if (pa.visitBy === editingVisitor.original) {
-      updatePostOp({ visitBy: trimmed });
-    }
-    setEditingVisitor(null);
-  };
-
-  const handleRemoveVisitorOption = (name: string) => {
-    onUpdateVisitorOptions(visitorOptions.filter((v) => v !== name));
-    if (pa.visitBy === name) {
-      updatePostOp({ visitBy: '' });
-    }
-    if (editingVisitor?.original === name) {
-      setEditingVisitor(null);
-    }
-  };
-
-  const handleClearAllVisitors = () => {
-    onUpdateVisitorOptions([]);
-    if (visitorOptions.includes(pa.visitBy ?? '')) {
-      updatePostOp({ visitBy: '' });
-    }
-    setEditingVisitor(null);
-  };
-
-  const handleResetVisitorOptions = () => {
-    onUpdateVisitorOptions([...DEFAULT_SUMMARIZER_LIST]);
-    setEditingVisitor(null);
-  };
-
   const fd = value.formData;
   const h = fd.history;
   const p = fd.physicalExam;
@@ -278,7 +228,6 @@ export function PreAnestheticForm({
   const lab = fd.laboratory;
   const pm = fd.premedication;
   const ap = fd.anestheticPlan;
-  const pa = fd.postAnesthesia;
 
   const updateTop = <K extends keyof PreAnestheticEvaluation>(
     key: K,
@@ -579,15 +528,6 @@ export function PreAnestheticForm({
     });
   };
 
-  const updatePostOp = (patch: Partial<EvaluationFormData['postAnesthesia']>) => {
-    const nextPa = { ...pa, ...patch };
-    onChange({
-      ...value,
-      hasComplication: nextPa.complicationStatus === 'yes',
-      formData: { ...fd, postAnesthesia: nextPa },
-    });
-  };
-
   const toggleTri = (current: TriStatus, target: 'no' | 'yes'): TriStatus =>
     current === target ? 'none' : target;
 
@@ -710,12 +650,33 @@ export function PreAnestheticForm({
             <input
               type="text"
               value={value.patientName}
-              onChange={(e) => updateTop('patientName', e.target.value)}
+              onChange={(e) => {
+                const nextName = e.target.value;
+                const autoGender = value.gender || inferPatientGender(nextName);
+                onChange({
+                  ...value,
+                  patientName: nextName,
+                  ...(autoGender && autoGender !== value.gender ? { gender: autoGender } : {}),
+                });
+              }}
               placeholder="ชื่อ-นามสกุล ผู้ป่วย"
               className={inputBase}
               required
             />
           </label>
+          <div className="lg:col-span-1 flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-600">เพศ</span>
+            <select
+              aria-label="เพศผู้ป่วย"
+              value={inferPatientGender(value.patientName, value.gender)}
+              onChange={(e) => updateTop('gender', e.target.value as PatientGender)}
+              className={inputBase}
+            >
+              <option value="">ระบุ</option>
+              <option value="male">ชาย</option>
+              <option value="female">หญิง</option>
+            </select>
+          </div>
           <label className="lg:col-span-1 flex flex-col gap-1">
             <span className="text-xs font-medium text-slate-600">Age (yr)</span>
             <input
@@ -736,13 +697,13 @@ export function PreAnestheticForm({
               className={`${inputBase} font-mono tabular-nums`}
             />
           </label>
-          <label className="lg:col-span-2 flex flex-col gap-1">
+          <label className="lg:col-span-1 flex flex-col gap-1">
             <span className="text-xs font-medium text-slate-600">AN</span>
             <input
               type="text"
               value={value.an}
               onChange={(e) => updateTop('an', e.target.value)}
-              placeholder="เช่น 67-008912"
+              placeholder="AN"
               className={`${inputBase} font-mono tabular-nums`}
             />
           </label>
@@ -888,7 +849,7 @@ export function PreAnestheticForm({
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
-          <label className="lg:col-span-6 flex flex-col gap-1">
+          <label className="lg:col-span-4 flex flex-col gap-1">
             <span className="text-xs font-medium text-slate-600">Diagnosis</span>
             <input
               type="text"
@@ -898,7 +859,7 @@ export function PreAnestheticForm({
               className={inputBase}
             />
           </label>
-          <label className="lg:col-span-6 flex flex-col gap-1">
+          <label className="lg:col-span-5 flex flex-col gap-1">
             <span className="text-xs font-medium text-slate-600">Operation</span>
             <input
               type="text"
@@ -908,7 +869,138 @@ export function PreAnestheticForm({
               className={inputBase}
             />
           </label>
+          <div className="lg:col-span-3 flex flex-col gap-1">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-xs font-medium text-slate-600">สาขา (Specialty)</span>
+              <button
+                type="button"
+                onClick={() => setIsManagingSpecialties((prev) => !prev)}
+                className="inline-flex items-center gap-0.5 text-[11px] font-medium text-blue-800 hover:text-blue-950 whitespace-nowrap"
+              >
+                <Plus className="w-3 h-3" />
+                {isManagingSpecialties ? 'ปิด' : 'เพิ่ม/จัดการ'}
+              </button>
+            </div>
+            {(() => {
+              const currentSpecialty = value.specialty ?? '';
+              const isListedSpecialty = specialtyOptions.includes(currentSpecialty);
+              const isOtherSelected = currentSpecialty !== '' && !isListedSpecialty;
+              return (
+                <>
+                  <select
+                    aria-label="สาขา (Specialty)"
+                    value={isOtherSelected ? 'อื่นๆ' : currentSpecialty}
+                    onChange={(e) => updateTop('specialty', e.target.value)}
+                    className={inputBase}
+                  >
+                    <option value="">-- เลือกสาขา --</option>
+                    {specialtyOptions.map((sp) => (
+                      <option key={sp} value={sp}>
+                        {sp}
+                      </option>
+                    ))}
+                    <option value="อื่นๆ">อื่นๆ</option>
+                  </select>
+                  {isOtherSelected && (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        aria-label="ระบุสาขาอื่นๆ"
+                        value={currentSpecialty === 'อื่นๆ' ? '' : currentSpecialty}
+                        onChange={(e) => updateTop('specialty', e.target.value || 'อื่นๆ')}
+                        placeholder="ระบุชื่อสาขา..."
+                        maxLength={80}
+                        className={`${inputBase} min-w-0 flex-1`}
+                      />
+                      {currentSpecialty !== 'อื่นๆ' && currentSpecialty.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => handleAddSpecialtyOption(currentSpecialty)}
+                          title="เพิ่มเข้าตัวเลือกสาขา"
+                          className="shrink-0 px-2 py-1.5 text-[11px] font-medium text-blue-800 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 whitespace-nowrap"
+                        >
+                          + บันทึก
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
         </div>
+
+        {isManagingSpecialties && (
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-800">
+                จัดการรายการสาขา (เพิ่มหรือลบตัวเลือกได้ · {specialtyOptions.length} สาขา)
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleResetSpecialtyOptions}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-100"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  รีเซ็ตค่าเริ่มต้น
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsManagingSpecialties(false)}
+                  className="px-2 py-1 text-[11px] font-medium text-slate-600 hover:text-slate-900"
+                >
+                  ปิด
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                value={newSpecialtyName}
+                onChange={(e) => setNewSpecialtyName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddSpecialtyOption(newSpecialtyName);
+                  }
+                }}
+                placeholder="พิมพ์ชื่อสาขาใหม่ เช่น CVT, Ped, Gyn, Spine"
+                maxLength={80}
+                className="flex-1 min-w-[220px] bg-white border border-slate-300 rounded-md px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
+              />
+              <button
+                type="button"
+                onClick={() => handleAddSpecialtyOption(newSpecialtyName)}
+                disabled={!newSpecialtyName.trim() || newSpecialtyName.trim() === 'อื่นๆ'}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-blue-800 rounded-md hover:bg-blue-900 disabled:opacity-50"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                เพิ่มสาขา
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
+              {specialtyOptions.map((sp) => (
+                <span
+                  key={sp}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-white border border-slate-300 rounded-md text-slate-800"
+                >
+                  <span>{sp}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveSpecialtyOption(sp)}
+                    aria-label={`ลบสาขา ${sp}`}
+                    className="text-slate-400 hover:text-red-600"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5">
           <div className="sm:col-span-2 lg:col-span-6 flex flex-col gap-1">
@@ -1343,23 +1435,24 @@ export function PreAnestheticForm({
               </div>
 
               <div className="space-y-3 border border-slate-200 rounded-lg p-3 bg-slate-50/50">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer min-w-[105px]">
-                        <input
-                          type="checkbox"
-                          checked={h.dm}
-                          onChange={(e) =>
-                            updateHistory({
-                              dm: e.target.checked,
-                              underlyingStatus: e.target.checked ? 'yes' : h.underlyingStatus,
-                            })
-                          }
-                          className="rounded border-slate-400 text-blue-800 focus:ring-blue-800"
-                        />
-                        DM
-                      </label>
+                <div className="space-y-2">
+                  {/* DM */}
+                  <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer w-[92px] shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={h.dm}
+                        onChange={(e) =>
+                          updateHistory({
+                            dm: e.target.checked,
+                            underlyingStatus: e.target.checked ? 'yes' : h.underlyingStatus,
+                          })
+                        }
+                        className="rounded border-slate-400 text-blue-800 focus:ring-blue-800"
+                      />
+                      DM
+                    </label>
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <input
                         type="text"
                         value={h.dmYears}
@@ -1371,26 +1464,43 @@ export function PreAnestheticForm({
                           })
                         }
                         placeholder="จำนวน"
-                        className={`${inputBase} w-16 text-center font-mono tabular-nums text-xs`}
+                        className={`${inputBase} w-14 text-center font-mono tabular-nums text-xs`}
                       />
                       <span className="text-xs text-slate-500">ปี</span>
                     </div>
+                    <input
+                      type="text"
+                      value={h.dmDetail ?? ''}
+                      onChange={(e) =>
+                        updateHistory({
+                          dmDetail: e.target.value,
+                          dm: e.target.value.trim() ? true : h.dm,
+                          underlyingStatus: e.target.value.trim() ? 'yes' : h.underlyingStatus,
+                        })
+                      }
+                      maxLength={200}
+                      placeholder="รายละเอียด DM (เช่น คุมได้ / ฉีด Insulin / HbA1c / ขาดยา)"
+                      className={`${inputBase} flex-1 min-w-[180px] text-xs`}
+                    />
+                  </div>
 
-                    <div className="flex items-center gap-2">
-                      <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer min-w-[105px]">
-                        <input
-                          type="checkbox"
-                          checked={h.ht}
-                          onChange={(e) =>
-                            updateHistory({
-                              ht: e.target.checked,
-                              underlyingStatus: e.target.checked ? 'yes' : h.underlyingStatus,
-                            })
-                          }
-                          className="rounded border-slate-400 text-blue-800 focus:ring-blue-800"
-                        />
-                        HT
-                      </label>
+                  {/* HT */}
+                  <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer w-[92px] shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={h.ht}
+                        onChange={(e) =>
+                          updateHistory({
+                            ht: e.target.checked,
+                            underlyingStatus: e.target.checked ? 'yes' : h.underlyingStatus,
+                          })
+                        }
+                        className="rounded border-slate-400 text-blue-800 focus:ring-blue-800"
+                      />
+                      HT
+                    </label>
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <input
                         type="text"
                         value={h.htYears}
@@ -1402,26 +1512,43 @@ export function PreAnestheticForm({
                           })
                         }
                         placeholder="จำนวน"
-                        className={`${inputBase} w-16 text-center font-mono tabular-nums text-xs`}
+                        className={`${inputBase} w-14 text-center font-mono tabular-nums text-xs`}
                       />
                       <span className="text-xs text-slate-500">ปี</span>
                     </div>
+                    <input
+                      type="text"
+                      value={h.htDetail ?? ''}
+                      onChange={(e) =>
+                        updateHistory({
+                          htDetail: e.target.value,
+                          ht: e.target.value.trim() ? true : h.ht,
+                          underlyingStatus: e.target.value.trim() ? 'yes' : h.underlyingStatus,
+                        })
+                      }
+                      maxLength={200}
+                      placeholder="รายละเอียด HT (เช่น คุมความดันได้ / BP ประจำ / ขาดยา)"
+                      className={`${inputBase} flex-1 min-w-[180px] text-xs`}
+                    />
+                  </div>
 
-                    <div className="flex items-center gap-2">
-                      <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer min-w-[105px]">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(h.dlp)}
-                          onChange={(e) =>
-                            updateHistory({
-                              dlp: e.target.checked,
-                              underlyingStatus: e.target.checked ? 'yes' : h.underlyingStatus,
-                            })
-                          }
-                          className="rounded border-slate-400 text-blue-800 focus:ring-blue-800"
-                        />
-                        DLP
-                      </label>
+                  {/* DLP */}
+                  <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer w-[92px] shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(h.dlp)}
+                        onChange={(e) =>
+                          updateHistory({
+                            dlp: e.target.checked,
+                            underlyingStatus: e.target.checked ? 'yes' : h.underlyingStatus,
+                          })
+                        }
+                        className="rounded border-slate-400 text-blue-800 focus:ring-blue-800"
+                      />
+                      DLP
+                    </label>
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <input
                         type="text"
                         value={h.dlpYears ?? ''}
@@ -1433,26 +1560,43 @@ export function PreAnestheticForm({
                           })
                         }
                         placeholder="จำนวน"
-                        className={`${inputBase} w-16 text-center font-mono tabular-nums text-xs`}
+                        className={`${inputBase} w-14 text-center font-mono tabular-nums text-xs`}
                       />
                       <span className="text-xs text-slate-500">ปี</span>
                     </div>
+                    <input
+                      type="text"
+                      value={h.dlpDetail ?? ''}
+                      onChange={(e) =>
+                        updateHistory({
+                          dlpDetail: e.target.value,
+                          dlp: e.target.value.trim() ? true : h.dlp,
+                          underlyingStatus: e.target.value.trim() ? 'yes' : h.underlyingStatus,
+                        })
+                      }
+                      maxLength={200}
+                      placeholder="รายละเอียด DLP (เช่น ทานยาสม่ำเสมอ / คุมไขมันได้)"
+                      className={`${inputBase} flex-1 min-w-[180px] text-xs`}
+                    />
+                  </div>
 
-                    <div className="flex items-center gap-2">
-                      <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer min-w-[105px]">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(h.ckd)}
-                          onChange={(e) =>
-                            updateHistory({
-                              ckd: e.target.checked,
-                              underlyingStatus: e.target.checked ? 'yes' : h.underlyingStatus,
-                            })
-                          }
-                          className="rounded border-slate-400 text-blue-800 focus:ring-blue-800"
-                        />
-                        โรคไต
-                      </label>
+                  {/* โรคไต */}
+                  <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer w-[92px] shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(h.ckd)}
+                        onChange={(e) =>
+                          updateHistory({
+                            ckd: e.target.checked,
+                            underlyingStatus: e.target.checked ? 'yes' : h.underlyingStatus,
+                          })
+                        }
+                        className="rounded border-slate-400 text-blue-800 focus:ring-blue-800"
+                      />
+                      โรคไต
+                    </label>
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <input
                         type="text"
                         value={h.ckdYears ?? ''}
@@ -1464,26 +1608,43 @@ export function PreAnestheticForm({
                           })
                         }
                         placeholder="จำนวน"
-                        className={`${inputBase} w-16 text-center font-mono tabular-nums text-xs`}
+                        className={`${inputBase} w-14 text-center font-mono tabular-nums text-xs`}
                       />
                       <span className="text-xs text-slate-500">ปี</span>
                     </div>
+                    <input
+                      type="text"
+                      value={h.ckdDetail ?? ''}
+                      onChange={(e) =>
+                        updateHistory({
+                          ckdDetail: e.target.value,
+                          ckd: e.target.value.trim() ? true : h.ckd,
+                          underlyingStatus: e.target.value.trim() ? 'yes' : h.underlyingStatus,
+                        })
+                      }
+                      maxLength={200}
+                      placeholder="รายละเอียดโรคไต (เช่น CKD stage 3 / HD วัน จ-พ-ศ / CAPD / ปัสสาวะออก)"
+                      className={`${inputBase} flex-1 min-w-[180px] text-xs`}
+                    />
+                  </div>
 
-                    <div className="flex items-center gap-2">
-                      <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer min-w-[105px]">
-                        <input
-                          type="checkbox"
-                          checked={h.heartDisease}
-                          onChange={(e) =>
-                            updateHistory({
-                              heartDisease: e.target.checked,
-                              underlyingStatus: e.target.checked ? 'yes' : h.underlyingStatus,
-                            })
-                          }
-                          className="rounded border-slate-400 text-blue-800 focus:ring-blue-800"
-                        />
-                        โรคหัวใจ
-                      </label>
+                  {/* โรคหัวใจ */}
+                  <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer w-[92px] shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={h.heartDisease}
+                        onChange={(e) =>
+                          updateHistory({
+                            heartDisease: e.target.checked,
+                            underlyingStatus: e.target.checked ? 'yes' : h.underlyingStatus,
+                          })
+                        }
+                        className="rounded border-slate-400 text-blue-800 focus:ring-blue-800"
+                      />
+                      โรคหัวใจ
+                    </label>
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <input
                         type="text"
                         value={h.heartDiseaseYears}
@@ -1495,13 +1656,29 @@ export function PreAnestheticForm({
                           })
                         }
                         placeholder="จำนวน"
-                        className={`${inputBase} w-16 text-center font-mono tabular-nums text-xs`}
+                        className={`${inputBase} w-14 text-center font-mono tabular-nums text-xs`}
                       />
                       <span className="text-xs text-slate-500">ปี</span>
                     </div>
+                    <input
+                      type="text"
+                      value={h.heartDiseaseDetail ?? ''}
+                      onChange={(e) =>
+                        updateHistory({
+                          heartDiseaseDetail: e.target.value,
+                          heartDisease: e.target.value.trim() ? true : h.heartDisease,
+                          underlyingStatus: e.target.value.trim() ? 'yes' : h.underlyingStatus,
+                        })
+                      }
+                      maxLength={200}
+                      placeholder="รายละเอียดโรคหัวใจ (เช่น CAD / AF / EF% / ทำ PCI / ไม่มีเจ็บหน้าอก)"
+                      className={`${inputBase} flex-1 min-w-[180px] text-xs`}
+                    />
                   </div>
+                </div>
 
-                  {/* Additional underlying rows */}
+                {/* Additional underlying rows + General underlying detail */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t border-slate-200/80">
                   <div className="space-y-1.5">
                     <span className="text-xs font-medium text-slate-600 block">
                       และอื่นๆ
@@ -1521,7 +1698,7 @@ export function PreAnestheticForm({
                                 : h.underlyingStatus,
                             });
                           }}
-                          placeholder="เช่น Asthma, COPD, Stroke, Thyroid"
+                          placeholder="เช่น Asthma, COPD, Stroke, Thyroid (ระบุรายละเอียดได้)"
                           className={`${inputBase} flex-1 text-xs`}
                         />
                         {h.otherUnderlying.length > 1 && (
@@ -1548,9 +1725,30 @@ export function PreAnestheticForm({
                         className="inline-flex items-center gap-1 text-xs font-medium text-blue-800 hover:text-blue-900"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        เพิ่มโรคประจำตัวอื่นๆ
+                        เพิ่มโรคประจำตัว
                       </button>
                     )}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-slate-600 block">
+                      รายละเอียดโรคประจำตัวเพิ่มเติม
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={h.underlyingDetail ?? ''}
+                      onChange={(e) =>
+                        updateHistory({
+                          underlyingDetail: e.target.value,
+                          underlyingStatus: e.target.value.trim()
+                            ? 'yes'
+                            : h.underlyingStatus,
+                        })
+                      }
+                      maxLength={500}
+                      placeholder="เช่น รักษาต่อเนื่องที่ รพ.บางพลี รับประทานยาสม่ำเสมอ / ผล Echo ล่าสุด / ประวัติขาดยา / อาการกำเริบล่าสุด..."
+                      className={`${inputBase} w-full text-xs resize-y`}
+                    />
                   </div>
                 </div>
 
@@ -2232,15 +2430,22 @@ export function PreAnestheticForm({
               ))}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-              <label className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-slate-700 shrink-0">NPO time</span>
+            <div className="space-y-2.5 pt-2">
+              <label className="block bg-amber-50/80 border-2 border-amber-500 rounded-lg p-3 space-y-1.5">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-lg font-extrabold tracking-wide text-red-700">
+                    NPO
+                  </span>
+                  <span className="text-xs font-semibold text-amber-900">
+                    เวลางดน้ำและอาหาร (NPO time)
+                  </span>
+                </div>
                 <input
                   type="text"
                   value={pm.npoTime}
                   onChange={(e) => updatePremed({ npoTime: e.target.value })}
-                  placeholder="เช่น หลัง 24.00 น."
-                  className={`${inputBase} flex-1 text-xs`}
+                  placeholder="เช่น หลัง 24.00 น. / NPO 6 ชม."
+                  className="w-full bg-white border-2 border-amber-400 rounded-md px-3 py-2 text-base sm:text-lg font-bold text-slate-950 placeholder:font-normal placeholder:text-slate-400 focus:outline-none focus:border-red-600 transition-colors"
                 />
               </label>
               <label className="flex items-center gap-2">
@@ -3343,7 +3548,7 @@ export function PreAnestheticForm({
               </label>
             </div>
 
-            {/* Glucose, HbA1C, Other */}
+            {/* Glucose, HbA1C, Lactate, Trop I */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <label className="flex flex-col gap-0.5">
                 <span className="text-[11px] text-slate-500">Glucose (mg/dl)</span>
@@ -3363,16 +3568,166 @@ export function PreAnestheticForm({
                   className={`${inputBase} font-mono tabular-nums text-xs`}
                 />
               </label>
-              <label className="col-span-2 flex flex-col gap-0.5">
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[11px] text-slate-500">Lactate (mmol/L)</span>
+                <input
+                  type="text"
+                  value={lab.lactate || ''}
+                  onChange={(e) => updateLab('lactate', e.target.value)}
+                  maxLength={20}
+                  className={`${inputBase} font-mono tabular-nums text-xs`}
+                />
+              </label>
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[11px] text-slate-500">Trop I</span>
+                <input
+                  type="text"
+                  value={lab.tropI || ''}
+                  onChange={(e) => updateLab('tropI', e.target.value)}
+                  maxLength={20}
+                  className={`${inputBase} font-mono tabular-nums text-xs`}
+                />
+              </label>
+            </div>
+
+            {/* Anti-HIV & Other Lab */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">
+              <div className="sm:col-span-2 flex flex-col gap-1">
+                <span className="text-[11px] text-slate-500">Anti-HIV</span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateLabPatch({
+                        antiHiv: lab.antiHiv === 'negative' ? '' : 'negative',
+                      })
+                    }
+                    className={radioBtn(lab.antiHiv === 'negative')}
+                  >
+                    {lab.antiHiv === 'negative' ? '●' : '○'} Negative
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateLabPatch({
+                        antiHiv: lab.antiHiv === 'positive' ? '' : 'positive',
+                      })
+                    }
+                    className={radioBtn(lab.antiHiv === 'positive', 'danger')}
+                  >
+                    {lab.antiHiv === 'positive' ? '●' : '○'} Positive
+                  </button>
+                </div>
+              </div>
+              <label className="sm:col-span-2 flex flex-col gap-0.5">
                 <span className="text-[11px] text-slate-500">Other Lab</span>
                 <input
                   type="text"
                   value={lab.other}
                   onChange={(e) => updateLab('other', e.target.value)}
-                  placeholder="Anti-HIV, HBsAg, UA, etc."
+                  placeholder="HBsAg, UA, ABG, etc."
                   className={`${inputBase} text-xs`}
                 />
               </label>
+            </div>
+
+            {/* Dynamic Additional Labs */}
+            <div className="space-y-1.5 pt-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-medium text-slate-600">
+                  ผล Lab เพิ่มเติม
+                  {(lab.customLabs?.length ?? 0) > 0 && (
+                    <span className="ml-1 font-mono text-slate-400">
+                      ({lab.customLabs?.length}/15)
+                    </span>
+                  )}
+                </span>
+                {(lab.customLabs?.length ?? 0) < 15 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateLabPatch({
+                        customLabs: [...(lab.customLabs || []), { name: '', value: '' }],
+                      })
+                    }
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-blue-800 bg-blue-50/70 border border-blue-200 rounded hover:bg-blue-100 transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    เพิ่ม Lab
+                  </button>
+                )}
+              </div>
+
+              <datalist id="custom-lab-name-presets">
+                <option value="HBsAg" />
+                <option value="Anti-HCV" />
+                <option value="VDRL" />
+                <option value="T.Bil" />
+                <option value="D.Bil" />
+                <option value="Ca" />
+                <option value="Mg" />
+                <option value="PO4" />
+                <option value="eGFR" />
+                <option value="UA" />
+                <option value="UPT" />
+                <option value="ABG pH" />
+                <option value="PaO2" />
+                <option value="PaCO2" />
+                <option value="HCO3" />
+                <option value="TSH" />
+                <option value="FT4" />
+                <option value="D-dimer" />
+                <option value="NT-proBNP" />
+                <option value="Procalcitonin" />
+                <option value="CRP" />
+                <option value="COVID-19 Ag" />
+              </datalist>
+
+              {(lab.customLabs || []).length > 0 && (
+                <div className="space-y-1.5">
+                  {(lab.customLabs || []).map((item, idx) => (
+                    <div key={idx} className="grid grid-cols-12 gap-1.5 items-center">
+                      <input
+                        type="text"
+                        list="custom-lab-name-presets"
+                        value={item.name}
+                        onChange={(e) => {
+                          const next = [...(lab.customLabs || [])];
+                          next[idx] = { ...next[idx], name: e.target.value };
+                          updateLabPatch({ customLabs: next });
+                        }}
+                        placeholder="ชื่อ Lab (เช่น HBsAg, Mg, Ca, pH)"
+                        maxLength={60}
+                        className={`${inputBase} col-span-5 text-xs`}
+                      />
+                      <input
+                        type="text"
+                        value={item.value}
+                        onChange={(e) => {
+                          const next = [...(lab.customLabs || [])];
+                          next[idx] = { ...next[idx], value: e.target.value };
+                          updateLabPatch({ customLabs: next });
+                        }}
+                        placeholder="ค่าผลตรวจ / ผล Lab"
+                        maxLength={80}
+                        className={`${inputBase} col-span-6 font-mono tabular-nums text-xs`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateLabPatch({
+                            customLabs: (lab.customLabs || []).filter((_, i) => i !== idx),
+                          })
+                        }
+                        aria-label={`ลบผล Lab เพิ่มเติมแถวที่ ${idx + 1}`}
+                        className="col-span-1 inline-flex items-center justify-center p-1 text-slate-400 hover:text-red-600 transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Blood component prepare */}
@@ -3516,53 +3871,139 @@ export function PreAnestheticForm({
         </div>
 
         {/* 8. Problem list */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-bold text-slate-900">8. Problem list</span>
-            {fd.problemList.length < 12 && (
-              <button
-                type="button"
-                onClick={() => updateFormData({ problemList: [...fd.problemList, ''] })}
-                className="inline-flex items-center gap-1 text-xs font-medium text-blue-800 hover:text-blue-900"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                เพิ่ม Problem
-              </button>
-            )}
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-            {fd.problemList.map((prob, idx) => (
-              <div key={idx} className="flex items-center gap-1.5">
-                <span className="font-mono text-xs text-slate-500 w-5">{idx + 1}.</span>
-                <input
-                  type="text"
-                  value={prob}
-                  onChange={(e) => {
-                    const next = [...fd.problemList];
-                    next[idx] = e.target.value;
-                    updateFormData({ problemList: next });
-                  }}
-                  placeholder={`ปัญหาทางคลินิกข้อ ${idx + 1}`}
-                  className={`${inputBase} flex-1 text-xs`}
-                />
-                {fd.problemList.length > 6 && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      updateFormData({
-                        problemList: fd.problemList.filter((_, i) => i !== idx),
-                      })
-                    }
-                    aria-label="ลบ Problem"
-                    className="p-1 text-slate-400 hover:text-red-600"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                )}
+        {(() => {
+          const autoProblems = generateAutoProblemEntries(value);
+          const missingAutoProblems = getMissingAutoProblems(value);
+          const isSorted = isProblemListSortedBySeverity(value);
+          return (
+            <div className="space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <span className="text-sm font-bold text-slate-900">8. Problem list</span>
+                  {autoProblems.length > 0 && missingAutoProblems.length === 0 && (
+                    <span className="text-[11px] text-emerald-700 font-medium">
+                      เรียงลำดับอัตโนมัติแล้ว
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {!isSorted && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateFormData({
+                          problemList: sortProblemListBySeverity(fd.problemList, autoProblems),
+                        })
+                      }
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-800 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors whitespace-nowrap"
+                    >
+                      <ArrowDownWideNarrow className="w-3.5 h-3.5 text-blue-800" />
+                      เรียงลำดับ
+                    </button>
+                  )}
+                  {missingAutoProblems.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateFormData({
+                          problemList: applyAutoProblems(value),
+                        })
+                      }
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-white bg-blue-800 rounded-md hover:bg-blue-900 transition-colors whitespace-nowrap"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      ดึงข้อมูลลง Problem list (+{missingAutoProblems.length})
+                    </button>
+                  )}
+                  {fd.problemList.length < 12 && (
+                    <button
+                      type="button"
+                      onClick={() => updateFormData({ problemList: [...fd.problemList, ''] })}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-blue-800 hover:text-blue-900 whitespace-nowrap"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      เพิ่ม Problem
+                    </button>
+                  )}
+                </div>
               </div>
-            ))}
-          </div>
-        </div>
+
+              {missingAutoProblems.length > 0 && (
+                <div className="bg-blue-50/60 border border-blue-200 rounded-lg p-2.5 space-y-1.5">
+                  <div className="text-[11px] font-medium text-blue-900">
+                    พบข้อมูลผู้ป่วยเรียงลำดับแล้ว (คลิกเพื่อเพิ่มทีละข้อ หรือกดดึงทั้งหมดด้านบน):
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {missingAutoProblems.map((entry, idx) => (
+                      <button
+                        key={entry.key}
+                        type="button"
+                        onClick={() =>
+                          updateFormData({
+                            problemList: applyAutoProblems(value, [entry]),
+                          })
+                        }
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs text-left text-slate-800 bg-white border border-slate-300 rounded-md hover:bg-blue-50 hover:border-blue-300 transition-colors"
+                      >
+                        <Plus className="w-3 h-3 shrink-0 text-blue-700" />
+                        <span className="font-mono text-[11px] text-slate-500">{idx + 1}.</span>
+                        <span>{entry.text}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {fd.problemList.map((prob, idx) => (
+                  <div key={idx} className="flex items-center gap-1.5">
+                    <span className="font-mono text-xs text-slate-500 w-5 shrink-0">{idx + 1}.</span>
+                    <input
+                      type="text"
+                      value={prob}
+                      onChange={(e) => {
+                        const next = [...fd.problemList];
+                        next[idx] = e.target.value;
+                        updateFormData({ problemList: next });
+                      }}
+                      placeholder={`ปัญหาทางคลินิกข้อ ${idx + 1}`}
+                      className={`${inputBase} flex-1 text-xs`}
+                    />
+                    {prob.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = [...fd.problemList];
+                          next[idx] = '';
+                          updateFormData({ problemList: next });
+                        }}
+                        aria-label={`ล้าง Problem ข้อ ${idx + 1}`}
+                        title="ล้างข้อความช่องนี้"
+                        className="p-1 text-slate-400 hover:text-slate-700"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {fd.problemList.length > 6 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateFormData({
+                            problemList: fd.problemList.filter((_, i) => i !== idx),
+                          })
+                        }
+                        aria-label="ลบ Problem"
+                        className="p-1 text-slate-400 hover:text-red-600"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* 9. Anesthetic plan */}
         <div className="space-y-2">
@@ -3631,6 +4072,29 @@ export function PreAnestheticForm({
                 />
               )}
             </div>
+
+            {/* MAC */}
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-800 min-w-[165px] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(ap.macSelected)}
+                  onChange={(e) => updatePlan({ macSelected: e.target.checked })}
+                  className="rounded border-slate-400 text-blue-800 focus:ring-blue-800"
+                />
+                MAC (Monitored Anesthesia Care)
+              </label>
+              {ap.macSelected && (
+                <input
+                  type="text"
+                  value={ap.macDetail ?? ''}
+                  onChange={(e) => updatePlan({ macDetail: e.target.value })}
+                  maxLength={200}
+                  placeholder="รายละเอียด MAC / Sedation (ถ้ามี)"
+                  className={`${inputBase} w-64 text-xs`}
+                />
+              )}
+            </div>
           </div>
         </div>
 
@@ -3688,559 +4152,43 @@ export function PreAnestheticForm({
         </div>
       </div>
 
-      {/* Post Anesthesia Evaluation */}
-      <div className="p-4 bg-slate-50/70 space-y-3">
-        <div className="space-y-2.5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="px-3 py-1 border border-slate-400 bg-white rounded text-sm font-bold text-slate-900">
-              Post Anesthesia Evaluation
-            </div>
-            <div className="flex flex-wrap items-center gap-2.5 flex-1 justify-end">
-              <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                <span className="text-slate-600 font-medium">Summarized by</span>
-                {(() => {
-                  const currentSummarizer = pa.summarizedBy ?? '';
-                  const isListedSummarizer = summarizerOptions.includes(currentSummarizer);
-                  return (
-                    <>
-                      <select
-                        aria-label="เลือกผู้สรุป (Summarized by)"
-                        value={isListedSummarizer ? currentSummarizer : ''}
-                        onChange={(e) => {
-                          if (e.target.value) {
-                            updatePostOp({ summarizedBy: e.target.value });
-                          } else if (isListedSummarizer) {
-                            updatePostOp({ summarizedBy: '' });
-                          }
-                        }}
-                        className={`${inputBase} w-48 text-xs`}
-                      >
-                        <option value="">-- เลือกรายชื่อผู้สรุป --</option>
-                        {summarizerOptions.map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        type="text"
-                        aria-label="พิมพ์ชื่อผู้สรุปเพิ่มเติม"
-                        value={currentSummarizer}
-                        onChange={(e) => updatePostOp({ summarizedBy: e.target.value })}
-                        placeholder="หรือพิมพ์ชื่อเพิ่มเติม..."
-                        maxLength={120}
-                        className={`${inputBase} w-44 text-xs`}
-                      />
-                      {currentSummarizer.trim() && (
-                        <button
-                          type="button"
-                          onClick={() => updatePostOp({ summarizedBy: '' })}
-                          title="ล้างชื่อผู้สรุปในช่องนี้"
-                          aria-label="ล้างชื่อผู้สรุปในช่องนี้"
-                          className="p-1 text-slate-400 hover:text-slate-700"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      {currentSummarizer.trim() && !isListedSummarizer && (
-                        <button
-                          type="button"
-                          onClick={() => handleAddSummarizerOption(currentSummarizer)}
-                          title="เพิ่มชื่อนี้เข้าตัวเลือก Summarized by"
-                          className="px-2 py-1 text-[11px] font-medium text-blue-800 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 whitespace-nowrap"
-                        >
-                          + บันทึก
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setIsManagingSummarizers((prev) => !prev)}
-                        className="inline-flex items-center gap-0.5 text-[11px] font-medium text-blue-800 hover:text-blue-950 whitespace-nowrap ml-1"
-                      >
-                        <Plus className="w-3 h-3" />
-                        {isManagingSummarizers ? 'ปิด' : 'เพิ่ม/ลดรายชื่อ'}
-                      </button>
-                    </>
-                  );
-                })()}
-              </div>
-              <label className="inline-flex items-center gap-1.5 text-xs">
-                <span className="text-slate-600 font-medium">date</span>
-                <input
-                  type="date"
-                  value={pa.summarizedDate}
-                  onChange={(e) => updatePostOp({ summarizedDate: e.target.value })}
-                  className={`${inputBase} font-mono tabular-nums text-xs`}
-                />
-              </label>
-            </div>
-          </div>
-
-          {isManagingSummarizers && (
-            <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-slate-800">
-                  จัดการรายชื่อผู้สรุป Summarized by (เพิ่ม แก้ไข หรือลบรายชื่อได้ · {summarizerOptions.length} รายชื่อ)
+      {/* Footer with link to Post-op Evaluation */}
+      {(() => {
+        const postOpCheck = getPostOpVisitCompleteness(fd.postAnesthesia);
+        return (
+          <div className="px-4 py-3 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              {postOpCheck.isComplete ? (
+                <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  เยี่ยมหลังผ่าตัดแล้ว (ลงข้อมูลครบถ้วน)
                 </span>
-                <div className="flex flex-wrap items-center gap-2">
-                  {summarizerOptions.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleClearAllSummarizers}
-                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-red-700 bg-white border border-red-200 rounded hover:bg-red-50"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      ล้างทั้งหมด
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleResetSummarizerOptions}
-                    className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-100"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                    รีเซ็ตค่าเริ่มต้น
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsManagingSummarizers(false)}
-                    className="px-2 py-1 text-[11px] font-medium text-slate-600 hover:text-slate-900"
-                  >
-                    ปิด
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  type="text"
-                  value={newSummarizerName}
-                  onChange={(e) => setNewSummarizerName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleAddSummarizerOption(newSummarizerName);
-                    }
-                  }}
-                  placeholder="พิมพ์ชื่อผู้สรุปใหม่ เช่น พว.สมหญิง ใจดี"
-                  maxLength={120}
-                  className="flex-1 min-w-[220px] bg-white border border-slate-300 rounded-md px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
-                />
+              ) : (
+                <span className="inline-flex items-center gap-1.5 font-semibold text-amber-800">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  ยังไม่ได้เยี่ยมหลังผ่าตัด
+                  {postOpCheck.hasAnyInput
+                    ? ` (ลงข้อมูลไม่ครบ ${postOpCheck.filledCount}/${postOpCheck.totalRequired})`
+                    : ''}
+                </span>
+              )}
+              {onGoToPostOp && (
                 <button
                   type="button"
-                  onClick={() => handleAddSummarizerOption(newSummarizerName)}
-                  disabled={!newSummarizerName.trim() || newSummarizerName.trim() === 'อื่นๆ'}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-blue-800 rounded-md hover:bg-blue-900 disabled:opacity-50"
+                  onClick={onGoToPostOp}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-900 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 transition-colors whitespace-nowrap"
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  เพิ่มรายชื่อ
+                  เปิดแบบฟอร์ม Post-op Evaluation (ANE-FM-006-01)
+                  <ArrowRight className="w-3.5 h-3.5" />
                 </button>
-              </div>
-
-              {summarizerOptions.length === 0 ? (
-                <p className="text-xs text-slate-500 py-1">
-                  ยังไม่มีรายชื่อผู้สรุปในตัวเลือก (สามารถพิมพ์เพิ่มด้านบน หรือกดรีเซ็ตค่าเริ่มต้น)
-                </p>
-              ) : (
-                <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
-                  {summarizerOptions.map((s) => {
-                    const isEditing = editingSummarizer?.original === s;
-                    return isEditing ? (
-                      <span
-                        key={s}
-                        className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-white border border-blue-800 rounded-md"
-                      >
-                        <input
-                          type="text"
-                          value={editingSummarizer.text}
-                          onChange={(e) =>
-                            setEditingSummarizer({ original: s, text: e.target.value })
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              handleSaveEditedSummarizer();
-                            } else if (e.key === 'Escape') {
-                              setEditingSummarizer(null);
-                            }
-                          }}
-                          maxLength={120}
-                          autoFocus
-                          className="w-44 text-xs text-slate-900 focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleSaveEditedSummarizer}
-                          aria-label="บันทึกชื่อที่แก้ไข"
-                          className="p-0.5 text-emerald-700 hover:bg-emerald-50 rounded"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingSummarizer(null)}
-                          aria-label="ยกเลิกการแก้ไข"
-                          className="p-0.5 text-slate-400 hover:text-slate-700 rounded"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </span>
-                    ) : (
-                      <span
-                        key={s}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-slate-50 border border-slate-300 rounded-md text-slate-800"
-                      >
-                        <span>{s}</span>
-                        <button
-                          type="button"
-                          onClick={() => setEditingSummarizer({ original: s, text: s })}
-                          aria-label={`แก้ไข ${s}`}
-                          title="แก้ไขชื่อ"
-                          className="p-0.5 text-slate-400 hover:text-blue-800 hover:bg-blue-50 rounded"
-                        >
-                          <Edit2 className="w-3 h-3" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveSummarizerOption(s)}
-                          aria-label={`ลบ ${s}`}
-                          title="ลบรายชื่อ"
-                          className="p-0.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </span>
-                    );
-                  })}
-                </div>
               )}
             </div>
-          )}
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[11px] text-slate-600">BP (mm Hg)</span>
-            <input
-              type="text"
-              value={pa.bp}
-              onChange={(e) => updatePostOp({ bp: e.target.value })}
-              className={`${inputBase} font-mono tabular-nums text-xs`}
-            />
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[11px] text-slate-600">P (bpm)</span>
-            <input
-              type="text"
-              value={pa.pulse}
-              onChange={(e) => updatePostOp({ pulse: e.target.value })}
-              className={`${inputBase} font-mono tabular-nums text-xs`}
-            />
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[11px] text-slate-600">RR (bpm)</span>
-            <input
-              type="text"
-              value={pa.rr}
-              onChange={(e) => updatePostOp({ rr: e.target.value })}
-              className={`${inputBase} font-mono tabular-nums text-xs`}
-            />
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[11px] text-slate-600">T (°C)</span>
-            <input
-              type="text"
-              value={pa.temp}
-              onChange={(e) => updatePostOp({ temp: e.target.value })}
-              className={`${inputBase} font-mono tabular-nums text-xs`}
-            />
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[11px] text-slate-600">SpO2 (%)</span>
-            <input
-              type="text"
-              value={pa.spo2}
-              onChange={(e) => updatePostOp({ spo2: e.target.value })}
-              className={`${inputBase} font-mono tabular-nums text-xs`}
-            />
-          </label>
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[11px] text-slate-600">PS (คะแนน)</span>
-            <input
-              type="text"
-              value={pa.painScore}
-              onChange={(e) => updatePostOp({ painScore: e.target.value })}
-              className={`${inputBase} font-mono tabular-nums text-xs`}
-            />
-          </label>
-        </div>
-
-        <div className="space-y-2.5 pt-1">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[260px]">
-              <span className="text-xs font-semibold text-slate-700">
-                Post anesthesia complication
-              </span>
-              <button
-                type="button"
-                onClick={() =>
-                  updatePostOp({
-                    complicationStatus: toggleTri(pa.complicationStatus, 'no'),
-                  })
-                }
-                className={radioBtn(pa.complicationStatus === 'no')}
-              >
-                {pa.complicationStatus === 'no' ? '●' : '○'} No
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  updatePostOp({
-                    complicationStatus: toggleTri(pa.complicationStatus, 'yes'),
-                  })
-                }
-                className={radioBtn(pa.complicationStatus === 'yes', 'danger')}
-              >
-                {pa.complicationStatus === 'yes' ? '●' : '○'} Yes
-              </button>
-              {pa.complicationStatus === 'yes' && (
-                <input
-                  type="text"
-                  value={pa.complicationDetail}
-                  onChange={(e) => updatePostOp({ complicationDetail: e.target.value })}
-                  placeholder="ระบุภาวะแทรกซ้อนและการดูแลแก้ไข"
-                  className={`${inputBase} flex-1 min-w-[200px] text-xs border-red-300`}
-                />
-              )}
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2.5">
-              <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                <span className="text-slate-600 font-medium">visit by</span>
-                {(() => {
-                  const currentVisitor = pa.visitBy ?? '';
-                  const isListedVisitor = visitorOptions.includes(currentVisitor);
-                  return (
-                    <>
-                      <select
-                        aria-label="เลือกผู้เยี่ยม (visit by)"
-                        value={isListedVisitor ? currentVisitor : ''}
-                        onChange={(e) => {
-                          if (e.target.value) {
-                            updatePostOp({ visitBy: e.target.value });
-                          } else if (isListedVisitor) {
-                            updatePostOp({ visitBy: '' });
-                          }
-                        }}
-                        className={`${inputBase} w-48 text-xs`}
-                      >
-                        <option value="">-- เลือกรายชื่อผู้เยี่ยม --</option>
-                        {visitorOptions.map((v) => (
-                          <option key={v} value={v}>
-                            {v}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        type="text"
-                        aria-label="พิมพ์ชื่อผู้เยี่ยมเพิ่มเติม"
-                        value={currentVisitor}
-                        onChange={(e) => updatePostOp({ visitBy: e.target.value })}
-                        placeholder="หรือพิมพ์ชื่อเพิ่มเติม..."
-                        maxLength={120}
-                        className={`${inputBase} w-44 text-xs`}
-                      />
-                      {currentVisitor.trim() && (
-                        <button
-                          type="button"
-                          onClick={() => updatePostOp({ visitBy: '' })}
-                          title="ล้างชื่อผู้เยี่ยมในช่องนี้"
-                          aria-label="ล้างชื่อผู้เยี่ยมในช่องนี้"
-                          className="p-1 text-slate-400 hover:text-slate-700"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      {currentVisitor.trim() && !isListedVisitor && (
-                        <button
-                          type="button"
-                          onClick={() => handleAddVisitorOption(currentVisitor)}
-                          title="เพิ่มชื่อนี้เข้าตัวเลือก visit by"
-                          className="px-2 py-1 text-[11px] font-medium text-blue-800 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 whitespace-nowrap"
-                        >
-                          + บันทึก
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setIsManagingVisitors((prev) => !prev)}
-                        className="inline-flex items-center gap-0.5 text-[11px] font-medium text-blue-800 hover:text-blue-950 whitespace-nowrap ml-1"
-                      >
-                        <Plus className="w-3 h-3" />
-                        {isManagingVisitors ? 'ปิด' : 'เพิ่ม/ลดรายชื่อ'}
-                      </button>
-                    </>
-                  );
-                })()}
-              </div>
-              <label className="inline-flex items-center gap-1.5 text-xs">
-                <span className="text-slate-600 font-medium">date</span>
-                <input
-                  type="date"
-                  value={pa.visitDate}
-                  onChange={(e) => updatePostOp({ visitDate: e.target.value })}
-                  className={`${inputBase} font-mono tabular-nums text-xs`}
-                />
-              </label>
+            <div className="text-right text-[11px] text-slate-500">
+              ANE-FM-002-03 อนุมัติใช้วันที่ 21 มิถุนายน 2564
             </div>
           </div>
-
-          {isManagingVisitors && (
-            <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-slate-800">
-                  จัดการรายชื่อผู้เยี่ยม visit by (เพิ่ม แก้ไข หรือลบรายชื่อได้ · {visitorOptions.length} รายชื่อ)
-                </span>
-                <div className="flex flex-wrap items-center gap-2">
-                  {visitorOptions.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleClearAllVisitors}
-                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-red-700 bg-white border border-red-200 rounded hover:bg-red-50"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      ล้างทั้งหมด
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleResetVisitorOptions}
-                    className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-100"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                    รีเซ็ตค่าเริ่มต้น
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsManagingVisitors(false)}
-                    className="px-2 py-1 text-[11px] font-medium text-slate-600 hover:text-slate-900"
-                  >
-                    ปิด
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  type="text"
-                  value={newVisitorName}
-                  onChange={(e) => setNewVisitorName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleAddVisitorOption(newVisitorName);
-                    }
-                  }}
-                  placeholder="พิมพ์ชื่อผู้เยี่ยมใหม่ เช่น พว.สมหญิง ใจดี"
-                  maxLength={120}
-                  className="flex-1 min-w-[220px] bg-white border border-slate-300 rounded-md px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
-                />
-                <button
-                  type="button"
-                  onClick={() => handleAddVisitorOption(newVisitorName)}
-                  disabled={!newVisitorName.trim() || newVisitorName.trim() === 'อื่นๆ'}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-blue-800 rounded-md hover:bg-blue-900 disabled:opacity-50"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  เพิ่มรายชื่อ
-                </button>
-              </div>
-
-              {visitorOptions.length === 0 ? (
-                <p className="text-xs text-slate-500 py-1">
-                  ยังไม่มีรายชื่อผู้เยี่ยมในตัวเลือก (สามารถพิมพ์เพิ่มด้านบน หรือกดรีเซ็ตค่าเริ่มต้น)
-                </p>
-              ) : (
-                <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
-                  {visitorOptions.map((v) => {
-                    const isEditing = editingVisitor?.original === v;
-                    return isEditing ? (
-                      <span
-                        key={v}
-                        className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-white border border-blue-800 rounded-md"
-                      >
-                        <input
-                          type="text"
-                          value={editingVisitor.text}
-                          onChange={(e) =>
-                            setEditingVisitor({ original: v, text: e.target.value })
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              handleSaveEditedVisitor();
-                            } else if (e.key === 'Escape') {
-                              setEditingVisitor(null);
-                            }
-                          }}
-                          maxLength={120}
-                          autoFocus
-                          className="w-44 text-xs text-slate-900 focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleSaveEditedVisitor}
-                          aria-label="บันทึกชื่อที่แก้ไข"
-                          className="p-0.5 text-emerald-700 hover:bg-emerald-50 rounded"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingVisitor(null)}
-                          aria-label="ยกเลิกการแก้ไข"
-                          className="p-0.5 text-slate-400 hover:text-slate-700 rounded"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </span>
-                    ) : (
-                      <span
-                        key={v}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-slate-50 border border-slate-300 rounded-md text-slate-800"
-                      >
-                        <span>{v}</span>
-                        <button
-                          type="button"
-                          onClick={() => setEditingVisitor({ original: v, text: v })}
-                          aria-label={`แก้ไข ${v}`}
-                          title="แก้ไขชื่อ"
-                          className="p-0.5 text-slate-400 hover:text-blue-800 hover:bg-blue-50 rounded"
-                        >
-                          <Edit2 className="w-3 h-3" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveVisitorOption(v)}
-                          aria-label={`ลบ ${v}`}
-                          title="ลบรายชื่อ"
-                          className="p-0.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="text-right text-[11px] text-slate-500 pt-1">
-          ANE-FM-002-03 อนุมัติใช้วันที่ 21 มิถุนายน 2564
-        </div>
-      </div>
+        );
+      })()}
     </div>
   );
 }

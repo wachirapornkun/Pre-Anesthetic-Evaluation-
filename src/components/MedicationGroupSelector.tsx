@@ -444,7 +444,8 @@ export function MedicationGroupSelector({
           </p>
         ) : (
           <div className="space-y-1.5">
-            <div className="hidden sm:grid grid-cols-[1.2fr_0.9fr_1.1fr_24px] gap-1.5 text-[10px] font-medium text-slate-500 px-0.5">
+            <div className="hidden sm:grid grid-cols-[20px_1.2fr_0.9fr_1.1fr_24px] gap-1.5 text-[10px] font-medium text-slate-500 px-0.5">
+              <span>#</span>
               <span>ชื่อยา</span>
               <span>จำนวน (mg / unit)</span>
               <span>ปริมาณที่รับประทาน / วิธีใช้</span>
@@ -456,8 +457,11 @@ export function MedicationGroupSelector({
               return (
               <div
                 key={`sel_med_${idx}`}
-                className="grid grid-cols-1 sm:grid-cols-[1.2fr_0.9fr_1.1fr_24px] gap-1.5 items-center"
+                className="grid grid-cols-1 sm:grid-cols-[20px_1.2fr_0.9fr_1.1fr_24px] gap-1.5 items-center"
               >
+                <span className="hidden sm:inline-block font-mono text-[11px] text-slate-400 text-right pr-0.5">
+                  {idx + 1}.
+                </span>
                 <div className="space-y-0.5">
                   <input
                     type="text"

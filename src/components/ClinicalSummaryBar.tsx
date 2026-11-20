@@ -6,6 +6,8 @@ import {
   formatDrugAddictionDetail,
   formatOxygenSupportSummary,
   formatSmokingDetail,
+  getMedicationLines,
+  getPostOpVisitCompleteness,
   PreAnestheticEvaluation,
 } from '../types/evaluation';
 
@@ -15,6 +17,8 @@ interface ClinicalSummaryBarProps {
 
 export function ClinicalSummaryBar({ evaluation }: ClinicalSummaryBarProps) {
   const summary = computeClinicalSummary(evaluation);
+  const postOpStatus = getPostOpVisitCompleteness(evaluation.formData.postAnesthesia);
+  const medicationLines = getMedicationLines(evaluation.formData.history.medication);
 
   const airwayColor =
     summary.airwayRiskLevel === 'high'
@@ -56,7 +60,33 @@ export function ClinicalSummaryBar({ evaluation }: ClinicalSummaryBarProps) {
           </p>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex flex-wrap items-center gap-4 shrink-0">
+          <div className="text-right">
+            <div className="text-xs text-slate-500">การเยี่ยมหลังผ่าตัด</div>
+            <div
+              className={`mt-0.5 text-xs font-semibold inline-flex items-center gap-1 ${
+                postOpStatus.isComplete ? 'text-emerald-700' : 'text-amber-700'
+              }`}
+            >
+              {postOpStatus.isComplete ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>เยี่ยมหลังผ่าตัดแล้ว</span>
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    ยังไม่ได้เยี่ยมหลังผ่าตัด
+                    {postOpStatus.hasAnyInput
+                      ? ` (ลงข้อมูลไม่ครบ ${postOpStatus.filledCount}/${postOpStatus.totalRequired})`
+                      : ''}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+
           <div className="text-right">
             <div className="text-xs text-slate-500">ความครบถ้วนของแบบฟอร์ม</div>
             <div className="flex items-center gap-2 mt-0.5">
@@ -111,13 +141,21 @@ export function ClinicalSummaryBar({ evaluation }: ClinicalSummaryBarProps) {
         </div>
 
         <div>
-          <div className="text-xs text-slate-500">NPO &amp; สารน้ำ (IVF)</div>
-          <div className="mt-0.5 text-xs font-medium text-slate-800 truncate">
-            {evaluation.formData.premedication.npoTime || 'ยังไม่ระบุ NPO'}
-            {evaluation.formData.premedication.onIvf
-              ? ` · ${evaluation.formData.premedication.onIvf}`
-              : ''}
+          <div className="text-xs font-bold text-red-700">NPO (งดน้ำและอาหาร)</div>
+          <div
+            className={`mt-0.5 leading-snug ${
+              evaluation.formData.premedication.npoTime.trim()
+                ? 'text-base font-extrabold text-red-700'
+                : 'text-xs font-medium text-slate-500'
+            }`}
+          >
+            {evaluation.formData.premedication.npoTime.trim() || 'ยังไม่ระบุ NPO'}
           </div>
+          {evaluation.formData.premedication.onIvf.trim() && (
+            <div className="mt-0.5 text-[11px] text-slate-600 truncate">
+              IVF: {evaluation.formData.premedication.onIvf.trim()}
+            </div>
+          )}
         </div>
 
         <div>
@@ -134,11 +172,11 @@ export function ClinicalSummaryBar({ evaluation }: ClinicalSummaryBarProps) {
         Boolean(formatOxygenSupportSummary(evaluation.formData.physicalExam.oxygenSupport)) ||
         summary.labAlerts.length > 0 ||
         summary.underlyingTags.length > 0 ||
-        evaluation.formData.history.medication.trim().length > 0 ||
+        medicationLines.length > 0 ||
         evaluation.formData.history.smokingStatus === 'yes' ||
         evaluation.formData.history.drinkingStatus === 'yes' ||
         evaluation.formData.history.drugAddictionStatus === 'yes') && (
-        <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
+        <div className="pt-2 border-t border-slate-100 flex flex-wrap items-start gap-x-4 gap-y-1.5 text-xs">
           {summary.allergyFlag && (
             <span className="inline-flex items-center gap-1 font-semibold text-red-700">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
@@ -163,10 +201,15 @@ export function ClinicalSummaryBar({ evaluation }: ClinicalSummaryBarProps) {
               โรคประจำตัว: <strong className="font-semibold">{summary.underlyingTags.join(', ')}</strong>
             </span>
           )}
-          {evaluation.formData.history.medication.trim() && (
-            <span className="text-slate-700">
-              ยาประจำ: <strong className="font-semibold">{evaluation.formData.history.medication.trim()}</strong>
-            </span>
+          {medicationLines.length > 0 && (
+            <div className="text-slate-700 inline-flex items-start gap-1">
+              <span className="shrink-0">ยาประจำ:</span>
+              <div className="font-semibold leading-snug">
+                {medicationLines.map((med, idx) => (
+                  <div key={idx}>{med}</div>
+                ))}
+              </div>
+            </div>
           )}
           {evaluation.formData.history.smokingStatus === 'yes' && (
             <span className="text-slate-700">

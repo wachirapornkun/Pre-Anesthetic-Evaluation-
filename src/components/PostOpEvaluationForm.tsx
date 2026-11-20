@@ -37,6 +37,7 @@ import {
   TriStatus,
 } from '../types/evaluation';
 import { BphLogo } from './MedicalDiagrams';
+import { OperationInput } from './OperationInput';
 
 interface PostOpEvaluationFormProps {
   value: PreAnestheticEvaluation;
@@ -628,19 +629,17 @@ export function PostOpEvaluationForm({
                   />
                 </label>
 
-                <label className="flex flex-col gap-1 lg:col-span-4">
-                  <span className="text-[11px] font-medium text-slate-600">
-                    การผ่าตัด (Operation)
-                  </span>
-                  <input
-                    type="text"
+                <div className="lg:col-span-4">
+                  <OperationInput
                     value={value.operation}
-                    onChange={(e) => onChange({ ...value, operation: e.target.value })}
-                    maxLength={300}
-                    placeholder="ระบุชื่อหัตถการ / Operation"
-                    className={inputBase}
+                    onChange={(nextOp) => onChange({ ...value, operation: nextOp })}
+                    label="การผ่าตัด (Operation)"
+                    labelClassName="text-[11px] font-medium text-slate-600"
+                    placeholder="พิมพ์หรือเลือกหัตถการ / Operation"
+                    inputClassName={inputBase}
+                    compact
                   />
-                </label>
+                </div>
 
                 <label className="flex flex-col gap-1 lg:col-span-3">
                   <span className="text-[11px] font-medium text-slate-600">หอผู้ป่วย (Ward)</span>

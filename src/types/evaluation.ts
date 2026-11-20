@@ -1279,6 +1279,9 @@ export function createEmptyEvaluation(
   overrides?: Partial<
     Pick<
       PreAnestheticEvaluation,
+      | 'hn'
+      | 'patientName'
+      | 'gender'
       | 'dateOfOperation'
       | 'dateOfVisit'
       | 'orRoom'
@@ -1299,11 +1302,11 @@ export function createEmptyEvaluation(
     id: generateEvaluationId(),
     ownerId,
     status: 'draft',
-    patientName: '',
-    hn: '',
+    patientName: overrides?.patientName ?? '',
+    hn: overrides?.hn ?? '',
     an: '',
     age: '',
-    gender: '',
+    gender: overrides?.gender ?? '',
     ward: overrides?.ward ?? '',
     specialty: overrides?.specialty ?? '',
     dateOfVisit: overrides?.dateOfVisit ?? today,

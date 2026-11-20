@@ -62,6 +62,7 @@ import {
   MallampatiSelector,
 } from './MedicalDiagrams';
 import { MedicationGroupSelector } from './MedicationGroupSelector';
+import { OperationInput } from './OperationInput';
 
 interface PreAnestheticFormProps {
   value: PreAnestheticEvaluation;
@@ -859,16 +860,15 @@ export function PreAnestheticForm({
               className={inputBase}
             />
           </label>
-          <label className="lg:col-span-5 flex flex-col gap-1">
-            <span className="text-xs font-medium text-slate-600">Operation</span>
-            <input
-              type="text"
+          <div className="lg:col-span-5">
+            <OperationInput
               value={value.operation}
-              onChange={(e) => updateTop('operation', e.target.value)}
-              placeholder="หัตถการ / การผ่าตัดที่วางแผน"
-              className={inputBase}
+              onChange={(nextOp) => updateTop('operation', nextOp)}
+              label="Operation"
+              placeholder="พิมพ์หรือเลือกหัตถการ เช่น Appendectomy, C/S, ORIF c PFNA..."
+              inputClassName={inputBase}
             />
-          </label>
+          </div>
           <div className="lg:col-span-3 flex flex-col gap-1">
             <div className="flex items-center justify-between gap-1">
               <span className="text-xs font-medium text-slate-600">สาขา (Specialty)</span>

@@ -51,6 +51,7 @@ import {
   generateEvaluationId,
   getEffectiveEvaluationStatus,
   getTodayIsoDate,
+  inferPatientGender,
   isSampleEvaluationRecord,
   MedicationGroup,
   OR_ROOM_OPTIONS,
@@ -70,6 +71,8 @@ type ActiveTab = 'form' | 'post_op' | 'schedule' | 'dashboard' | 'registry' | 'p
 type PrintSheetMode = 'pre_op' | 'post_op' | 'both';
 
 interface NewFormScheduleDraft {
+  hn: string;
+  patientName: string;
   dateOfOperation: string;
   surgeon: string;
   scheduleType: ScheduleType;
@@ -119,6 +122,8 @@ export default function App() {
   const purgedSampleIdsRef = useRef<Set<string>>(new Set());
   const [isNewFormModalOpen, setIsNewFormModalOpen] = useState(false);
   const [newFormDraft, setNewFormDraft] = useState<NewFormScheduleDraft>(() => ({
+    hn: '',
+    patientName: '',
     dateOfOperation: getTodayIsoDate(),
     surgeon: '',
     scheduleType: 'elective',
@@ -993,6 +998,8 @@ export default function App() {
   const handleCreateNew = () => {
     const defaultDate = currentForm.dateOfOperation?.trim() || getTodayIsoDate();
     setNewFormDraft({
+      hn: '',
+      patientName: '',
       dateOfOperation: defaultDate,
       surgeon: '',
       scheduleType: 'elective',
@@ -1003,14 +1010,25 @@ export default function App() {
     setIsNewFormModalOpen(true);
   };
 
-  const handleConfirmCreateNew = (e?: React.FormEvent) => {
+  const handleConfirmCreateNew = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const chosenDate = newFormDraft.dateOfOperation.trim();
     if (!chosenDate) {
       showNotice('error', 'กรุณาเลือกวันที่ทำผ่าตัด (Date of Operation)');
       return;
     }
+    const trimmedHn = newFormDraft.hn.trim();
+    const trimmedName = newFormDraft.patientName.trim();
+    if (!trimmedHn && !trimmedName) {
+      showNotice('error', 'กรุณาระบุ HN หรือ ชื่อ-นามสกุลผู้ป่วย เพื่อเก็บข้อมูลลงทะเบียน');
+      return;
+    }
+
+    const resolvedName = trimmedName || `ผู้ป่วย HN ${trimmedHn}`;
     const created = createEmptyEvaluation(user?.uid || 'local', {
+      hn: trimmedHn,
+      patientName: resolvedName,
+      gender: inferPatientGender(resolvedName),
       dateOfOperation: chosenDate,
       dateOfVisit: '',
       surgeon: newFormDraft.surgeon.trim(),
@@ -1020,13 +1038,17 @@ export default function App() {
       caseOrder: newFormDraft.caseOrder.trim(),
       operationTime: newFormDraft.operationTime.trim(),
     });
-    setCurrentForm(created);
+
+    const saved = await saveEvaluationRecord(created);
+    if (!saved) return;
+
+    setCurrentForm(saved);
     setIsNewFormModalOpen(false);
     setActiveTab('form');
     const dateMeta = formatThaiScheduleDate(chosenDate);
     showNotice(
       'success',
-      `เปิดฟอร์มเต็มสำหรับวันผ่าตัด ${dateMeta.label}${newFormDraft.surgeon.trim() ? ` · ${newFormDraft.surgeon.trim()}` : ''} กรอกข้อมูลบางส่วนแล้วกดบันทึกข้อมูลไว้รอเยี่ยมได้เลย`,
+      `สร้างฟอร์มและเก็บลงทะเบียนแล้ว (${saved.hn ? `HN ${saved.hn} · ` : ''}${saved.patientName} · ${dateMeta.label})`,
     );
   };
 
@@ -1038,21 +1060,17 @@ export default function App() {
     const nextOrder = orRoom
       ? String(countCasesOnDate(dateOfOperation, orRoom) + 1)
       : '';
-    setCurrentForm(
-      createEmptyEvaluation(user?.uid || 'local', {
-        dateOfOperation,
-        dateOfVisit: '',
-        surgeon: surgeon ?? '',
-        scheduleType: 'elective',
-        orRoom: orRoom ?? '',
-        caseOrder: nextOrder,
-      }),
-    );
-    setActiveTab('form');
-    showNotice(
-      'success',
-      `เปิดฟอร์มเต็มสำหรับวันผ่าตัด ${dateOfOperation}${surgeon ? ` · ${surgeon}` : ''}`,
-    );
+    setNewFormDraft({
+      hn: '',
+      patientName: '',
+      dateOfOperation,
+      surgeon: surgeon ?? '',
+      scheduleType: 'elective',
+      orRoom: orRoom ?? '',
+      caseOrder: nextOrder,
+      operationTime: '',
+    });
+    setIsNewFormModalOpen(true);
   };
 
   const saveEvaluationRecord = async (
@@ -1714,7 +1732,7 @@ export default function App() {
                     สร้างใบเยี่ยมใหม่ (เปิดฟอร์มเต็ม)
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    เลือกวันที่ผ่าตัดและแพทย์ผ่าตัด เพื่อเปิดฟอร์มเต็มกรอกข้อมูลบางส่วนเก็บไว้รอไปเยี่ยมที่หอผู้ป่วย
+                    ระบุ HN / ชื่อผู้ป่วย และวันที่ผ่าตัด เพื่อสร้างฟอร์มและเก็บข้อมูลลงทะเบียนทันที สามารถสืบค้นย้อนหลังได้จาก HN และวันที่
                   </p>
                 </div>
               </div>
@@ -1740,8 +1758,71 @@ export default function App() {
               const existingCount = newFormDraft.dateOfOperation
                 ? countCasesOnDate(newFormDraft.dateOfOperation)
                 : 0;
+              const normalizedDraftHn = newFormDraft.hn.replace(/[\s-]/g, '').toLowerCase();
+              const matchedByHn =
+                normalizedDraftHn.length >= 3
+                  ? records.filter(
+                      (r) =>
+                        r.hn &&
+                        r.hn.replace(/[\s-]/g, '').toLowerCase() === normalizedDraftHn,
+                    )
+                  : [];
               return (
                 <div className="space-y-3">
+                  {/* Patient HN & Name (Stored immediately into Registry) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5">
+                    <label className="sm:col-span-2 flex flex-col gap-1">
+                      <span className="text-xs font-semibold text-slate-700">
+                        HN <span className="text-red-600">*</span>
+                      </span>
+                      <input
+                        type="text"
+                        autoFocus
+                        value={newFormDraft.hn}
+                        onChange={(e) =>
+                          setNewFormDraft((prev) => ({ ...prev, hn: e.target.value }))
+                        }
+                        placeholder="เช่น 67012345"
+                        maxLength={40}
+                        className="bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800 focus:ring-1 focus:ring-blue-800"
+                      />
+                    </label>
+                    <label className="sm:col-span-3 flex flex-col gap-1">
+                      <span className="text-xs font-semibold text-slate-700">
+                        ชื่อ-นามสกุลผู้ป่วย (Name)
+                      </span>
+                      <input
+                        type="text"
+                        value={newFormDraft.patientName}
+                        onChange={(e) =>
+                          setNewFormDraft((prev) => ({ ...prev, patientName: e.target.value }))
+                        }
+                        placeholder="เช่น นายสมชาย ใจดี (เว้นว่างได้หากกรอก HN แล้ว)"
+                        maxLength={120}
+                        className="bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-blue-800 focus:ring-1 focus:ring-blue-800"
+                      />
+                    </label>
+                  </div>
+
+                  {matchedByHn.length > 0 && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-950">
+                      <span>
+                        พบประวัติเดิมของ HN <strong className="font-mono">{newFormDraft.hn.trim()}</strong> ในทะเบียนแล้ว ({matchedByHn.length} รายการ — {matchedByHn[matchedByHn.length - 1].patientName})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const latest = matchedByHn[matchedByHn.length - 1];
+                          handleEditRecord(latest);
+                          setIsNewFormModalOpen(false);
+                        }}
+                        className="font-semibold text-blue-800 hover:underline whitespace-nowrap"
+                      >
+                        เปิดข้อมูลเดิม
+                      </button>
+                    </div>
+                  )}
+
                   <div className="space-y-1.5">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <label
@@ -1944,10 +2025,11 @@ export default function App() {
               </button>
               <button
                 type="submit"
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-blue-800 rounded-lg hover:bg-blue-900"
+                disabled={isSaving}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-blue-800 rounded-lg hover:bg-blue-900 disabled:opacity-60"
               >
                 <FilePlus2 className="w-3.5 h-3.5" />
-                เปิดฟอร์มเต็มเพื่อบันทึกข้อมูล
+                {isSaving ? 'กำลังบันทึกเข้าทะเบียน...' : 'สร้างฟอร์มและเก็บในทะเบียน'}
               </button>
             </div>
           </form>

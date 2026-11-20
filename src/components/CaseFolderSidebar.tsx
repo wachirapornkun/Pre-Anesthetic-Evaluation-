@@ -30,6 +30,7 @@ export function CaseFolderSidebar({
   onClose,
 }: CaseFolderSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [dateFilter, setDateFilter] = useState('');
   const [surgeonFilter, setSurgeonFilter] = useState('ALL');
   const [wardFilter, setWardFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'draft' | 'evaluated'>('ALL');
@@ -53,8 +54,17 @@ export function CaseFolderSidebar({
 
   const groupedFolders = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
+    const qNorm = q.replace(/[\s-]/g, '');
     const filtered = records
       .filter((r) => {
+        if (dateFilter) {
+          const opDate = (r.dateOfOperation || '').trim();
+          const visitDate = (r.dateOfVisit || '').trim();
+          const postOpDate = (r.formData?.postAnesthesia?.visitDate || '').trim();
+          if (opDate !== dateFilter && visitDate !== dateFilter && postOpDate !== dateFilter) {
+            return false;
+          }
+        }
         if (surgeonFilter !== 'ALL') {
           const s = (r.surgeon || '').trim() || '__NONE__';
           if (s !== surgeonFilter) return false;
@@ -76,12 +86,14 @@ export function CaseFolderSidebar({
         return (
           r.patientName.toLowerCase().includes(q) ||
           r.hn.toLowerCase().includes(q) ||
+          r.hn.replace(/[\s-]/g, '').toLowerCase().includes(qNorm) ||
           r.an.toLowerCase().includes(q) ||
           (r.surgeon || '').toLowerCase().includes(q) ||
           (r.ward || '').toLowerCase().includes(q) ||
           r.operation.toLowerCase().includes(q) ||
           r.diagnosis.toLowerCase().includes(q) ||
-          (r.dateOfOperation || '').includes(q)
+          (r.dateOfOperation || '').includes(q) ||
+          (r.dateOfVisit || '').includes(q)
         );
       })
       .sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
@@ -116,7 +128,7 @@ export function CaseFolderSidebar({
     }
 
     return dateGroups;
-  }, [records, searchQuery, surgeonFilter, wardFilter, statusFilter]);
+  }, [records, searchQuery, dateFilter, surgeonFilter, wardFilter, statusFilter]);
 
   const toggleDateCollapse = (dateKey: string) => {
     setCollapsedDates((prev) => ({ ...prev, [dateKey]: !prev[dateKey] }));
@@ -145,6 +157,7 @@ export function CaseFolderSidebar({
   const totalFiltered = groupedFolders.reduce((sum, g) => sum + g.total, 0);
   const hasActiveFilters =
     Boolean(searchQuery.trim()) ||
+    Boolean(dateFilter) ||
     surgeonFilter !== 'ALL' ||
     wardFilter !== 'ALL' ||
     statusFilter !== 'ALL';
@@ -190,26 +203,49 @@ export function CaseFolderSidebar({
           เรียงตามวันผ่าตัดและแพทย์ผ่าตัด คลิกชื่อผู้ป่วยเพื่อเปิดฟอร์มเต็มกรอกต่อเมื่อไปเยี่ยม
         </p>
 
-        {/* Search */}
-        <div className="relative">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="ค้นหา ชื่อ, HN, แพทย์, หอผู้ป่วย..."
-            className="w-full pl-8 pr-7 py-1.5 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-800"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              aria-label="ล้างคำค้นหา"
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
+        {/* Search by HN / Name & Date */}
+        <div className="space-y-1.5">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="สืบค้น HN, ชื่อ, แพทย์, หอผู้ป่วย..."
+              className="w-full pl-8 pr-7 py-1.5 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-800"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label="ล้างคำค้นหา"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            <input
+              type="date"
+              aria-label="สืบค้นตามวันที่"
+              title="สืบค้นตามวันที่ผ่าตัดหรือวันที่เยี่ยม"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+              className="flex-1 min-w-0 bg-white border border-slate-300 rounded-md px-2 py-1 text-[11px] font-mono tabular-nums text-slate-800 focus:outline-none focus:border-blue-800"
+            />
+            {dateFilter && (
+              <button
+                type="button"
+                onClick={() => setDateFilter('')}
+                aria-label="ล้างการกรองวันที่"
+                title="ล้างการกรองวันที่"
+                className="p-1 text-slate-500 hover:text-slate-900 bg-white border border-slate-300 rounded-md"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Surgeon & Ward Filter */}
@@ -276,13 +312,13 @@ export function CaseFolderSidebar({
             <p className="font-semibold text-slate-800">ยังไม่มีใบเยี่ยมที่บันทึกไว้</p>
             <ol className="list-decimal list-inside space-y-1.5 text-[11px] leading-relaxed text-slate-600">
               <li>
-                กด <strong>สร้างใบใหม่</strong> แล้วเลือก<strong>วันที่ผ่าตัด</strong>และ<strong>แพทย์ผ่าตัด</strong>
+                กด <strong>สร้างใบใหม่</strong> แล้วระบุ <strong>HN / ชื่อผู้ป่วย</strong> และ <strong>วันที่ผ่าตัด</strong>
               </li>
               <li>
-                กรอกข้อมูลบางส่วนในฟอร์มเต็ม แล้วกดปุ่ม <strong>บันทึกข้อมูล</strong> ด้านบนขวา
+                ระบบจะจัดเก็บข้อมูลลงใน <strong>ทะเบียน</strong> ทันที และสามารถกด <strong>อัปเดตข้อมูล</strong> เมื่อกรอกรายละเอียดเพิ่มเติม
               </li>
               <li>
-                รายชื่อจะถูกจัดเก็บเรียงตามวันผ่าตัดและแพทย์ที่นี่ เพื่อเปิดกรอกต่อเมื่อไปเยี่ยมที่หอผู้ป่วย
+                สามารถสืบค้นย้อนหลังได้ทันทีจาก <strong>HN</strong> และ <strong>วันที่</strong> ทั้งที่นี่และในหน้าทะเบียน
               </li>
             </ol>
           </div>
@@ -294,6 +330,7 @@ export function CaseFolderSidebar({
                 type="button"
                 onClick={() => {
                   setSearchQuery('');
+                  setDateFilter('');
                   setSurgeonFilter('ALL');
                   setWardFilter('ALL');
                   setStatusFilter('ALL');

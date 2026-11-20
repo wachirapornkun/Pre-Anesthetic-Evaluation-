@@ -8,6 +8,7 @@ import {
   FilePlus2,
   Plus,
   Printer,
+  RotateCcw,
   Search,
   Trash2,
   X,
@@ -20,6 +21,7 @@ import {
   getEffectiveEvaluationStatus,
   getEffectiveScheduleType,
   getPostOpVisitCompleteness,
+  getTodayIsoDate,
   PreAnestheticEvaluation,
 } from '../types/evaluation';
 import { exportEvaluationsCsv, exportSingleHtmlReport } from '../utils/exportReports';
@@ -45,6 +47,10 @@ interface RegistryViewProps {
   onCreateNewForDate?: (dateOfOperation: string, orRoom?: string, surgeon?: string) => void;
 }
 
+function normalizeCode(val: string | undefined): string {
+  return (val || '').replace(/[\s-]/g, '').toLowerCase();
+}
+
 export function RegistryView({
   records,
   activeId,
@@ -56,18 +62,42 @@ export function RegistryView({
   onCreateNew,
   onCreateNewForDate,
 }: RegistryViewProps) {
+  const [hnQuery, setHnQuery] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<
     'ALL' | 'draft' | 'evaluated' | 'not_post_op' | 'post_op_completed'
   >('ALL');
   const [scheduleFilter, setScheduleFilter] = useState<'ALL' | 'elective' | 'emergency'>('ALL');
   const [surgeonFilter, setSurgeonFilter] = useState('ALL');
-  const [operationDateFilter, setOperationDateFilter] = useState('');
+  const [dateField, setDateField] = useState<'all' | 'operation' | 'visit' | 'post_op'>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [sortMode, setSortMode] = useState<'op_surgeon_asc' | 'op_asc' | 'op_desc' | 'updated'>(
     'op_surgeon_asc',
   );
   const [confirmDeleteRecord, setConfirmDeleteRecord] = useState<PreAnestheticEvaluation | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  const hasActiveSearchOrFilter = Boolean(
+    hnQuery.trim() ||
+      searchQuery.trim() ||
+      dateFrom ||
+      dateTo ||
+      statusFilter !== 'ALL' ||
+      scheduleFilter !== 'ALL' ||
+      surgeonFilter !== 'ALL',
+  );
+
+  const resetAllFilters = () => {
+    setHnQuery('');
+    setSearchQuery('');
+    setDateField('all');
+    setDateFrom('');
+    setDateTo('');
+    setStatusFilter('ALL');
+    setScheduleFilter('ALL');
+    setSurgeonFilter('ALL');
+  };
 
   const availableSurgeons = useMemo(() => {
     const set = new Set<string>(surgeonOptions);
@@ -79,6 +109,7 @@ export function RegistryView({
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
+    const normHn = normalizeCode(hnQuery);
     const list = records.filter((r) => {
       const effStatus = getEffectiveEvaluationStatus(r);
       const postOpCheck = getPostOpVisitCompleteness(r.formData?.postAnesthesia);
@@ -95,19 +126,59 @@ export function RegistryView({
         const s = (r.surgeon || '').trim() || '__NONE__';
         if (s !== surgeonFilter) return false;
       }
-      if (operationDateFilter && (r.dateOfOperation || '').trim() !== operationDateFilter) {
-        return false;
+
+      // Dedicated HN search (normalized so dashes/spaces don't break lookup)
+      if (normHn) {
+        if (!normalizeCode(r.hn).includes(normHn)) return false;
       }
+
+      // Dedicated Date search (exact single date when only dateFrom is set, or inclusive range)
+      if (dateFrom || dateTo) {
+        const opDate = (r.dateOfOperation || '').trim();
+        const visitDate = (r.dateOfVisit || '').trim();
+        const postOpDates = [
+          (r.formData?.postAnesthesia?.visitDate || '').trim(),
+          (r.formData?.postOpComplication?.postOpDate || '').trim(),
+          (r.formData?.postOpComplication?.periOpDate || '').trim(),
+        ].filter(Boolean);
+
+        const candidateDates =
+          dateField === 'operation'
+            ? [opDate].filter(Boolean)
+            : dateField === 'visit'
+            ? [visitDate].filter(Boolean)
+            : dateField === 'post_op'
+            ? postOpDates
+            : [opDate, visitDate, ...postOpDates].filter(Boolean);
+
+        if (candidateDates.length === 0) return false;
+
+        const matchesDate = candidateDates.some((d) => {
+          if (dateFrom && dateTo) {
+            const start = dateFrom <= dateTo ? dateFrom : dateTo;
+            const end = dateFrom <= dateTo ? dateTo : dateFrom;
+            return d >= start && d <= end;
+          }
+          if (dateFrom) return d === dateFrom;
+          if (dateTo) return d <= dateTo;
+          return true;
+        });
+        if (!matchesDate) return false;
+      }
+
       if (!q) return true;
       return (
         r.patientName.toLowerCase().includes(q) ||
         r.hn.toLowerCase().includes(q) ||
+        normalizeCode(r.hn).includes(normalizeCode(q)) ||
         r.an.toLowerCase().includes(q) ||
         r.ward.toLowerCase().includes(q) ||
         (r.surgeon || '').toLowerCase().includes(q) ||
         (r.orRoom || '').toLowerCase().includes(q) ||
         r.diagnosis.toLowerCase().includes(q) ||
-        r.operation.toLowerCase().includes(q)
+        r.operation.toLowerCase().includes(q) ||
+        (r.dateOfOperation || '').includes(q) ||
+        (r.dateOfVisit || '').includes(q)
       );
     });
     if (sortMode === 'op_surgeon_asc') {
@@ -120,7 +191,18 @@ export function RegistryView({
       return [...list].sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
     }
     return [...list].sort((a, b) => getUpdatedMillis(b.updatedAt) - getUpdatedMillis(a.updatedAt));
-  }, [records, searchQuery, statusFilter, scheduleFilter, surgeonFilter, operationDateFilter, sortMode]);
+  }, [
+    records,
+    hnQuery,
+    searchQuery,
+    statusFilter,
+    scheduleFilter,
+    surgeonFilter,
+    dateField,
+    dateFrom,
+    dateTo,
+    sortMode,
+  ]);
 
   const groupedByDate = useMemo(() => {
     if (sortMode === 'updated') return null;
@@ -155,125 +237,220 @@ export function RegistryView({
   return (
     <div className="space-y-4">
       {/* Search & Controls Toolbar */}
-      <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[260px]">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="ค้นหา ชื่อ, HN, AN, หอผู้ป่วย, การผ่าตัด..."
-              className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-blue-800"
-            />
-          </div>
+      <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+        {/* Row 1: Primary HN & Date Lookup + Main Actions */}
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="flex flex-wrap items-end gap-2.5 flex-1 min-w-[260px]">
+            {/* Dedicated HN Search */}
+            <label className="flex flex-col gap-1 w-44 sm:w-48">
+              <span className="text-[11px] font-semibold text-slate-600">สืบค้นจาก HN</span>
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-blue-800 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={hnQuery}
+                  onChange={(e) => setHnQuery(e.target.value)}
+                  placeholder="พิมพ์เลข HN..."
+                  className="w-full pl-8 pr-7 py-1.5 text-xs font-mono tabular-nums bg-white border border-slate-300 rounded-lg text-slate-900 placeholder:font-sans placeholder:text-slate-400 focus:outline-none focus:border-blue-800 focus:ring-1 focus:ring-blue-800"
+                />
+                {hnQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setHnQuery('')}
+                    aria-label="ล้างเลข HN"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </label>
 
-          <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
-            {(
-              [
-                { key: 'ALL', label: 'ทั้งหมด' },
-                { key: 'draft', label: 'ฉบับร่าง' },
-                { key: 'evaluated', label: 'ประเมินแล้ว' },
-                { key: 'not_post_op', label: 'ยังไม่เยี่ยม Post-Op' },
-                { key: 'post_op_completed', label: 'Post-Op แล้ว' },
-              ] as const
-            ).map((tab) => (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => setStatusFilter(tab.key)}
-                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
-                  statusFilter === tab.key
-                    ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
+            {/* Date Field Scope */}
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold text-slate-600">ค้นหาตามวันที่</span>
+              <select
+                aria-label="ประเภทวันที่ที่ต้องการค้นหา"
+                value={dateField}
+                onChange={(e) =>
+                  setDateField(e.target.value as 'all' | 'operation' | 'visit' | 'post_op')
+                }
+                className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
               >
-                {tab.label}
-              </button>
-            ))}
-          </div>
+                <option value="all">ทุกวันที่ (ผ่าตัด / เยี่ยม)</option>
+                <option value="operation">วันที่ทำผ่าตัด</option>
+                <option value="visit">วันที่เยี่ยม Pre-op</option>
+                <option value="post_op">วันที่เยี่ยม Post-op</option>
+              </select>
+            </label>
 
-          <select
-            aria-label="ประเภทตารางผ่าตัด"
-            value={scheduleFilter}
-            onChange={(e) => setScheduleFilter(e.target.value as 'ALL' | 'elective' | 'emergency')}
-            className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
-          >
-            <option value="ALL">ทุกประเภทเคส</option>
-            <option value="elective">เฉพาะ Elective</option>
-            <option value="emergency">เฉพาะ Emergency</option>
-          </select>
+            {/* Single Date or Date Range Start */}
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold text-slate-600">
+                {dateTo ? 'ตั้งแต่วันที่' : 'วันที่'}
+              </span>
+              <div className="flex items-center gap-1">
+                <input
+                  type="date"
+                  aria-label="เลือกวันที่เริ่มต้นหรือวันที่ต้องการค้นหา"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800"
+                />
+              </div>
+            </label>
 
-          <div className="flex items-center gap-1">
-            <input
-              type="date"
-              aria-label="กรองตามวันที่ทำผ่าตัด"
-              title="กรองเฉพาะวันที่ทำผ่าตัด"
-              value={operationDateFilter}
-              onChange={(e) => setOperationDateFilter(e.target.value)}
-              className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800"
-            />
-            {operationDateFilter && (
+            {/* Optional Range End */}
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-medium text-slate-500">ถึงวันที่ (ไม่บังคับ)</span>
+              <input
+                type="date"
+                aria-label="เลือกวันที่สิ้นสุด"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800"
+              />
+            </label>
+
+            {/* Quick Today & Clear Buttons */}
+            <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => setOperationDateFilter('')}
-                title="ล้างการกรองวันที่ผ่าตัด"
-                aria-label="ล้างการกรองวันที่ผ่าตัด"
-                className="p-1.5 text-slate-500 hover:text-slate-900 bg-white border border-slate-300 rounded-lg"
+                onClick={() => {
+                  setDateFrom(getTodayIsoDate());
+                  setDateTo('');
+                }}
+                className="px-2.5 py-1.5 text-xs font-medium text-blue-900 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors whitespace-nowrap"
               >
-                <X className="w-3.5 h-3.5" />
+                วันนี้
               </button>
-            )}
+              {hasActiveSearchOrFilter && (
+                <button
+                  type="button"
+                  onClick={resetAllFilters}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors whitespace-nowrap"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  ล้างค้นหา
+                </button>
+              )}
+            </div>
           </div>
 
-          <select
-            aria-label="กรองตามแพทย์ผ่าตัด"
-            value={surgeonFilter}
-            onChange={(e) => setSurgeonFilter(e.target.value)}
-            className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
-          >
-            <option value="ALL">ทุกแพทย์ผ่าตัด</option>
-            {availableSurgeons.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-            <option value="__NONE__">ยังไม่ระบุแพทย์</option>
-          </select>
-
-          <select
-            aria-label="เรียงลำดับข้อมูล"
-            value={sortMode}
-            onChange={(e) =>
-              setSortMode(e.target.value as 'op_surgeon_asc' | 'op_asc' | 'op_desc' | 'updated')
-            }
-            className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
-          >
-            <option value="op_surgeon_asc">เรียงตามวันผ่าตัด → แพทย์ผ่าตัด</option>
-            <option value="op_asc">เรียงตามวันผ่าตัด → ห้อง OR</option>
-            <option value="op_desc">เรียงตามวันผ่าตัด (ล่าสุด → เก่า)</option>
-            <option value="updated">เรียงตามแก้ไขล่าสุด</option>
-          </select>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => exportEvaluationsCsv(filtered)}
+              disabled={filtered.length === 0}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors whitespace-nowrap shrink-0"
+            >
+              <Download className="w-3.5 h-3.5 text-blue-800" />
+              ส่งออก CSV
+            </button>
+            <button
+              type="button"
+              onClick={onCreateNew}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-800 rounded-lg hover:bg-blue-900 transition-colors whitespace-nowrap shrink-0"
+            >
+              <FilePlus2 className="w-3.5 h-3.5" />
+              เพิ่มรายการใหม่
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => exportEvaluationsCsv(filtered)}
-            disabled={filtered.length === 0}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors whitespace-nowrap shrink-0"
-          >
-            <Download className="w-3.5 h-3.5 text-blue-800" />
-            ส่งออก CSV
-          </button>
-          <button
-            type="button"
-            onClick={onCreateNew}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-800 rounded-lg hover:bg-blue-900 transition-colors whitespace-nowrap shrink-0"
-          >
-            <FilePlus2 className="w-3.5 h-3.5" />
-            เพิ่มรายการใหม่
-          </button>
+        {/* Row 2: General Keyword + Status / Schedule / Surgeon / Sort Filters */}
+        <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[240px]">
+            <div className="relative flex-1 min-w-[200px] max-w-xs">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="ค้นหา ชื่อ, AN, หอผู้ป่วย, การผ่าตัด..."
+                className="w-full pl-8 pr-7 py-1.5 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-blue-800"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  aria-label="ล้างคำค้นหา"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg overflow-x-auto">
+              {(
+                [
+                  { key: 'ALL', label: 'ทั้งหมด' },
+                  { key: 'draft', label: 'ฉบับร่าง' },
+                  { key: 'evaluated', label: 'ประเมินแล้ว' },
+                  { key: 'not_post_op', label: 'ยังไม่เยี่ยม Post-Op' },
+                  { key: 'post_op_completed', label: 'Post-Op แล้ว' },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setStatusFilter(tab.key)}
+                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                    statusFilter === tab.key
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <select
+              aria-label="ประเภทตารางผ่าตัด"
+              value={scheduleFilter}
+              onChange={(e) => setScheduleFilter(e.target.value as 'ALL' | 'elective' | 'emergency')}
+              className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
+            >
+              <option value="ALL">ทุกประเภทเคส</option>
+              <option value="elective">เฉพาะ Elective</option>
+              <option value="emergency">เฉพาะ Emergency</option>
+            </select>
+
+            <select
+              aria-label="กรองตามแพทย์ผ่าตัด"
+              value={surgeonFilter}
+              onChange={(e) => setSurgeonFilter(e.target.value)}
+              className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
+            >
+              <option value="ALL">ทุกแพทย์ผ่าตัด</option>
+              {availableSurgeons.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+              <option value="__NONE__">ยังไม่ระบุแพทย์</option>
+            </select>
+
+            <select
+              aria-label="เรียงลำดับข้อมูล"
+              value={sortMode}
+              onChange={(e) =>
+                setSortMode(e.target.value as 'op_surgeon_asc' | 'op_asc' | 'op_desc' | 'updated')
+              }
+              className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
+            >
+              <option value="op_surgeon_asc">เรียงตามวันผ่าตัด → แพทย์ผ่าตัด</option>
+              <option value="op_asc">เรียงตามวันผ่าตัด → ห้อง OR</option>
+              <option value="op_desc">เรียงตามวันผ่าตัด (ล่าสุด → เก่า)</option>
+              <option value="updated">เรียงตามแก้ไขล่าสุด</option>
+            </select>
+          </div>
+
+          <div className="text-xs font-mono tabular-nums text-slate-500 whitespace-nowrap">
+            พบ <strong className="text-slate-900">{filtered.length}</strong> จาก {records.length} รายการ
+          </div>
         </div>
       </div>
 

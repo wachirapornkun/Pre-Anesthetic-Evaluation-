@@ -29,7 +29,6 @@ import {
   Download,
   FileCode2,
   FilePlus2,
-  FolderOpen,
   LogIn,
   LogOut,
   Printer,
@@ -42,7 +41,6 @@ import {
 } from 'lucide-react';
 import { A4PrintSheet } from './components/A4PrintSheet';
 import { AuthModal } from './components/AuthModal';
-import { CaseFolderSidebar } from './components/CaseFolderSidebar';
 import { ClinicalSummaryBar } from './components/ClinicalSummaryBar';
 import { DashboardView } from './components/DashboardView';
 import { PostOpA4PrintSheet } from './components/PostOpA4PrintSheet';
@@ -210,7 +208,6 @@ export default function App() {
   );
   const [isLoadingRecords, setIsLoadingRecords] = useState(true);
   const [isPullingCloud, setIsPullingCloud] = useState(false);
-  const [showFolderSidebar, setShowFolderSidebar] = useState(true);
   const [registryFocusNonce, setRegistryFocusNonce] = useState(0);
   const [currentForm, setCurrentForm] = useState<PreAnestheticEvaluation>(() =>
     loadActiveDraftOrEmpty(),
@@ -1973,7 +1970,6 @@ export default function App() {
     setCurrentForm(result.record);
     setIsNewFormModalOpen(false);
     setActiveTab('form');
-    setShowFolderSidebar(true);
     if (!result.savedToLocalFallback) {
       const dateMeta = formatThaiScheduleDate(chosenDate);
       showNotice(
@@ -2517,23 +2513,6 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {(activeTab === 'form' || activeTab === 'post_op') && (
-              <button
-                type="button"
-                onClick={() => setShowFolderSidebar((prev) => !prev)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors whitespace-nowrap shrink-0 ${
-                  showFolderSidebar
-                    ? 'bg-pblue-50 border-pblue-300 text-pblue-800'
-                    : 'bg-white border-pborder text-slate-700 hover:bg-pblue-50/60'
-                }`}
-              >
-                <FolderOpen className="w-3.5 h-3.5 text-pblue-600" />
-                {showFolderSidebar
-                  ? `ซ่อนทะเบียนผ่าตัด (${liveRecords.length})`
-                  : `แสดงทะเบียนผ่าตัด (${liveRecords.length})`}
-              </button>
-            )}
-
             <button
               type="button"
               onClick={() => {
@@ -2709,34 +2688,8 @@ export default function App() {
           </div>
         )}
         {(activeTab === 'form' || activeTab === 'post_op') && (
-          <div
-            className={`bph-screen-only ${
-              showFolderSidebar
-                ? 'grid grid-cols-1 xl:grid-cols-[290px_minmax(0,1fr)] gap-5 items-start'
-                : 'space-y-5'
-            }`}
-          >
-            {showFolderSidebar && (
-              <div className="xl:sticky xl:top-20">
-                <CaseFolderSidebar
-                  records={liveRecords}
-                  activeId={currentForm.id}
-                  surgeonOptions={surgeonOptions}
-                  wardOptions={wardOptions}
-                  onSelectRecord={(rec) => {
-                    const keepPostOp = activeTab === 'post_op';
-                    handleEditRecord(rec);
-                    if (keepPostOp) setActiveTab('post_op');
-                  }}
-                  onCreateNew={handleCreateNew}
-                  onCreateNewForDate={handleCreateNewForDate}
-                  onOpenFullRegistry={() => setActiveTab('registry')}
-                  onClose={() => setShowFolderSidebar(false)}
-                />
-              </div>
-            )}
-            <div className="min-w-0 space-y-4">
-              <ClinicalSummaryBar evaluation={currentForm} />
+          <div className="bph-screen-only space-y-4">
+            <ClinicalSummaryBar evaluation={currentForm} />
 
               {/* Unified Patient Form Switcher: Pre-op vs Post-op (Same Patient Record) */}
               <div className="no-print flex flex-wrap items-center justify-between gap-2">
@@ -2804,8 +2757,7 @@ export default function App() {
                   onSave={handleSave}
                   isSaving={isSaving}
                 />
-              )}
-            </div>
+            )}
           </div>
         )}
 

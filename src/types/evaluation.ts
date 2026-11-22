@@ -559,6 +559,24 @@ export interface MedicationGroup {
   autoUnderlying?: 'ht' | 'dm' | 'dlp' | 'heartDisease';
 }
 
+const DEFAULT_ANTICOAGULANT_ITEMS: string[] = [
+  'Warfarin',
+  'Enoxaparin',
+  'Heparin',
+  'Rivaroxaban',
+  'Apixaban',
+  'Dabigatran',
+  'Edoxaban',
+];
+
+const DEFAULT_ANTIPLATELET_ITEMS: string[] = [
+  'ASA (81) 1x1',
+  'Clopidogrel (75) 1x1',
+  'Ticagrelor',
+  'Prasugrel',
+  'Cilostazol',
+];
+
 export const DEFAULT_MEDICATION_GROUPS: MedicationGroup[] = [
   {
     id: 'ht',
@@ -587,12 +605,12 @@ export const DEFAULT_MEDICATION_GROUPS: MedicationGroup[] = [
   {
     id: 'anticoag',
     label: '5. Anticoagulant',
-    items: ['ASA'],
+    items: [...DEFAULT_ANTICOAGULANT_ITEMS],
   },
   {
     id: 'antiplatelet',
     label: '6. Antiplatelet',
-    items: ['Clopidogrel'],
+    items: [...DEFAULT_ANTIPLATELET_ITEMS],
   },
   {
     id: 'hiv',
@@ -615,6 +633,12 @@ export const DEFAULT_MEDICATION_GROUPS: MedicationGroup[] = [
     items: [],
   },
 ];
+
+const ANTIPLATELET_TOKEN_RE =
+  /\b(?:asa|aspirin|aspent|clopidogrel|plavix|apolets|ticagrelor|brilinta|prasugrel|effient|cilostazol|pletaal|ticlopidine|ticlid)\b/i;
+
+const ANTICOAGULANT_TOKEN_RE =
+  /\b(?:warfarin|coumadin|orfarin|enoxaparin|clexane|lmwh|heparin|ufh|rivaroxaban|xarelto|apixaban|eliquis|dabigatran|pradaxa|edoxaban|lixiana|fondaparinux|arixtra)\b/i;
 
 export function sanitizeMedicationGroups(raw: unknown): MedicationGroup[] {
   if (!Array.isArray(raw)) return DEFAULT_MEDICATION_GROUPS.map((g) => ({ ...g, items: [...g.items] }));
@@ -651,6 +675,71 @@ export function sanitizeMedicationGroups(raw: unknown): MedicationGroup[] {
     }
     cleaned.push(groupObj);
   }
+
+  // Auto-correct legacy/misclassified Anticoagulant vs Antiplatelet groups
+  const anticoagGroup = cleaned.find((g) => g.id === 'anticoag');
+  const antiplateletGroup = cleaned.find((g) => g.id === 'antiplatelet');
+
+  if (anticoagGroup) {
+    const isLegacyAnticoag =
+      anticoagGroup.items.length === 1 &&
+      /^asa(?:\b|\s|\()/i.test(anticoagGroup.items[0].trim());
+    if (isLegacyAnticoag) {
+      anticoagGroup.items = [...DEFAULT_ANTICOAGULANT_ITEMS];
+    } else {
+      const misplacedAntiplatelets = anticoagGroup.items.filter((it) =>
+        ANTIPLATELET_TOKEN_RE.test(it),
+      );
+      if (misplacedAntiplatelets.length > 0) {
+        anticoagGroup.items = anticoagGroup.items.filter(
+          (it) => !ANTIPLATELET_TOKEN_RE.test(it),
+        );
+        if (anticoagGroup.items.length === 0) {
+          anticoagGroup.items = [...DEFAULT_ANTICOAGULANT_ITEMS];
+        }
+        if (antiplateletGroup) {
+          for (const moved of misplacedAntiplatelets) {
+            const normalized = /^asa$/i.test(moved.trim()) ? 'ASA (81) 1x1' : moved;
+            if (
+              !antiplateletGroup.items.some(
+                (it) => it.toLowerCase() === normalized.toLowerCase(),
+              )
+            ) {
+              antiplateletGroup.items.unshift(normalized);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (antiplateletGroup) {
+    const isLegacyAntiplatelet =
+      antiplateletGroup.items.length === 1 &&
+      /^clopidogrel$/i.test(antiplateletGroup.items[0].trim());
+    if (isLegacyAntiplatelet) {
+      antiplateletGroup.items = [...DEFAULT_ANTIPLATELET_ITEMS];
+    } else {
+      const misplacedAnticoags = antiplateletGroup.items.filter((it) =>
+        ANTICOAGULANT_TOKEN_RE.test(it),
+      );
+      if (misplacedAnticoags.length > 0) {
+        antiplateletGroup.items = antiplateletGroup.items.filter(
+          (it) => !ANTICOAGULANT_TOKEN_RE.test(it),
+        );
+        if (anticoagGroup) {
+          for (const moved of misplacedAnticoags) {
+            if (
+              !anticoagGroup.items.some((it) => it.toLowerCase() === moved.toLowerCase())
+            ) {
+              anticoagGroup.items.push(moved);
+            }
+          }
+        }
+      }
+    }
+  }
+
   return cleaned.length > 0 ? cleaned : DEFAULT_MEDICATION_GROUPS.map((g) => ({ ...g, items: [...g.items] }));
 }
 
@@ -2636,18 +2725,26 @@ export interface AutoProblemEntry {
 
 const ANTITHROMBOTIC_DRUG_PATTERNS: readonly {
   label: string;
+  drugClass: 'anticoagulant' | 'antiplatelet';
   re: RegExp;
   highRisk: boolean;
 }[] = [
-  { label: 'Warfarin', re: /\b(?:warfarin|coumadin)\b/i, highRisk: true },
-  { label: 'Apixaban', re: /\b(?:apixaban|eliquis)\b/i, highRisk: true },
-  { label: 'Rivaroxaban', re: /\b(?:rivaroxaban|xarelto)\b/i, highRisk: true },
-  { label: 'Dabigatran', re: /\b(?:dabigatran|pradaxa)\b/i, highRisk: true },
-  { label: 'Heparin', re: /\bheparin\b/i, highRisk: true },
-  { label: 'Enoxaparin', re: /\b(?:enoxaparin|clexane)\b/i, highRisk: true },
-  { label: 'Clopidogrel', re: /\b(?:clopidogrel|plavix)\b/i, highRisk: true },
-  { label: 'Ticagrelor', re: /\b(?:ticagrelor|brilinta)\b/i, highRisk: true },
-  { label: 'ASA', re: /\b(?:asa|aspirin)\b/i, highRisk: false },
+  // Anticoagulants
+  { label: 'Warfarin', drugClass: 'anticoagulant', re: /\b(?:warfarin|coumadin|orfarin)\b/i, highRisk: true },
+  { label: 'Apixaban', drugClass: 'anticoagulant', re: /\b(?:apixaban|eliquis)\b/i, highRisk: true },
+  { label: 'Rivaroxaban', drugClass: 'anticoagulant', re: /\b(?:rivaroxaban|xarelto)\b/i, highRisk: true },
+  { label: 'Dabigatran', drugClass: 'anticoagulant', re: /\b(?:dabigatran|pradaxa)\b/i, highRisk: true },
+  { label: 'Edoxaban', drugClass: 'anticoagulant', re: /\b(?:edoxaban|lixiana)\b/i, highRisk: true },
+  { label: 'Heparin', drugClass: 'anticoagulant', re: /\b(?:heparin|ufh)\b/i, highRisk: true },
+  { label: 'Enoxaparin', drugClass: 'anticoagulant', re: /\b(?:enoxaparin|clexane|lmwh)\b/i, highRisk: true },
+  { label: 'Fondaparinux', drugClass: 'anticoagulant', re: /\b(?:fondaparinux|arixtra)\b/i, highRisk: true },
+  // Antiplatelets
+  { label: 'ASA', drugClass: 'antiplatelet', re: /\b(?:asa|aspirin|aspent)\b/i, highRisk: false },
+  { label: 'Clopidogrel', drugClass: 'antiplatelet', re: /\b(?:clopidogrel|plavix|apolets)\b/i, highRisk: true },
+  { label: 'Ticagrelor', drugClass: 'antiplatelet', re: /\b(?:ticagrelor|brilinta)\b/i, highRisk: true },
+  { label: 'Prasugrel', drugClass: 'antiplatelet', re: /\b(?:prasugrel|effient)\b/i, highRisk: true },
+  { label: 'Cilostazol', drugClass: 'antiplatelet', re: /\b(?:cilostazol|pletaal)\b/i, highRisk: true },
+  { label: 'Ticlopidine', drugClass: 'antiplatelet', re: /\b(?:ticlopidine|ticlid)\b/i, highRisk: true },
 ];
 
 const VASOPRESSOR_DRUG_PATTERNS: readonly {
@@ -3582,9 +3679,18 @@ export function generateAutoProblemEntries(
       item.re.test(history.medication),
     );
     if (matchedAnti.length > 0) {
+      const anticoagMatched = matchedAnti.filter((m) => m.drugClass === 'anticoagulant');
+      const antiplateletMatched = matchedAnti.filter((m) => m.drugClass === 'antiplatelet');
       const hasHighRisk = matchedAnti.some((m) => m.highRisk);
+      const parts: string[] = [];
+      if (anticoagMatched.length > 0) {
+        parts.push(`On Anticoagulant (${anticoagMatched.map((m) => m.label).join(', ')})`);
+      }
+      if (antiplateletMatched.length > 0) {
+        parts.push(`On Antiplatelet (${antiplateletMatched.map((m) => m.label).join(', ')})`);
+      }
       generalRiskItems.push({
-        text: `On Anticoagulant/Antiplatelet (${matchedAnti.map((m) => m.label).join(', ')})`,
+        text: parts.join(' + '),
         score: hasHighRisk ? 80 : 66,
       });
     }

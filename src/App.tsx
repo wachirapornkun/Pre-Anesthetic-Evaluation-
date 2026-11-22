@@ -48,6 +48,13 @@ import { DashboardView } from './components/DashboardView';
 import { PostOpA4PrintSheet } from './components/PostOpA4PrintSheet';
 import { PostOpEvaluationForm } from './components/PostOpEvaluationForm';
 import { PreAnestheticForm } from './components/PreAnestheticForm';
+import {
+  loadPrinterSettings,
+  PrinterModal,
+  PrinterSettings,
+  PrinterSheetChoice,
+  savePrinterSettings,
+} from './components/PrinterModal';
 import { RegistryView } from './components/RegistryView';
 import { ShareQrModal } from './components/ShareQrModal';
 import { ThaiDateInput } from './components/ThaiDateInput';
@@ -188,6 +195,13 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isShareQrOpen, setIsShareQrOpen] = useState(false);
+  const [isPrinterModalOpen, setIsPrinterModalOpen] = useState(false);
+  const [printerSettings, setPrinterSettings] = useState<PrinterSettings>(() =>
+    loadPrinterSettings(),
+  );
+  const [activePrintJob, setActivePrintJob] = useState<PrinterSheetChoice | 'test_page' | null>(
+    null,
+  );
   const [allowOfflineBypass, setAllowOfflineBypass] = useState(false);
   const isVerifiedCloudUser = Boolean(user && isEmailVerified);
   const [cloudRecords, setCloudRecords] = useState<PreAnestheticEvaluation[]>([]);
@@ -2190,6 +2204,64 @@ export default function App() {
     setActiveTab('form');
   };
 
+  // Apply saved @page paper size & margin preferences dynamically for hospital printers
+  useEffect(() => {
+    const styleId = 'bph-dynamic-page-style';
+    let styleEl = document.getElementById(styleId) as HTMLStyleElement | null;
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = styleId;
+      document.head.appendChild(styleEl);
+    }
+    const marginCss = printerSettings.marginMode === 'narrow' ? '4mm 5mm' : '7mm 8mm';
+    styleEl.textContent = `@page { size: ${printerSettings.paperSize} portrait; margin: ${marginCss}; }`;
+  }, [printerSettings.paperSize, printerSettings.marginMode]);
+
+  const handleUpdatePrinterSettings = (next: PrinterSettings) => {
+    setPrinterSettings(next);
+    savePrinterSettings(next);
+  };
+
+  const triggerHospitalPrint = (
+    mode: PrinterSheetChoice | 'test_page',
+    recordOverride?: PreAnestheticEvaluation,
+  ) => {
+    const targetRecord = recordOverride ?? currentFormRef.current;
+    const originalTitle = document.title;
+    const cleanHn = (targetRecord.hn || '').trim().replace(/[^\w-]/g, '');
+    const cleanName = (targetRecord.patientName || '')
+      .trim()
+      .replace(/[\\/:*?"<>|]/g, '')
+      .slice(0, 40);
+    const jobTitle =
+      mode === 'test_page'
+        ? 'Bangplee_Printer_Test_Page'
+        : `${mode === 'post_op' ? 'PostOp' : mode === 'both' ? 'PreOp_PostOp' : 'PreOp'}${cleanHn ? `_HN${cleanHn}` : ''}${cleanName ? `_${cleanName}` : ''}`;
+
+    setActivePrintJob(mode);
+    document.body.classList.add('bph-print-isolated');
+    document.title = jobTitle;
+
+    let cleanedUp = false;
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      document.title = originalTitle;
+      document.body.classList.remove('bph-print-isolated');
+      setActivePrintJob(null);
+      window.removeEventListener('afterprint', cleanup);
+    };
+
+    window.addEventListener('afterprint', cleanup);
+    window.requestAnimationFrame(() => {
+      setTimeout(() => {
+        window.print();
+        // Safety fallback for mobile browsers that don't always fire afterprint
+        setTimeout(cleanup, 1500);
+      }, 140);
+    });
+  };
+
   const handlePrintRecord = (record: PreAnestheticEvaluation) => {
     flushPendingCloudSave();
     const latestFromCloud = cloudRecordsRef.current.find((r) => r.id === record.id) ?? record;
@@ -2203,9 +2275,7 @@ export default function App() {
     setRemoteUpdateCandidate(null);
     setCurrentForm(latestFromCloud);
     setActiveTab('print_preview');
-    setTimeout(() => {
-      window.print();
-    }, 150);
+    triggerHospitalPrint('pre_op', latestFromCloud);
   };
 
   if (!authReady) {
@@ -2487,11 +2557,30 @@ export default function App() {
 
             <button
               type="button"
-              onClick={() => window.print()}
+              onClick={() =>
+                triggerHospitalPrint(
+                  activeTab === 'post_op'
+                    ? 'post_op'
+                    : activeTab === 'print_preview'
+                      ? printSheetMode
+                      : printerSettings.defaultSheet,
+                )
+              }
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-ppink-800 bg-ppink-50 border border-ppink-200 rounded-lg hover:bg-ppink-100 transition-colors whitespace-nowrap shrink-0"
+              title={`สั่งพิมพ์ทันที (${printerSettings.printerLabel})`}
             >
               <Printer className="w-3.5 h-3.5 text-ppink-600" />
               พิมพ์ / PDF (1 หน้า A4)
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsPrinterModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-pgreen-800 bg-pgreen-50 border border-pgreen-200 rounded-lg hover:bg-pgreen-100 transition-colors whitespace-nowrap shrink-0"
+              title={`ตั้งค่าและเชื่อมต่อเครื่องพิมพ์ (${printerSettings.printerLabel})`}
+            >
+              <Printer className="w-3.5 h-3.5 text-pgreen-600" />
+              เชื่อมต่อเครื่องพิมพ์
             </button>
 
             <button
@@ -2621,11 +2710,11 @@ export default function App() {
         )}
         {(activeTab === 'form' || activeTab === 'post_op') && (
           <div
-            className={
+            className={`bph-screen-only ${
               showFolderSidebar
                 ? 'grid grid-cols-1 xl:grid-cols-[290px_minmax(0,1fr)] gap-5 items-start'
                 : 'space-y-5'
-            }
+            }`}
           >
             {showFolderSidebar && (
               <div className="xl:sticky xl:top-20">
@@ -2721,54 +2810,58 @@ export default function App() {
         )}
 
         {activeTab === 'dashboard' && (
-          <DashboardView
-            records={liveRecords}
-            wardOptions={wardOptions}
-            isLoading={isLoadingRecords}
-            onCreateNew={handleCreateNew}
-            onSelectRecord={handleEditRecord}
-            onSelectRecordPostOp={(rec) => {
-              handleEditRecord(rec);
-              setActiveTab('post_op');
-            }}
-          />
+          <div className="bph-screen-only">
+            <DashboardView
+              records={liveRecords}
+              wardOptions={wardOptions}
+              isLoading={isLoadingRecords}
+              onCreateNew={handleCreateNew}
+              onSelectRecord={handleEditRecord}
+              onSelectRecordPostOp={(rec) => {
+                handleEditRecord(rec);
+                setActiveTab('post_op');
+              }}
+            />
+          </div>
         )}
 
         {activeTab === 'registry' && (
-          <RegistryView
-            records={liveRecords}
-            activeId={currentForm.id}
-            wardOptions={wardOptions}
-            surgeonOptions={surgeonOptions}
-            isLoading={isLoadingRecords && liveRecords.length === 0}
-            userEmail={isVerifiedCloudUser ? (user?.email ?? null) : null}
-            cloudCount={cloudRecords.length}
-            unsyncedLocalCount={unsyncedLocalRecords.length}
-            isSyncingLocal={isSyncingLocal}
-            isPullingCloud={isPullingCloud || (isVerifiedCloudUser && isLoadingRecords)}
-            focusSearchNonce={registryFocusNonce}
-            unsavedCurrentForm={
-              !savedIdSet.has(currentForm.id) &&
-              Boolean(currentForm.patientName.trim() || currentForm.hn.trim())
-                ? currentForm
-                : null
-            }
-            onSaveCurrentForm={handleSave}
-            onSignIn={handleOpenAuthModal}
-            onSyncLocalToCloud={() => void handleSyncLocalToCloud()}
-            onPullFromCloud={() => void handlePullFromCloud()}
-            onImportJsonFile={handleImportJsonFile}
-            onEdit={handleEditRecord}
-            onOpenPostOp={(rec) => {
-              handleEditRecord(rec);
-              setActiveTab('post_op');
-            }}
-            onDuplicate={handleDuplicate}
-            onDelete={handleDelete}
-            onPrintRecord={handlePrintRecord}
-            onCreateNew={handleCreateNew}
-            onCreateNewForDate={handleCreateNewForDate}
-          />
+          <div className="bph-screen-only">
+            <RegistryView
+              records={liveRecords}
+              activeId={currentForm.id}
+              wardOptions={wardOptions}
+              surgeonOptions={surgeonOptions}
+              isLoading={isLoadingRecords && liveRecords.length === 0}
+              userEmail={isVerifiedCloudUser ? (user?.email ?? null) : null}
+              cloudCount={cloudRecords.length}
+              unsyncedLocalCount={unsyncedLocalRecords.length}
+              isSyncingLocal={isSyncingLocal}
+              isPullingCloud={isPullingCloud || (isVerifiedCloudUser && isLoadingRecords)}
+              focusSearchNonce={registryFocusNonce}
+              unsavedCurrentForm={
+                !savedIdSet.has(currentForm.id) &&
+                Boolean(currentForm.patientName.trim() || currentForm.hn.trim())
+                  ? currentForm
+                  : null
+              }
+              onSaveCurrentForm={handleSave}
+              onSignIn={handleOpenAuthModal}
+              onSyncLocalToCloud={() => void handleSyncLocalToCloud()}
+              onPullFromCloud={() => void handlePullFromCloud()}
+              onImportJsonFile={handleImportJsonFile}
+              onEdit={handleEditRecord}
+              onOpenPostOp={(rec) => {
+                handleEditRecord(rec);
+                setActiveTab('post_op');
+              }}
+              onDuplicate={handleDuplicate}
+              onDelete={handleDelete}
+              onPrintRecord={handlePrintRecord}
+              onCreateNew={handleCreateNew}
+              onCreateNewForDate={handleCreateNewForDate}
+            />
+          </div>
         )}
 
         {activeTab === 'print_preview' && (
@@ -2825,7 +2918,15 @@ export default function App() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={() => setIsPrinterModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-pgreen-800 bg-pgreen-50 border border-pgreen-200 rounded-lg hover:bg-pgreen-100"
+                >
+                  <Printer className="w-3.5 h-3.5 text-pgreen-600" />
+                  ตั้งค่าเครื่องพิมพ์
+                </button>
+                <button
+                  type="button"
+                  onClick={() => triggerHospitalPrint(printSheetMode)}
                   className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-prose-600 rounded-lg hover:bg-prose-700"
                 >
                   <Printer className="w-3.5 h-3.5" />
@@ -2833,26 +2934,125 @@ export default function App() {
                 </button>
               </div>
             </div>
-            {(printSheetMode === 'pre_op' || printSheetMode === 'both') && (
-              <A4PrintSheet evaluation={currentForm} previewMode />
-            )}
-            {(printSheetMode === 'post_op' || printSheetMode === 'both') && (
-              <PostOpA4PrintSheet
-                evaluation={currentForm}
-                previewMode
-                pageBreakBefore={printSheetMode === 'both'}
-              />
-            )}
+            <div className="bph-screen-only space-y-4">
+              {(printSheetMode === 'pre_op' || printSheetMode === 'both') && (
+                <A4PrintSheet evaluation={currentForm} previewMode />
+              )}
+              {(printSheetMode === 'post_op' || printSheetMode === 'both') && (
+                <PostOpA4PrintSheet
+                  evaluation={currentForm}
+                  previewMode
+                  pageBreakBefore={printSheetMode === 'both'}
+                />
+              )}
+            </div>
           </div>
         )}
 
-        {/* Always-present hidden print sheet matching active view */}
-        {activeTab !== 'print_preview' &&
-          (activeTab === 'post_op' ? (
-            <PostOpA4PrintSheet evaluation={currentForm} previewMode={false} />
-          ) : (
-            <A4PrintSheet evaluation={currentForm} previewMode={false} />
-          ))}
+        {/* Dedicated Clean Print Output Layer (eliminates overlap with Dashboard/Registry/Modals) */}
+        {(() => {
+          const printStyleClasses = [
+            'hidden print-only-sheet',
+            printerSettings.colorMode === 'bw' ? 'print-bw' : '',
+            printerSettings.scalePercent === 95
+              ? 'print-scale-95'
+              : printerSettings.scalePercent === 90
+                ? 'print-scale-90'
+                : '',
+          ]
+            .filter(Boolean)
+            .join(' ');
+
+          if (activePrintJob === 'test_page') {
+            return (
+              <div className={printStyleClasses}>
+                <div className="border-2 border-slate-900 p-6 space-y-4 text-black bg-white">
+                  <div className="border-b-2 border-slate-900 pb-3 text-center space-y-1">
+                    <div className="text-lg font-bold">โรงพยาบาลบางพลี · งานวิสัญญีพยาบาล</div>
+                    <div className="text-sm font-semibold">
+                      หน้าทดสอบการเชื่อมต่อเครื่องพิมพ์ (Bangplee Pre-Anesthetic Printer Test Page)
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-xs border border-slate-700 p-3">
+                    <div>
+                      <strong>เครื่องพิมพ์ที่ตั้งไว้:</strong> {printerSettings.printerLabel}
+                    </div>
+                    <div>
+                      <strong>ขนาดกระดาษ / ขอบ:</strong> {printerSettings.paperSize} (
+                      {printerSettings.marginMode === 'narrow' ? 'ขอบแคบ 4-5 มม.' : 'ขอบปกติ 7-8 มม.'})
+                    </div>
+                    <div>
+                      <strong>โหมดสี / สเกล:</strong>{' '}
+                      {printerSettings.colorMode === 'bw' ? 'ขาว-ดำคมชัด' : 'สีปกติ'} ·{' '}
+                      {printerSettings.scalePercent}%
+                    </div>
+                    <div>
+                      <strong>วันเวลาทดสอบ:</strong>{' '}
+                      {new Date().toLocaleString('th-TH', {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                      })}
+                    </div>
+                  </div>
+                  <div className="text-xs space-y-1.5 border border-slate-700 p-3">
+                    <div className="font-bold">ทดสอบความคมชัดภาษาไทยและสัญลักษณ์ทางคลินิก</div>
+                    <div>• Pre-Anesthetic Evaluation Form (ANE-FM-002-03) &amp; Post-op (ANE-FM-006-01)</div>
+                    <div>• ตัวเลขและสัญลักษณ์: ☑ เลือกแล้ว ☐ ยังไม่เลือก ● ASA II E ○ Mallampati I–IV · SpO₂ 99% · BP 120/80 mmHg</div>
+                    <div>• กรอบขอบหน้ากระดาษทั้ง 4 ด้านควรเห็นเส้นกรอบครบสมบูรณ์ ไม่ขาดขอบ</div>
+                  </div>
+                  <div className="text-center text-xs font-semibold pt-2">
+                    ✓ หากพิมพ์หน้านี้ชัดเจนครบกรอบ แสดงว่าเครื่องพิมพ์พร้อมใช้งานสำหรับใบ Pre-op / Post-op แล้ว
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          if (activePrintJob) {
+            return (
+              <div className={printStyleClasses}>
+                {(activePrintJob === 'pre_op' || activePrintJob === 'both') && (
+                  <A4PrintSheet evaluation={currentForm} previewMode={false} />
+                )}
+                {(activePrintJob === 'post_op' || activePrintJob === 'both') && (
+                  <PostOpA4PrintSheet
+                    evaluation={currentForm}
+                    previewMode={false}
+                    pageBreakBefore={activePrintJob === 'both'}
+                  />
+                )}
+              </div>
+            );
+          }
+
+          // Fallback for manual browser Ctrl+P / Cmd+P (exclude Dashboard so Dashboard prints cleanly alone)
+          if (activeTab === 'dashboard') return null;
+          if (activeTab === 'print_preview') {
+            return (
+              <div className={printStyleClasses}>
+                {(printSheetMode === 'pre_op' || printSheetMode === 'both') && (
+                  <A4PrintSheet evaluation={currentForm} previewMode={false} />
+                )}
+                {(printSheetMode === 'post_op' || printSheetMode === 'both') && (
+                  <PostOpA4PrintSheet
+                    evaluation={currentForm}
+                    previewMode={false}
+                    pageBreakBefore={printSheetMode === 'both'}
+                  />
+                )}
+              </div>
+            );
+          }
+          return (
+            <div className={printStyleClasses}>
+              {activeTab === 'post_op' ? (
+                <PostOpA4PrintSheet evaluation={currentForm} previewMode={false} />
+              ) : (
+                <A4PrintSheet evaluation={currentForm} previewMode={false} />
+              )}
+            </div>
+          );
+        })()}
       </main>
 
       {/* New Form — Select Operation Date & Surgeon Modal */}
@@ -3206,6 +3406,17 @@ export default function App() {
       <ShareQrModal
         isOpen={isShareQrOpen}
         onClose={() => setIsShareQrOpen(false)}
+        onNotify={showNotice}
+      />
+
+      {/* Printer Connection & Print Center Modal */}
+      <PrinterModal
+        isOpen={isPrinterModalOpen}
+        onClose={() => setIsPrinterModalOpen(false)}
+        evaluation={currentForm}
+        settings={printerSettings}
+        onChangeSettings={handleUpdatePrinterSettings}
+        onTriggerPrint={(mode) => triggerHospitalPrint(mode)}
         onNotify={showNotice}
       />
 

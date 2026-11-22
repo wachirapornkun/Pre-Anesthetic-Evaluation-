@@ -59,7 +59,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
     <div
       className={
         previewMode
-          ? 'bg-white border border-slate-300 shadow-sm mx-auto max-w-[820px] p-4 text-[11px] leading-[1.32] text-slate-950'
+          ? 'bg-white border border-slate-300 shadow-sm mx-auto max-w-[820px] p-4 text-[11px] leading-[1.32] text-slate-950 print:border-0 print:shadow-none print:max-w-none print:p-0'
           : 'hidden print-only-sheet text-[10.5px] leading-[1.28] text-black'
       }
     >

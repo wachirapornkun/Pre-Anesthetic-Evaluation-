@@ -105,6 +105,11 @@
     display: none !important;
   }
 
+  /* When printing a dedicated A4 form or test sheet, suppress all screen views cleanly */
+  body.bph-print-isolated .bph-screen-only {
+    display: none !important;
+  }
+
   .print-only-sheet {
     display: block !important;
     width: 100% !important;
@@ -113,5 +118,18 @@
     padding: 0 !important;
     box-shadow: none !important;
     border: none !important;
+    background: #ffffff !important;
+  }
+
+  .print-only-sheet.print-bw {
+    filter: grayscale(100%) contrast(1.08);
+  }
+
+  .print-only-sheet.print-scale-95 {
+    zoom: 0.95;
+  }
+
+  .print-only-sheet.print-scale-90 {
+    zoom: 0.9;
   }
 }

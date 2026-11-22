@@ -79,7 +79,7 @@ export function PostOpA4PrintSheet({
       style={pageBreakBefore ? { breakBefore: 'page', pageBreakBefore: 'always' } : undefined}
       className={
         previewMode
-          ? 'bg-white border border-slate-300 shadow-sm mx-auto max-w-[820px] p-4 text-[10px] leading-[1.25] text-slate-950'
+          ? 'bg-white border border-slate-300 shadow-sm mx-auto max-w-[820px] p-4 text-[10px] leading-[1.25] text-slate-950 print:border-0 print:shadow-none print:max-w-none print:p-0'
           : 'hidden print-only-sheet text-[9.5px] leading-[1.22] text-black'
       }
     >

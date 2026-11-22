@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   createEmptyPostOpComplication,
+  formatWardWithBed,
   POST_OP_ADMIN_ERROR_OPTIONS,
   POST_OP_INCIDENT_OPTIONS,
   POST_OP_LEFT_COMPLICATIONS,
@@ -98,7 +99,7 @@ export function PostOpA4PrintSheet({
           <strong>AN:</strong> <span className="font-mono">{evaluation.an || '_________'}</span>
         </span>
         <span>
-          <strong>Ward:</strong> {evaluation.ward || '________'}
+          <strong>Ward:</strong> {formatWardWithBed(evaluation.ward, evaluation.bed) || '________'}
         </span>
         <span>
           <strong>Op:</strong> {evaluation.operation || '______________'}

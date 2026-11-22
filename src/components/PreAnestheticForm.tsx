@@ -20,6 +20,8 @@ import {
   BLOOD_PREP_STATUS_OPTIONS,
   BloodPrepStatus,
   calculateBmi,
+  CONSULT_TYPE_OPTIONS,
+  ConsultType,
   createEmptyOxygenSupport,
   DEFAULT_OXYGEN_OTHER_PRESETS,
   DEFAULT_SPECIALTY_LIST,
@@ -30,6 +32,7 @@ import {
   DurationUnit,
   EvaluationFormData,
   formatOxygenSupportSummary,
+  formatShortThaiDate,
   formatThaiScheduleDate,
   formatToothMarksSummary,
   GaMethod,
@@ -709,7 +712,7 @@ export function PreAnestheticForm({
               className={`${inputBase} font-mono tabular-nums`}
             />
           </label>
-          <div className="lg:col-span-2 flex flex-col gap-1">
+          <div className="lg:col-span-3 flex flex-col gap-1">
             <div className="flex items-center justify-between gap-1">
               <span className="text-xs font-medium text-slate-600">Ward (หอผู้ป่วย)</span>
               <button
@@ -767,12 +770,14 @@ export function PreAnestheticForm({
               );
             })()}
           </div>
-          <label className="lg:col-span-2 flex flex-col gap-1">
-            <span className="text-xs font-medium text-slate-600">Date of visit</span>
+          <label className="lg:col-span-1 flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-600">เตียง (Bed)</span>
             <input
-              type="date"
-              value={value.dateOfVisit}
-              onChange={(e) => updateTop('dateOfVisit', e.target.value)}
+              type="text"
+              value={value.bed ?? ''}
+              onChange={(e) => updateTop('bed', e.target.value)}
+              placeholder="เตียง"
+              maxLength={32}
               className={`${inputBase} font-mono tabular-nums`}
             />
           </label>
@@ -861,7 +866,7 @@ export function PreAnestheticForm({
               className={inputBase}
             />
           </label>
-          <div className="lg:col-span-5">
+          <div className="lg:col-span-4">
             <OperationInput
               value={value.operation}
               onChange={(nextOp) => updateTop('operation', nextOp)}
@@ -870,7 +875,7 @@ export function PreAnestheticForm({
               inputClassName={inputBase}
             />
           </div>
-          <div className="lg:col-span-3 flex flex-col gap-1">
+          <div className="lg:col-span-2 flex flex-col gap-1">
             <div className="flex items-center justify-between gap-1">
               <span className="text-xs font-medium text-slate-600">สาขา (Specialty)</span>
               <button
@@ -879,7 +884,7 @@ export function PreAnestheticForm({
                 className="inline-flex items-center gap-0.5 text-[11px] font-medium text-blue-800 hover:text-blue-950 whitespace-nowrap"
               >
                 <Plus className="w-3 h-3" />
-                {isManagingSpecialties ? 'ปิด' : 'เพิ่ม/จัดการ'}
+                {isManagingSpecialties ? 'ปิด' : 'จัดการ'}
               </button>
             </div>
             {(() => {
@@ -929,6 +934,15 @@ export function PreAnestheticForm({
               );
             })()}
           </div>
+          <label className="lg:col-span-2 flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-600">Date of visit</span>
+            <input
+              type="date"
+              value={value.dateOfVisit}
+              onChange={(e) => updateTop('dateOfVisit', e.target.value)}
+              className={`${inputBase} font-mono tabular-nums`}
+            />
+          </label>
         </div>
 
         {isManagingSpecialties && (
@@ -3462,7 +3476,7 @@ export function PreAnestheticForm({
             onKeyDown={handleLabKeyDown}
             className="p-4 space-y-3"
           >
-            <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-200 pb-1">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-1.5">
               <h2 className="text-sm font-bold text-slate-900">
                 4. Laboratory Evaluation
               </h2>
@@ -3471,9 +3485,97 @@ export function PreAnestheticForm({
               </span>
             </div>
 
+            {/* CBC & Chemistry Fishbone with separate Lab Dates */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50/60 border border-slate-200 rounded-lg p-3">
-              <CbcFishbone lab={lab} onChange={updateLab} />
-              <ChemFishbone lab={lab} onChange={updateLab} />
+              {/* CBC Column */}
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-1.5 pb-2 border-b border-slate-200/80">
+                  <span className="text-xs font-semibold text-slate-700 whitespace-nowrap">
+                    วันที่ตรวจ CBC :
+                  </span>
+                  <input
+                    type="date"
+                    aria-label="วันที่ตรวจ CBC"
+                    value={lab.cbcDate ?? ''}
+                    onChange={(e) => updateLabPatch({ cbcDate: e.target.value, labDate: '' })}
+                    className={`${inputBase} font-mono tabular-nums text-xs w-36`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => updateLabPatch({ cbcDate: getTodayIsoDate(), labDate: '' })}
+                    className="px-2 py-1 text-[11px] font-medium text-blue-900 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 whitespace-nowrap"
+                  >
+                    วันนี้
+                  </button>
+                  {lab.cbcDate && (
+                    <>
+                      <span className="text-[11px] font-mono tabular-nums text-blue-900 font-semibold">
+                        ({formatShortThaiDate(lab.cbcDate)})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => updateLabPatch({ cbcDate: '', labDate: '' })}
+                        aria-label="ล้างวันที่ตรวจ CBC"
+                        title="ล้างวันที่ตรวจ CBC"
+                        className="p-0.5 text-slate-400 hover:text-slate-700 rounded hover:bg-slate-200/70"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </>
+                  )}
+                </div>
+                <CbcFishbone lab={lab} onChange={updateLab} />
+              </div>
+
+              {/* Chemistry Column */}
+              <div className="space-y-2 sm:border-l sm:border-slate-200/80 sm:pl-4">
+                <div className="flex flex-wrap items-center gap-1.5 pb-2 border-b border-slate-200/80">
+                  <span className="text-xs font-semibold text-slate-700 whitespace-nowrap">
+                    วันที่ตรวจ Chemistry :
+                  </span>
+                  <input
+                    type="date"
+                    aria-label="วันที่ตรวจ Chemistry"
+                    value={lab.chemDate ?? ''}
+                    onChange={(e) => updateLabPatch({ chemDate: e.target.value, labDate: '' })}
+                    className={`${inputBase} font-mono tabular-nums text-xs w-36`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => updateLabPatch({ chemDate: getTodayIsoDate(), labDate: '' })}
+                    className="px-2 py-1 text-[11px] font-medium text-blue-900 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 whitespace-nowrap"
+                  >
+                    วันนี้
+                  </button>
+                  {lab.cbcDate && lab.chemDate !== lab.cbcDate && (
+                    <button
+                      type="button"
+                      onClick={() => updateLabPatch({ chemDate: lab.cbcDate, labDate: '' })}
+                      title="ใช้วันที่เดียวกับ CBC"
+                      className="px-2 py-1 text-[11px] font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-100 whitespace-nowrap"
+                    >
+                      = วัน CBC
+                    </button>
+                  )}
+                  {lab.chemDate && (
+                    <>
+                      <span className="text-[11px] font-mono tabular-nums text-blue-900 font-semibold">
+                        ({formatShortThaiDate(lab.chemDate)})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => updateLabPatch({ chemDate: '', labDate: '' })}
+                        aria-label="ล้างวันที่ตรวจ Chemistry"
+                        title="ล้างวันที่ตรวจ Chemistry"
+                        className="p-0.5 text-slate-400 hover:text-slate-700 rounded hover:bg-slate-200/70"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </>
+                  )}
+                </div>
+                <ChemFishbone lab={lab} onChange={updateLab} />
+              </div>
             </div>
 
             {/* Coag */}
@@ -3868,15 +3970,45 @@ export function PreAnestheticForm({
           </div>
 
           {/* 6. Consult Med/Cardio */}
-          <div className="p-4 space-y-2">
+          <div className="p-4 space-y-2.5">
             <h2 className="text-sm font-bold text-slate-900 border-b border-slate-200 pb-1">
               6. Consult Med/Cardio
             </h2>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {CONSULT_TYPE_OPTIONS.map((opt) => {
+                const selectedList: ConsultType[] = Array.isArray(fd.consultTypes)
+                  ? fd.consultTypes
+                  : [];
+                const active = selectedList.includes(opt.value);
+                const handleToggleConsult = () => {
+                  let nextList: ConsultType[];
+                  if (opt.value === 'none') {
+                    nextList = active ? [] : ['none'];
+                  } else {
+                    const withoutNone = selectedList.filter((item) => item !== 'none');
+                    nextList = active
+                      ? withoutNone.filter((item) => item !== opt.value)
+                      : [...withoutNone, opt.value];
+                  }
+                  updateFormData({ consultTypes: nextList });
+                };
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={handleToggleConsult}
+                    className={radioBtn(active)}
+                  >
+                    {active ? '☑' : '☐'} {opt.label}
+                  </button>
+                );
+              })}
+            </div>
             <textarea
               rows={3}
               value={fd.consult}
               onChange={(e) => updateFormData({ consult: e.target.value })}
-              placeholder="ความเห็นจากแพทย์อายุรกรรม / โรคหัวใจ (Med/Cardio clearance)..."
+              placeholder="รายละเอียดความเห็นจากแพทย์อายุรกรรม / โรคหัวใจ (Med/Cardio clearance, คำแนะนำก่อนผ่าตัด)..."
               className={`${inputBase} w-full text-xs resize-y`}
             />
           </div>

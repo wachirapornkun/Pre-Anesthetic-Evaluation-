@@ -229,6 +229,7 @@ service cloud.firestore {
           'prepPrc', 'prepFfp', 'prepPlt'
         ])
         && lab.keys().hasOnly([
+          'labDate', 'cbcDate', 'chemDate',
           'hb', 'hct', 'wbc', 'plt', 'neutrophil', 'lymphocyte',
           'na', 'k', 'cl', 'co2', 'bun', 'cr',
           'pt', 'ptt', 'inr',
@@ -238,6 +239,9 @@ service cloud.firestore {
           'prepTs', 'prepPrc', 'prepFfp', 'prepPlt',
           'prepStatuses', 'prepStatusDetail'
         ])
+        && (!('labDate' in lab) || isStr(lab.labDate, 0, 32))
+        && (!('cbcDate' in lab) || isStr(lab.cbcDate, 0, 32))
+        && (!('chemDate' in lab) || isStr(lab.chemDate, 0, 32))
         && isStr(lab.hb, 0, 20)
         && isStr(lab.hct, 0, 20)
         && isStr(lab.wbc, 0, 20)
@@ -433,7 +437,7 @@ service cloud.firestore {
         ])
         && fd.keys().hasOnly([
           'history', 'physicalExam', 'investigation', 'laboratory',
-          'premedication', 'consult', 'problemList', 'anestheticPlan',
+          'premedication', 'consult', 'consultTypes', 'problemList', 'anestheticPlan',
           'preparationOrders', 'postAnesthesia', 'postOpComplication'
         ])
         && isValidHistory(fd.history)
@@ -442,6 +446,11 @@ service cloud.firestore {
         && isValidLaboratory(fd.laboratory)
         && isValidPremedication(fd.premedication)
         && isStr(fd.consult, 0, 1500)
+        && (!('consultTypes' in fd) || (
+          fd.consultTypes is list
+          && fd.consultTypes.size() <= 7
+          && fd.consultTypes.hasOnly(['none', 'med', 'cardio', 'neuro', 'chest', 'nephro', 'other'])
+        ))
         && isBoundedStringList(fd.problemList, 12, 250)
         && isValidAnestheticPlan(fd.anestheticPlan)
         && isBoundedStringList(fd.preparationOrders, 12, 250)
@@ -457,7 +466,7 @@ service cloud.firestore {
           'hasComplication', 'anesthesiaType', 'formData', 'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'id', 'ownerId', 'status', 'patientName', 'hn', 'an', 'age', 'gender', 'ward', 'specialty',
+          'id', 'ownerId', 'status', 'patientName', 'hn', 'an', 'age', 'gender', 'ward', 'bed', 'specialty',
           'dateOfVisit', 'dateOfOperation', 'operationTime', 'scheduleType', 'orRoom', 'caseOrder',
           'surgeon', 'diagnosis', 'operation',
           'asaClass', 'asaEmergency', 'expectedDifficultAirway',
@@ -472,6 +481,7 @@ service cloud.firestore {
         && isStr(data.age, 0, 16)
         && (!('gender' in data) || (data.gender in ['', 'male', 'female']))
         && isStr(data.ward, 0, 80)
+        && (!('bed' in data) || isStr(data.bed, 0, 32))
         && (!('specialty' in data) || isStr(data.specialty, 0, 80))
         && isStr(data.dateOfVisit, 0, 32)
         && isStr(data.dateOfOperation, 0, 32)
@@ -602,7 +612,7 @@ service cloud.firestore {
         && (
           // Action 1: Edit evaluation content
           incoming().diff(existing()).affectedKeys().hasOnly([
-            'status', 'patientName', 'hn', 'an', 'age', 'gender', 'ward', 'specialty',
+            'status', 'patientName', 'hn', 'an', 'age', 'gender', 'ward', 'bed', 'specialty',
             'dateOfVisit', 'dateOfOperation', 'operationTime', 'scheduleType', 'orRoom', 'caseOrder',
             'surgeon', 'diagnosis', 'operation',
             'asaClass', 'asaEmergency', 'expectedDifficultAirway',

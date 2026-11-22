@@ -4,6 +4,7 @@ import {
   compareByDateAndSurgeon,
   formatShortThaiDate,
   formatThaiScheduleDate,
+  formatWardWithBed,
   getDateSearchTokens,
   getEffectiveEvaluationStatus,
   getPostOpVisitCompleteness,
@@ -102,6 +103,7 @@ export function CaseFolderSidebar({
           (r.an || '').toLowerCase().includes(q) ||
           (r.surgeon || '').toLowerCase().includes(q) ||
           (r.ward || '').toLowerCase().includes(q) ||
+          (r.bed || '').toLowerCase().includes(q) ||
           (r.operation || '').toLowerCase().includes(q) ||
           (r.diagnosis || '').toLowerCase().includes(q) ||
           getDateSearchTokens(r.dateOfOperation || '').includes(q) ||
@@ -491,7 +493,7 @@ export function CaseFolderSidebar({
                                   </span>
                                 </div>
                                 <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                                  {item.ward || 'ไม่ระบุหอผู้ป่วย'}
+                                  {formatWardWithBed(item.ward, item.bed) || 'ไม่ระบุหอผู้ป่วย'}
                                   {item.operation ? ` · ${item.operation}` : ''}
                                 </div>
                                 <div className="flex items-center justify-between gap-2 mt-0.5 text-[10px]">

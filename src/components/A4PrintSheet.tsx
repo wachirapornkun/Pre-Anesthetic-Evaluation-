@@ -1,12 +1,15 @@
 import React from 'react';
 import {
   BLOOD_PREP_STATUS_OPTIONS,
+  CONSULT_TYPE_OPTIONS,
   formatBloodGroup,
   formatDrinkingDetail,
   formatDrugAddictionDetail,
   formatOxygenSupportSummary,
+  formatShortThaiDate,
   formatSmokingDetail,
   formatToothMarksSummary,
+  formatWardWithBed,
   getMedicationLines,
   PreAnestheticEvaluation,
 } from '../types/evaluation';
@@ -83,7 +86,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
               AN: <strong className="font-mono">{evaluation.an || '________'}</strong>
             </span>
             <span>
-              Ward: <strong>{evaluation.ward || '________'}</strong>
+              Ward: <strong>{formatWardWithBed(evaluation.ward, evaluation.bed) || '________'}</strong>
             </span>
             <span>
               สาขา: <strong>{evaluation.specialty || '________'}</strong>
@@ -365,7 +368,29 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
 
             {/* 4. Laboratory Evaluation */}
             <div className="p-2 space-y-1">
-              <div className="font-bold text-[11px]">4. Laboratory Evaluation</div>
+              {(() => {
+                const effectiveCbcDate = lab.cbcDate || (!lab.chemDate ? lab.labDate : '');
+                const effectiveChemDate = lab.chemDate || (!lab.cbcDate ? lab.labDate : '');
+                return (
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <div className="font-bold text-[11px]">4. Laboratory Evaluation</div>
+                    {(effectiveCbcDate || effectiveChemDate) && (
+                      <div className="text-[10px] font-mono flex flex-wrap gap-x-2">
+                        {effectiveCbcDate && (
+                          <span>
+                            วันที่ CBC: <strong>{formatShortThaiDate(effectiveCbcDate)}</strong>
+                          </span>
+                        )}
+                        {effectiveChemDate && (
+                          <span>
+                            วันที่ Chem: <strong>{formatShortThaiDate(effectiveChemDate)}</strong>
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               <div className="grid grid-cols-2 gap-2">
                 <CbcFishbone lab={lab} readOnly />
                 <ChemFishbone lab={lab} readOnly />
@@ -429,8 +454,21 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
             </div>
 
             {/* 6. Consult Med/Cardio */}
-            <div className="p-2">
+            <div className="p-2 space-y-0.5">
               <div className="font-bold text-[11px]">6. Consult Med/Cardio</div>
+              <div className="flex flex-wrap items-center gap-x-1">
+                {CONSULT_TYPE_OPTIONS.filter(
+                  (opt) =>
+                    opt.value === 'none' ||
+                    opt.value === 'med' ||
+                    opt.value === 'cardio' ||
+                    (fd.consultTypes || []).includes(opt.value),
+                ).map((opt) => (
+                  <React.Fragment key={opt.value}>
+                    {box((fd.consultTypes || []).includes(opt.value), opt.shortLabel)}
+                  </React.Fragment>
+                ))}
+              </div>
               <div className="whitespace-pre-wrap">{fd.consult || '—'}</div>
             </div>
           </div>

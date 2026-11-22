@@ -257,6 +257,9 @@ export interface CustomLabItem {
 }
 
 export interface LaboratoryData {
+  labDate?: string;
+  cbcDate?: string;
+  chemDate?: string;
   hb: string;
   hct: string;
   wbc: string;
@@ -508,6 +511,50 @@ export function summarizePostOpComplications(
   return items.join(', ');
 }
 
+export type ConsultType =
+  | 'none'
+  | 'med'
+  | 'cardio'
+  | 'neuro'
+  | 'chest'
+  | 'nephro'
+  | 'other';
+
+export const CONSULT_TYPE_OPTIONS: readonly { value: ConsultType; label: string; shortLabel: string }[] = [
+  { value: 'none', label: 'ไม่มี / ไม่ได้ Consult', shortLabel: 'ไม่มี' },
+  { value: 'med', label: 'Consult Med', shortLabel: 'Med' },
+  { value: 'cardio', label: 'Consult Cardio', shortLabel: 'Cardio' },
+  { value: 'neuro', label: 'Consult Neuro', shortLabel: 'Neuro' },
+  { value: 'chest', label: 'Consult Chest', shortLabel: 'Chest' },
+  { value: 'nephro', label: 'Consult Nephro', shortLabel: 'Nephro' },
+  { value: 'other', label: 'อื่นๆ', shortLabel: 'อื่นๆ' },
+];
+
+export function formatWardWithBed(ward?: string, bed?: string): string {
+  const w = (ward || '').trim();
+  const b = (bed || '').trim();
+  if (w && b) return `${w} เตียง ${b}`;
+  if (w) return w;
+  if (b) return `เตียง ${b}`;
+  return '';
+}
+
+export function formatConsultSummary(
+  consultTypes?: ConsultType[],
+  consultDetail?: string,
+): string {
+  const types = Array.isArray(consultTypes) ? consultTypes : [];
+  const detail = (consultDetail || '').trim();
+  const labels = types
+    .map((t) => CONSULT_TYPE_OPTIONS.find((opt) => opt.value === t)?.label)
+    .filter((v): v is string => Boolean(v));
+  if (labels.length > 0 && detail) {
+    return `${labels.join(', ')} — ${detail}`;
+  }
+  if (labels.length > 0) return labels.join(', ');
+  return detail;
+}
+
 export interface EvaluationFormData {
   history: HistoryData;
   physicalExam: PhysicalExamData;
@@ -515,6 +562,7 @@ export interface EvaluationFormData {
   laboratory: LaboratoryData;
   premedication: PremedicationData;
   consult: string;
+  consultTypes?: ConsultType[];
   problemList: string[];
   anestheticPlan: AnestheticPlanData;
   preparationOrders: string[];
@@ -532,6 +580,7 @@ export interface PreAnestheticEvaluation {
   age: string;
   gender?: PatientGender;
   ward: string;
+  bed?: string;
   specialty?: string;
   dateOfVisit: string;
   dateOfOperation: string;
@@ -559,6 +608,36 @@ export interface MedicationGroup {
   autoUnderlying?: 'ht' | 'dm' | 'dlp' | 'heartDisease';
 }
 
+export const DEFAULT_HT_ITEMS: string[] = [
+  'Amlodipine (5) 1x1',
+  'Amlodipine (10) 1x1',
+  'Nifedipine SR (20) 1x1',
+  'Manidipine (10) 1x1',
+  'Enalapril (5) 1x1',
+  'Enalapril (20) 1x1',
+  'Losartan (50) 1x1',
+  'Losartan (100) 1x1',
+  'Atenolol (50) 1x1',
+  'Metoprolol (50) 1x1',
+  'Bisoprolol (2.5) 1x1',
+  'Carvedilol (6.25) 1x1',
+  'Propranolol (10) 1x2',
+  'HCTZ (25) 1x1',
+  'Furosemide (40) 1x1',
+  'Hydralazine (25) 1x2',
+  'Doxazosin (2) 1x1',
+  'Methyldopa (250) 1x2',
+];
+
+export const DEFAULT_THYROID_ITEMS: string[] = [
+  'Methimazole (5) 1x1',
+  'PTU (50) 1x1',
+  'Levothyroxine (50 mcg) 1x1',
+  'Levothyroxine (100 mcg) 1x1',
+  'Eltroxin (50 mcg) 1x1',
+  'Eltroxin (100 mcg) 1x1',
+];
+
 const DEFAULT_ANTICOAGULANT_ITEMS: string[] = [
   'Warfarin',
   'Enoxaparin',
@@ -581,7 +660,7 @@ export const DEFAULT_MEDICATION_GROUPS: MedicationGroup[] = [
   {
     id: 'ht',
     label: '1. HT',
-    items: ['Amlodipine (5) 1x1', 'Amlodipine (10) 1x1', 'Atenolol (50) 1x1'],
+    items: [...DEFAULT_HT_ITEMS],
     autoUnderlying: 'ht',
   },
   {
@@ -628,8 +707,13 @@ export const DEFAULT_MEDICATION_GROUPS: MedicationGroup[] = [
     items: ['ยาต้าน TB'],
   },
   {
+    id: 'thyroid',
+    label: '10. ยาไทรอยด์ (Thyroid)',
+    items: [...DEFAULT_THYROID_ITEMS],
+  },
+  {
     id: 'other',
-    label: '10. ยาอื่นๆ',
+    label: '11. ยาอื่นๆ',
     items: [],
   },
 ];
@@ -674,6 +758,18 @@ export function sanitizeMedicationGroups(raw: unknown): MedicationGroup[] {
       groupObj.autoUnderlying = 'dlp';
     }
     cleaned.push(groupObj);
+  }
+
+  // Auto-upgrade legacy 3-item HT default to expanded antihypertensive list
+  const htGroup = cleaned.find((g) => g.id === 'ht');
+  if (htGroup) {
+    const legacyHt = ['amlodipine (5) 1x1', 'amlodipine (10) 1x1', 'atenolol (50) 1x1'];
+    const isExactLegacyHt =
+      htGroup.items.length === legacyHt.length &&
+      htGroup.items.every((it, idx) => it.trim().toLowerCase() === legacyHt[idx]);
+    if (isExactLegacyHt) {
+      htGroup.items = [...DEFAULT_HT_ITEMS];
+    }
   }
 
   // Auto-correct legacy/misclassified Anticoagulant vs Antiplatelet groups
@@ -1210,6 +1306,7 @@ export const FIELD_LIMITS = {
   an: 40,
   age: 16,
   ward: 80,
+  bed: 32,
   specialty: 80,
   date: 32,
   operationTime: 32,
@@ -1421,6 +1518,7 @@ export function hydrateEvaluationRecord(
     an: typeof raw.an === 'string' ? raw.an : '',
     age: typeof raw.age === 'string' ? raw.age : '',
     ward: typeof raw.ward === 'string' ? raw.ward : '',
+    bed: typeof raw.bed === 'string' ? raw.bed : '',
     specialty: typeof raw.specialty === 'string' ? raw.specialty : '',
     dateOfVisit: normalizeIsoDate(raw.dateOfVisit),
     dateOfOperation: normalizeIsoDate(raw.dateOfOperation),
@@ -1484,6 +1582,19 @@ export function hydrateEvaluationRecord(
       laboratory: {
         ...base.formData.laboratory,
         ...rawLab,
+        labDate: normalizeIsoDate(rawLab.labDate),
+        cbcDate:
+          rawLab.cbcDate !== undefined
+            ? normalizeIsoDate(rawLab.cbcDate)
+            : rawLab.chemDate === undefined
+            ? normalizeIsoDate(rawLab.labDate)
+            : '',
+        chemDate:
+          rawLab.chemDate !== undefined
+            ? normalizeIsoDate(rawLab.chemDate)
+            : rawLab.cbcDate === undefined
+            ? normalizeIsoDate(rawLab.labDate)
+            : '',
         customLabs: Array.isArray(rawLab.customLabs)
           ? rawLab.customLabs.map((item) => ({
               name: typeof item?.name === 'string' ? item.name : '',
@@ -1510,6 +1621,18 @@ export function hydrateEvaluationRecord(
         items: Array.isArray(rawPm.items) ? rawPm.items : base.formData.premedication.items,
       },
       consult: typeof rawFd.consult === 'string' ? rawFd.consult : '',
+      consultTypes: Array.isArray(rawFd.consultTypes)
+        ? rawFd.consultTypes.filter(
+            (t): t is ConsultType =>
+              t === 'none' ||
+              t === 'med' ||
+              t === 'cardio' ||
+              t === 'neuro' ||
+              t === 'chest' ||
+              t === 'nephro' ||
+              t === 'other',
+          )
+        : [],
       problemList: Array.isArray(rawFd.problemList)
         ? rawFd.problemList
         : base.formData.problemList,
@@ -1635,6 +1758,7 @@ export function createEmptyEvaluation(
       | 'asaEmergency'
       | 'surgeon'
       | 'ward'
+      | 'bed'
       | 'specialty'
     >
   >,
@@ -1652,6 +1776,7 @@ export function createEmptyEvaluation(
     age: '',
     gender: overrides?.gender ?? '',
     ward: overrides?.ward ?? '',
+    bed: overrides?.bed ?? '',
     specialty: overrides?.specialty ?? '',
     dateOfVisit: overrides?.dateOfVisit ?? today,
     dateOfOperation: overrides?.dateOfOperation ?? today,
@@ -1754,6 +1879,9 @@ export function createEmptyEvaluation(
         other: '',
       },
       laboratory: {
+        labDate: '',
+        cbcDate: '',
+        chemDate: '',
         hb: '',
         hct: '',
         wbc: '',
@@ -1795,6 +1923,7 @@ export function createEmptyEvaluation(
         onIvf: '',
       },
       consult: '',
+      consultTypes: [],
       problemList: ['', '', '', '', '', ''],
       anestheticPlan: {
         gaSelected: false,
@@ -2033,6 +2162,7 @@ export function sanitizeEvaluationForFirestore(
     age: clampStr(evalRecord.age.trim(), FIELD_LIMITS.age),
     gender: inferPatientGender(evalRecord.patientName, evalRecord.gender),
     ward: clampStr(evalRecord.ward.trim(), FIELD_LIMITS.ward),
+    bed: clampStr((evalRecord.bed ?? '').trim(), FIELD_LIMITS.bed),
     specialty: clampStr((evalRecord.specialty ?? '').trim(), FIELD_LIMITS.specialty),
     dateOfVisit: clampStr(evalRecord.dateOfVisit, FIELD_LIMITS.date),
     dateOfOperation: clampStr(evalRecord.dateOfOperation, FIELD_LIMITS.date),
@@ -2178,6 +2308,9 @@ export function sanitizeEvaluationForFirestore(
         other: clampStr(fd.investigation.other, 600),
       },
       laboratory: {
+        labDate: clampStr(fd.laboratory.labDate ?? '', FIELD_LIMITS.date),
+        cbcDate: clampStr(fd.laboratory.cbcDate ?? '', FIELD_LIMITS.date),
+        chemDate: clampStr(fd.laboratory.chemDate ?? '', FIELD_LIMITS.date),
         hb: clampStr(fd.laboratory.hb, 20),
         hct: clampStr(fd.laboratory.hct, 20),
         wbc: clampStr(formatThousandsWithCommas(fd.laboratory.wbc), 20),
@@ -2245,6 +2378,11 @@ export function sanitizeEvaluationForFirestore(
         onIvf: clampStr(fd.premedication.onIvf, 150),
       },
       consult: clampStr(fd.consult, 1500),
+      consultTypes: (() => {
+        const allow: ConsultType[] = ['none', 'med', 'cardio', 'neuro', 'chest', 'nephro', 'other'];
+        const raw = Array.isArray(fd.consultTypes) ? fd.consultTypes : [];
+        return Array.from(new Set(raw.filter((t): t is ConsultType => allow.includes(t)))).slice(0, 7);
+      })(),
       problemList: clampStrArray(fd.problemList, 12, 250),
       anestheticPlan: sanitizedPlan,
       preparationOrders: clampStrArray(fd.preparationOrders, 12, 250),

@@ -55,6 +55,11 @@
           "description": "Hospital ward",
           "maxLength": 80
         },
+        "bed": {
+          "type": "string",
+          "description": "Hospital bed number / identifier within the ward",
+          "maxLength": 32
+        },
         "specialty": {
           "type": "string",
           "description": "Clinical specialty / department (e.g., Sx, Obs, Ortho, Med, Maxillo, Plastic, GI med, Chest med, Neuro, Eye, ENT, Uro)",
@@ -129,7 +134,7 @@
         },
         "formData": {
           "type": "object",
-          "description": "Structured clinical sections (history including DM/HT/DLP/CKD/Heart underlying diseases with per-disease detail fields and general underlyingDetail, medication, drinking/smoking/drug addiction details with quit duration, physicalExam including oxygen/ventilator support, per-tooth missingTeeth/looseTeeth markings, and 2.2 airway detail fields, investigation, laboratory including Anti-HIV negative/positive, Lactate, Trop I, dynamic customLabs list, bloodGroup A/B/AB/O and bloodRh positive/negative, blood component T&S, no_blood/ไม่มีจองเลือด, and readiness status/detail, premedication, consult, problemList, anestheticPlan including GA, RA, and optional MAC macSelected/macDetail, preparationOrders, postAnesthesia, and optional postOpComplication ANE-FM-006-01 Peri-op/Post-op complication checklist, outcomes, incident report, severity A-I, administration errors, remark, and recorder signatures)"
+          "description": "Structured clinical sections (history including DM/HT/DLP/CKD/Heart underlying diseases with per-disease detail fields and general underlyingDetail, medication, drinking/smoking/drug addiction details with quit duration, physicalExam including oxygen/ventilator support, per-tooth missingTeeth/looseTeeth markings, and 2.2 airway detail fields, investigation, laboratory including labDate, cbcDate, chemDate, Anti-HIV negative/positive, Lactate, Trop I, dynamic customLabs list, bloodGroup A/B/AB/O and bloodRh positive/negative, blood component T&S, no_blood/ไม่มีจองเลือด, and readiness status/detail, premedication, consultTypes (none/med/cardio/neuro/chest/nephro/other) and consult detail, problemList, anestheticPlan including GA, RA, and optional MAC macSelected/macDetail, preparationOrders, postAnesthesia, and optional postOpComplication ANE-FM-006-01 Peri-op/Post-op complication checklist, outcomes, incident report, severity A-I, administration errors, remark, and recorder signatures)"
         },
         "createdAt": {
           "type": "string",
@@ -167,7 +172,7 @@
     },
     "MedicationCatalog": {
       "title": "MedicationCatalog",
-      "description": "Clinician-customizable grouped medication presets (HT, DM, Lipid, Heart, Anticoagulant, Antiplatelet, HIV, Asthma / COPD, TB, Other).",
+      "description": "Clinician-customizable grouped medication presets (HT, DM, Lipid, Heart, Anticoagulant, Antiplatelet, HIV, Asthma / COPD, TB, Thyroid, Other).",
       "type": "object",
       "properties": {
         "id": {

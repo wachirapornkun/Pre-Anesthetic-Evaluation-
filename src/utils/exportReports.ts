@@ -1,14 +1,18 @@
 import {
   BLOOD_PREP_STATUS_OPTIONS,
   computeClinicalSummary,
+  CONSULT_TYPE_OPTIONS,
   formatBloodGroup,
+  formatConsultSummary,
   formatDrinkingDetail,
   formatDrugAddictionDetail,
   formatOxygenSupportSummary,
+  formatShortThaiDate,
   formatSmokingDetail,
   formatThousandsWithCommas,
   formatToothMarksSummary,
   formatUnderlyingDiseaseTag,
+  formatWardWithBed,
   getEffectiveEvaluationStatus,
   getMedicationLines,
   PreAnestheticEvaluation,
@@ -30,6 +34,7 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
     'Name',
     'Age (yr)',
     'Ward',
+    'Bed (เตียง)',
     'Specialty (สาขา)',
     'Date of Visit',
     'Date of Operation',
@@ -55,6 +60,8 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
     'Drinking (วัน/wk · ระยะเวลา)',
     'Smoking (มวน/วัน · ระยะเวลา)',
     'Drug Addiction (ชนิด · ปริมาณ · ระยะเวลา)',
+    'CBC Date (วันที่ตรวจ CBC)',
+    'Chemistry Date (วันที่ตรวจ Chemistry)',
     'Hb',
     'Hct',
     'WBC',
@@ -64,6 +71,7 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
     'BUN',
     'Cr',
     'INR',
+    'Consult Med/Cardio',
     'Anesthetic Plan',
     'Blood Group',
     'Blood Prep (PRC/FFP/Plt)',
@@ -80,6 +88,7 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
       r.patientName,
       r.age,
       r.ward,
+      r.bed || '',
       r.specialty || '',
       r.dateOfVisit,
       r.dateOfOperation,
@@ -117,6 +126,8 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
         : fd.history.drugAddictionStatus === 'no'
         ? 'No'
         : '',
+      fd.laboratory.cbcDate || (!fd.laboratory.chemDate ? fd.laboratory.labDate : '') || '',
+      fd.laboratory.chemDate || (!fd.laboratory.cbcDate ? fd.laboratory.labDate : '') || '',
       fd.laboratory.hb,
       fd.laboratory.hct,
       formatThousandsWithCommas(fd.laboratory.wbc),
@@ -126,6 +137,7 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
       fd.laboratory.bun,
       fd.laboratory.cr,
       fd.laboratory.inr,
+      formatConsultSummary(fd.consultTypes, fd.consult),
       summary.planSummary,
       formatBloodGroup(fd.laboratory.bloodGroup, fd.laboratory.bloodRh),
       summary.bloodPrepSummary,
@@ -237,7 +249,7 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
         Age: <span class="val">${esc(record.age || '-')}</span> yr &nbsp;
         HN: <span class="val">${esc(record.hn || '-')}</span> &nbsp;
         AN: <span class="val">${esc(record.an || '-')}</span> &nbsp;
-        Ward: <span class="val">${esc(record.ward || '-')}</span> &nbsp;
+        Ward: <span class="val">${esc(formatWardWithBed(record.ward, record.bed) || '-')}</span> &nbsp;
         สาขา: <span class="val">${esc(record.specialty || '-')}</span> &nbsp;
         Date of visit: <span class="val">${esc(record.dateOfVisit || '-')}</span>
       </div>
@@ -315,7 +327,16 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
         <div class="field"><strong>2.5 Heart sound:</strong> ${radioMark(p.heartSound === 'normal', 'Normal')} ${radioMark(p.heartSound === 'abnormal', 'Abnormal')} ${esc(p.heartSoundDetail)}</div>
         <div class="field"><strong>2.6 Functional Capacity:</strong> ${esc(p.functionalCapacity || '-')}</div>
 
-        <div class="sec-title" style="margin-top:6px;">4. Laboratory Evaluation</div>
+        <div class="sec-title" style="margin-top:6px;">4. Laboratory Evaluation${(() => {
+          const cbcD = lab.cbcDate || (!lab.chemDate ? lab.labDate : '');
+          const chemD = lab.chemDate || (!lab.cbcDate ? lab.labDate : '');
+          const parts: string[] = [];
+          if (cbcD) parts.push(`วันที่ CBC: ${esc(formatShortThaiDate(cbcD))}`);
+          if (chemD) parts.push(`วันที่ Chemistry: ${esc(formatShortThaiDate(chemD))}`);
+          return parts.length > 0
+            ? ` <span style="font-weight:normal;font-size:10px;">(${parts.join(' · ')})</span>`
+            : '';
+        })()}</div>
         <table class="fish">
           <tr>
             <td>Hb: ${esc(lab.hb || '-')}</td><td>WBC: ${esc(formatThousandsWithCommas(lab.wbc) || '-')}</td><td>N: ${esc(lab.neutrophil || '-')}%</td>
@@ -348,6 +369,15 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
         ).join(' ')}${!(lab.prepStatuses || []).includes('other') && lab.prepStatusDetail ? ` (${esc(lab.prepStatusDetail)})` : ''}</div>
 
         <div class="sec-title" style="margin-top:6px;">6. Consult Med/Cardio</div>
+        <div class="field">${CONSULT_TYPE_OPTIONS.filter(
+          (opt) =>
+            opt.value === 'none' ||
+            opt.value === 'med' ||
+            opt.value === 'cardio' ||
+            (fd.consultTypes || []).includes(opt.value),
+        )
+          .map((opt) => checkMark((fd.consultTypes || []).includes(opt.value), opt.shortLabel))
+          .join(' ')}</div>
         <div class="field">${esc(fd.consult || '-')}</div>
       </div>
     </div>

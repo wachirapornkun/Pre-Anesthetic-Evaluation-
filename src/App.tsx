@@ -52,11 +52,13 @@ import {
   addDaysToIsoDate,
   compareByDateAndSurgeon,
   createEmptyEvaluation,
+  DEFAULT_HT_ITEMS,
   DEFAULT_MEDICATION_GROUPS,
   DEFAULT_OXYGEN_OTHER_PRESETS,
   DEFAULT_SPECIALTY_LIST,
   DEFAULT_SUMMARIZER_LIST,
   DEFAULT_SURGEON_LIST,
+  DEFAULT_THYROID_ITEMS,
   DEFAULT_WARD_LIST,
   formatThaiScheduleDate,
   generateEvaluationId,
@@ -216,7 +218,7 @@ export default function App() {
       const migrated = localStorage.getItem('bph_med_other_added_v1');
       if (!migrated && !groups.some((g) => g.id === 'other')) {
         localStorage.setItem('bph_med_other_added_v1', '1');
-        return [...groups, { id: 'other', label: '10. ยาอื่นๆ', items: [] }];
+        return [...groups, { id: 'other', label: '11. ยาอื่นๆ', items: [] }];
       }
       if (!migrated) {
         localStorage.setItem('bph_med_other_added_v1', '1');
@@ -226,10 +228,65 @@ export default function App() {
     }
     return groups;
   };
+  const applyMedicationCatalogUpdatesOnce = (
+    groups: MedicationGroup[],
+    storageKey: string,
+  ): { groups: MedicationGroup[]; changed: boolean } => {
+    try {
+      if (localStorage.getItem(storageKey)) {
+        return { groups, changed: false };
+      }
+      localStorage.setItem(storageKey, '1');
+    } catch {
+      // ignore storage error
+    }
+
+    let changed = false;
+    let next = groups.map((g) => ({ ...g, items: [...g.items] }));
+
+    const htGroup = next.find((g) => g.id === 'ht');
+    if (htGroup) {
+      const existingLower = new Set(htGroup.items.map((it) => it.trim().toLowerCase()));
+      for (const item of DEFAULT_HT_ITEMS) {
+        if (!existingLower.has(item.trim().toLowerCase()) && htGroup.items.length < 30) {
+          htGroup.items.push(item);
+          existingLower.add(item.trim().toLowerCase());
+          changed = true;
+        }
+      }
+    }
+
+    if (!next.some((g) => g.id === 'thyroid')) {
+      const thyroidGroup: MedicationGroup = {
+        id: 'thyroid',
+        label: '10. ยาไทรอยด์ (Thyroid)',
+        items: [...DEFAULT_THYROID_ITEMS],
+      };
+      const otherIdx = next.findIndex((g) => g.id === 'other');
+      if (otherIdx !== -1) {
+        if (next[otherIdx].label === '10. ยาอื่นๆ') {
+          next[otherIdx] = { ...next[otherIdx], label: '11. ยาอื่นๆ' };
+        }
+        next = [...next.slice(0, otherIdx), thyroidGroup, ...next.slice(otherIdx)];
+      } else {
+        next = [...next, thyroidGroup];
+      }
+      changed = true;
+    }
+
+    return { groups: next.slice(0, 20), changed };
+  };
   const [medicationGroups, setMedicationGroups] = useState<MedicationGroup[]>(() => {
     try {
       const saved = localStorage.getItem('bph_med_groups_v1');
-      if (saved) return ensureOtherGroupOnce(sanitizeMedicationGroups(JSON.parse(saved)));
+      if (saved) {
+        const base = ensureOtherGroupOnce(sanitizeMedicationGroups(JSON.parse(saved)));
+        const upgraded = applyMedicationCatalogUpdatesOnce(base, 'bph_med_thyroid_ht_v1');
+        if (upgraded.changed) {
+          localStorage.setItem('bph_med_groups_v1', JSON.stringify(upgraded.groups));
+        }
+        return upgraded.groups;
+      }
     } catch {
       // ignore storage error
     }
@@ -377,18 +434,30 @@ export default function App() {
                 try {
                   if (!localStorage.getItem('bph_med_other_cloud_v1')) {
                     localStorage.setItem('bph_med_other_cloud_v1', '1');
-                    return [...sanitized, { id: 'other', label: '10. ยาอื่นๆ', items: [] }];
+                    return [...sanitized, { id: 'other', label: '11. ยาอื่นๆ', items: [] }];
                   }
                 } catch {
                   // ignore storage error
                 }
                 return sanitized;
               })();
-          setMedicationGroups(withOther);
+          const upgraded = applyMedicationCatalogUpdatesOnce(
+            withOther,
+            `bph_med_thyroid_ht_cloud_v1_${user.uid}`,
+          );
+          setMedicationGroups(upgraded.groups);
           try {
-            localStorage.setItem('bph_med_groups_v1', JSON.stringify(withOther));
+            localStorage.setItem('bph_med_groups_v1', JSON.stringify(upgraded.groups));
           } catch {
             // ignore storage error
+          }
+          if (upgraded.changed) {
+            updateDoc(catalogRef, {
+              groups: upgraded.groups,
+              updatedAt: serverTimestamp(),
+            }).catch(() => {
+              // ignore silent catalog sync error
+            });
           }
         } else {
           setHasCloudCatalog(false);

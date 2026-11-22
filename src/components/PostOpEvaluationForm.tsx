@@ -641,7 +641,7 @@ export function PostOpEvaluationForm({
                   />
                 </div>
 
-                <label className="flex flex-col gap-1 lg:col-span-3">
+                <label className="flex flex-col gap-1 lg:col-span-2">
                   <span className="text-[11px] font-medium text-slate-600">หอผู้ป่วย (Ward)</span>
                   <input
                     type="text"
@@ -657,6 +657,18 @@ export function PostOpEvaluationForm({
                       <option key={w} value={w} />
                     ))}
                   </datalist>
+                </label>
+
+                <label className="flex flex-col gap-1 lg:col-span-1">
+                  <span className="text-[11px] font-medium text-slate-600">เตียง (Bed)</span>
+                  <input
+                    type="text"
+                    value={value.bed ?? ''}
+                    onChange={(e) => onChange({ ...value, bed: e.target.value })}
+                    maxLength={32}
+                    placeholder="เตียง"
+                    className={`${inputBase} font-mono tabular-nums`}
+                  />
                 </label>
 
                 <label className="flex flex-col gap-1 lg:col-span-3">

@@ -28,6 +28,7 @@ import {
   formatBloodGroup,
   formatShortThaiDate,
   formatThaiScheduleDate,
+  formatWardWithBed,
   getDateSearchTokens,
   getEffectiveEvaluationStatus,
   getEffectiveScheduleType,
@@ -295,6 +296,7 @@ export function RegistryView({
         normalizeCode(r.hn).includes(normalizeCode(q)) ||
         (r.an || '').toLowerCase().includes(q) ||
         (r.ward || '').toLowerCase().includes(q) ||
+        (r.bed || '').toLowerCase().includes(q) ||
         (r.surgeon || '').toLowerCase().includes(q) ||
         (r.orRoom || '').toLowerCase().includes(q) ||
         (r.diagnosis || '').toLowerCase().includes(q) ||
@@ -962,7 +964,7 @@ export function RegistryView({
                         </td>
                         <td className="py-2.5 px-4 max-w-xs">
                           <div className="font-medium text-slate-800 truncate">
-                            {r.ward || 'ไม่ระบุหอผู้ป่วย'}
+                            {formatWardWithBed(r.ward, r.bed) || 'ไม่ระบุหอผู้ป่วย'}
                           </div>
                           <div className="text-[11px] text-slate-500 truncate">
                             {r.operation || r.diagnosis || '—'}

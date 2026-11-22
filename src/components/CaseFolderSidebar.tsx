@@ -194,7 +194,7 @@ export function CaseFolderSidebar({
 
   return (
     <aside
-      aria-label="ทะเบียนใบ Pre-op ที่บันทึกไว้ทั้งหมด"
+      aria-label="ทะเบียนผ่าตัดและใบเยี่ยมทั้งหมด"
       className="no-print bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden"
     >
       {/* Header */}
@@ -203,7 +203,7 @@ export function CaseFolderSidebar({
           <div className="flex items-center gap-1.5 min-w-0">
             <FolderOpen className="w-4 h-4 text-blue-800 shrink-0" />
             <h2 className="text-xs font-bold text-slate-900 truncate">
-              ทะเบียนใบ Pre-op ({records.length})
+              ทะเบียนผ่าตัด ({records.length})
             </h2>
           </div>
           <div className="flex items-center gap-1 shrink-0">
@@ -231,7 +231,7 @@ export function CaseFolderSidebar({
 
         <div className="flex items-center justify-between gap-2">
           <p className="text-[11px] text-slate-500 leading-snug">
-            เก็บใบ Pre-op ที่บันทึกไว้ทั้งหมดแสดงค้างไว้ตลอดเวลา
+            รวมแฟ้มวันผ่าตัดและใบเยี่ยมทั้งหมด แสดงค้างไว้ตลอดเวลา
           </p>
           {onOpenFullRegistry && (
             <button

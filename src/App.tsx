@@ -34,7 +34,6 @@ import { A4PrintSheet } from './components/A4PrintSheet';
 import { CaseFolderSidebar } from './components/CaseFolderSidebar';
 import { ClinicalSummaryBar } from './components/ClinicalSummaryBar';
 import { DashboardView } from './components/DashboardView';
-import { ElectiveScheduleView } from './components/ElectiveScheduleView';
 import { PostOpA4PrintSheet } from './components/PostOpA4PrintSheet';
 import { PostOpEvaluationForm } from './components/PostOpEvaluationForm';
 import { PreAnestheticForm } from './components/PreAnestheticForm';
@@ -79,7 +78,7 @@ import {
 } from './types/evaluation';
 import { exportEvaluationJson, exportEvaluationsCsv, exportSingleHtmlReport } from './utils/exportReports';
 
-type ActiveTab = 'form' | 'post_op' | 'schedule' | 'dashboard' | 'registry' | 'print_preview';
+type ActiveTab = 'form' | 'post_op' | 'dashboard' | 'registry' | 'print_preview';
 type PrintSheetMode = 'pre_op' | 'post_op' | 'both';
 
 interface NewFormScheduleDraft {
@@ -1460,14 +1459,14 @@ export default function App() {
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab('schedule')}
+              onClick={() => setActiveTab('registry')}
               className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'schedule'
+                activeTab === 'registry'
                   ? 'border-blue-800 text-slate-950 font-semibold'
                   : 'border-transparent hover:text-slate-900'
               }`}
             >
-              แฟ้มวันผ่าตัด
+              ทะเบียนผ่าตัด ({records.length})
             </button>
             <button
               type="button"
@@ -1479,17 +1478,6 @@ export default function App() {
               }`}
             >
               Dashboard
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('registry')}
-              className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'registry'
-                  ? 'border-blue-800 text-slate-950 font-semibold'
-                  : 'border-transparent hover:text-slate-900'
-              }`}
-            >
-              ทะเบียน ({records.length})
             </button>
             <button
               type="button"
@@ -1528,9 +1516,8 @@ export default function App() {
             [
               { key: 'form', label: 'Pre-op' },
               { key: 'post_op', label: 'Post-op' },
-              { key: 'schedule', label: 'แฟ้มวันผ่าตัด' },
+              { key: 'registry', label: `ทะเบียนผ่าตัด (${records.length})` },
               { key: 'dashboard', label: 'Dashboard' },
-              { key: 'registry', label: `ทะเบียน (${records.length})` },
               { key: 'print_preview', label: 'พิมพ์ A4' },
             ] as const
           ).map((t) => (
@@ -1633,8 +1620,8 @@ export default function App() {
               >
                 <FolderOpen className="w-3.5 h-3.5 text-blue-800" />
                 {showFolderSidebar
-                  ? `ซ่อนทะเบียน Pre-op (${records.length})`
-                  : `แสดงทะเบียน Pre-op (${records.length})`}
+                  ? `ซ่อนทะเบียนผ่าตัด (${records.length})`
+                  : `แสดงทะเบียนผ่าตัด (${records.length})`}
               </button>
             )}
 
@@ -1694,7 +1681,7 @@ export default function App() {
             <div className="flex items-center gap-2 min-w-0">
               <AlertCircle className="w-4 h-4 text-red-700 shrink-0" />
               <span className="font-medium">
-                การเชื่อมต่อฐานข้อมูล Cloud ขัดข้อง: {cloudError} (ข้อมูลที่บันทึกใหม่จะถูกสำรองในเครื่องและแสดงในแฟ้มจัดเก็บโดยอัตโนมัติ)
+                การเชื่อมต่อฐานข้อมูล Cloud ขัดข้อง: {cloudError} (ข้อมูลที่บันทึกใหม่จะถูกสำรองในเครื่องและแสดงในทะเบียนผ่าตัดโดยอัตโนมัติ)
               </span>
             </div>
             <button
@@ -1807,22 +1794,6 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === 'schedule' && (
-          <ElectiveScheduleView
-            records={records}
-            activeId={currentForm.id}
-            wardOptions={wardOptions}
-            surgeonOptions={surgeonOptions}
-            isLoading={isLoadingRecords}
-            onEdit={handleEditRecord}
-            onDuplicate={handleDuplicate}
-            onDelete={handleDelete}
-            onPrintRecord={handlePrintRecord}
-            onCreateNew={handleCreateNew}
-            onCreateNewForDate={handleCreateNewForDate}
-          />
-        )}
-
         {activeTab === 'dashboard' && (
           <DashboardView
             records={records}
@@ -1841,7 +1812,9 @@ export default function App() {
           <RegistryView
             records={records}
             activeId={currentForm.id}
+            wardOptions={wardOptions}
             surgeonOptions={surgeonOptions}
+            isLoading={isLoadingRecords && records.length === 0}
             userEmail={user?.email ?? null}
             isPullingCloud={isPullingCloud || (Boolean(user) && isLoadingRecords)}
             unsavedCurrentForm={

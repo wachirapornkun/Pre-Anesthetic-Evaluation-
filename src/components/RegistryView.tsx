@@ -17,9 +17,11 @@ import {
   Search,
   Trash2,
   Upload,
+  UserRound,
   X,
 } from 'lucide-react';
 import {
+  addDaysToIsoDate,
   compareByDateAndSurgeon,
   compareElectiveSchedule,
   computeClinicalSummary,
@@ -32,6 +34,7 @@ import {
   getPostOpVisitCompleteness,
   getTodayIsoDate,
   isPreOpVisited,
+  OR_ROOM_OPTIONS,
   PreAnestheticEvaluation,
 } from '../types/evaluation';
 import { exportEvaluationsCsv, exportSingleHtmlReport } from '../utils/exportReports';
@@ -49,7 +52,9 @@ function getUpdatedMillis(ts: unknown): number {
 interface RegistryViewProps {
   records: PreAnestheticEvaluation[];
   activeId: string;
+  wardOptions: string[];
   surgeonOptions: string[];
+  isLoading?: boolean;
   userEmail?: string | null;
   isPullingCloud?: boolean;
   unsavedCurrentForm?: PreAnestheticEvaluation | null;
@@ -66,6 +71,9 @@ interface RegistryViewProps {
   onCreateNewForDate?: (dateOfOperation: string, orRoom?: string, surgeon?: string) => void;
 }
 
+type DateScope = 'all' | 'upcoming' | 'today' | 'tomorrow' | 'past';
+type SortGroupMode = 'op_surgeon_desc' | 'op_surgeon_asc' | 'op_or_asc' | 'op_desc' | 'updated';
+
 function normalizeCode(val: string | undefined): string {
   return (val || '').replace(/[\s-]/g, '').toLowerCase();
 }
@@ -73,7 +81,9 @@ function normalizeCode(val: string | undefined): string {
 export function RegistryView({
   records,
   activeId,
+  wardOptions,
   surgeonOptions,
+  isLoading = false,
   userEmail,
   isPullingCloud = false,
   unsavedCurrentForm,
@@ -89,43 +99,55 @@ export function RegistryView({
   onCreateNew,
   onCreateNewForDate,
 }: RegistryViewProps) {
+  const today = getTodayIsoDate();
+  const tomorrow = addDaysToIsoDate(today, 1);
+
   const jsonInputRef = useRef<HTMLInputElement | null>(null);
   const [hnQuery, setHnQuery] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [dateScope, setDateScope] = useState<DateScope>('all');
   const [statusFilter, setStatusFilter] = useState<
     'ALL' | 'draft' | 'evaluated' | 'not_post_op' | 'post_op_completed'
   >('ALL');
   const [scheduleFilter, setScheduleFilter] = useState<'ALL' | 'elective' | 'emergency'>('ALL');
   const [surgeonFilter, setSurgeonFilter] = useState('ALL');
+  const [wardFilter, setWardFilter] = useState('ALL');
+  const [roomFilter, setRoomFilter] = useState('ALL');
   const [dateField, setDateField] = useState<'all' | 'operation' | 'visit' | 'post_op'>('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [sortMode, setSortMode] = useState<'op_surgeon_asc' | 'op_asc' | 'op_desc' | 'updated'>(
-    'op_desc',
-  );
+  const [sortMode, setSortMode] = useState<SortGroupMode>('op_surgeon_desc');
   const [previewRecord, setPreviewRecord] = useState<PreAnestheticEvaluation | null>(null);
-  const [confirmDeleteRecord, setConfirmDeleteRecord] = useState<PreAnestheticEvaluation | null>(null);
+  const [confirmDeleteRecord, setConfirmDeleteRecord] = useState<PreAnestheticEvaluation | null>(
+    null,
+  );
   const [isDeleting, setIsDeleting] = useState(false);
 
   const hasActiveSearchOrFilter = Boolean(
     hnQuery.trim() ||
       searchQuery.trim() ||
+      dateScope !== 'all' ||
       dateFrom ||
       dateTo ||
       statusFilter !== 'ALL' ||
       scheduleFilter !== 'ALL' ||
-      surgeonFilter !== 'ALL',
+      surgeonFilter !== 'ALL' ||
+      wardFilter !== 'ALL' ||
+      roomFilter !== 'ALL',
   );
 
   const resetAllFilters = () => {
     setHnQuery('');
     setSearchQuery('');
+    setDateScope('all');
     setDateField('all');
     setDateFrom('');
     setDateTo('');
     setStatusFilter('ALL');
     setScheduleFilter('ALL');
     setSurgeonFilter('ALL');
+    setWardFilter('ALL');
+    setRoomFilter('ALL');
   };
 
   const availableSurgeons = useMemo(() => {
@@ -136,30 +158,78 @@ export function RegistryView({
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'th'));
   }, [records, surgeonOptions]);
 
+  const availableWards = useMemo(() => {
+    const set = new Set<string>(wardOptions);
+    records.forEach((r) => {
+      if (r.ward?.trim()) set.add(r.ward.trim());
+    });
+    return Array.from(set);
+  }, [records, wardOptions]);
+
+  const availableOrRooms = useMemo(() => {
+    const set = new Set<string>(OR_ROOM_OPTIONS);
+    records.forEach((r) => {
+      if (r.orRoom?.trim()) set.add(r.orRoom.trim());
+    });
+    return Array.from(set);
+  }, [records]);
+
   const registryCounts = useMemo(() => {
     let draft = 0;
     let preOpDone = 0;
     let postOpDone = 0;
+    let todayCount = 0;
+    let tomorrowCount = 0;
+    let upcomingCount = 0;
+    const uniqueDates = new Set<string>();
+
     for (const r of records) {
       const eff = getEffectiveEvaluationStatus(r);
+      const opDate = (r.dateOfOperation || '').trim();
+      if (opDate) {
+        uniqueDates.add(opDate);
+        if (opDate === today) todayCount += 1;
+        if (opDate === tomorrow) tomorrowCount += 1;
+        if (opDate >= today) upcomingCount += 1;
+      }
       if (eff === 'draft') draft += 1;
-      if (isPreOpVisited(r) || eff === 'evaluated' || eff === 'post_op_completed' || eff === 'locked') {
+      if (
+        isPreOpVisited(r) ||
+        eff === 'evaluated' ||
+        eff === 'post_op_completed' ||
+        eff === 'locked'
+      ) {
         preOpDone += 1;
       }
       if (eff === 'post_op_completed') postOpDone += 1;
     }
-    return { total: records.length, draft, preOpDone, postOpDone };
-  }, [records]);
+
+    return {
+      total: records.length,
+      draft,
+      preOpDone,
+      postOpDone,
+      todayCount,
+      tomorrowCount,
+      upcomingCount,
+      dateCount: uniqueDates.size,
+    };
+  }, [records, today, tomorrow]);
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     const normHn = normalizeCode(hnQuery);
     const list = records.filter((r) => {
+      const opDate = (r.dateOfOperation || '').trim();
+      if (dateScope === 'upcoming' && (!opDate || opDate < today)) return false;
+      if (dateScope === 'today' && opDate !== today) return false;
+      if (dateScope === 'tomorrow' && opDate !== tomorrow) return false;
+      if (dateScope === 'past' && (!opDate || opDate >= today)) return false;
+
       const effStatus = getEffectiveEvaluationStatus(r);
       const postOpCheck = getPostOpVisitCompleteness(r.formData?.postAnesthesia);
       if (statusFilter === 'not_post_op' && postOpCheck.isComplete) return false;
       if (statusFilter === 'evaluated') {
-        // Keep Pre-op evaluated records visible even after Post-op is completed
         const hasPreOp =
           isPreOpVisited(r) ||
           effStatus === 'evaluated' ||
@@ -173,20 +243,20 @@ export function RegistryView({
       ) {
         return false;
       }
+
       if (scheduleFilter !== 'ALL' && getEffectiveScheduleType(r) !== scheduleFilter) return false;
       if (surgeonFilter !== 'ALL') {
         const s = (r.surgeon || '').trim() || '__NONE__';
         if (s !== surgeonFilter) return false;
       }
+      if (wardFilter !== 'ALL' && (r.ward || '').trim() !== wardFilter) return false;
+      if (roomFilter !== 'ALL' && (r.orRoom || '').trim() !== roomFilter) return false;
 
-      // Dedicated HN search (normalized so dashes/spaces don't break lookup)
       if (normHn) {
         if (!normalizeCode(r.hn).includes(normHn)) return false;
       }
 
-      // Dedicated Date search (exact single date when only dateFrom is set, or inclusive range)
       if (dateFrom || dateTo) {
-        const opDate = (r.dateOfOperation || '').trim();
         const visitDate = (r.dateOfVisit || '').trim();
         const postOpDates = [
           (r.formData?.postAnesthesia?.visitDate || '').trim(),
@@ -234,42 +304,68 @@ export function RegistryView({
         getDateSearchTokens(r.formData?.postAnesthesia?.visitDate || '').includes(q)
       );
     });
+
+    if (sortMode === 'op_surgeon_desc') {
+      return [...list].sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
+    }
     if (sortMode === 'op_surgeon_asc') {
       return [...list].sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
     }
-    if (sortMode === 'op_asc') {
+    if (sortMode === 'op_or_asc') {
       return [...list].sort((a, b) => compareElectiveSchedule(a, b, 'asc'));
     }
     if (sortMode === 'op_desc') {
-      return [...list].sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
+      return [...list].sort((a, b) => compareElectiveSchedule(a, b, 'desc'));
     }
     return [...list].sort((a, b) => getUpdatedMillis(b.updatedAt) - getUpdatedMillis(a.updatedAt));
   }, [
     records,
+    dateScope,
+    today,
+    tomorrow,
     hnQuery,
     searchQuery,
     statusFilter,
     scheduleFilter,
     surgeonFilter,
+    wardFilter,
+    roomFilter,
     dateField,
     dateFrom,
     dateTo,
     sortMode,
   ]);
 
+  const showSurgeonSubgroups = sortMode === 'op_surgeon_desc' || sortMode === 'op_surgeon_asc';
+
   const groupedByDate = useMemo(() => {
     if (sortMode === 'updated') return null;
-    const groups: { date: string; items: PreAnestheticEvaluation[] }[] = [];
+    const groups: {
+      date: string;
+      items: PreAnestheticEvaluation[];
+      surgeonGroups: { surgeon: string; isUnspecified: boolean; items: PreAnestheticEvaluation[] }[];
+    }[] = [];
     const idxByDate = new Map<string, number>();
+
     for (const item of filtered) {
       const key = (item.dateOfOperation || '').trim() || '__UNSPECIFIED__';
-      const idx = idxByDate.get(key);
+      let idx = idxByDate.get(key);
       if (idx === undefined) {
-        idxByDate.set(key, groups.length);
-        groups.push({ date: key, items: [item] });
-      } else {
-        groups[idx].items.push(item);
+        idx = groups.length;
+        idxByDate.set(key, idx);
+        groups.push({ date: key, items: [], surgeonGroups: [] });
       }
+      const grp = groups[idx];
+      grp.items.push(item);
+
+      const rawSurgeon = (item.surgeon || '').trim();
+      const surgLabel = rawSurgeon || 'ยังไม่ระบุแพทย์ผ่าตัด';
+      let sGrp = grp.surgeonGroups.find((sg) => sg.surgeon === surgLabel);
+      if (!sGrp) {
+        sGrp = { surgeon: surgLabel, isUnspecified: !rawSurgeon, items: [] };
+        grp.surgeonGroups.push(sGrp);
+      }
+      sGrp.items.push(item);
     }
     return groups;
   }, [filtered, sortMode]);
@@ -283,9 +379,19 @@ export function RegistryView({
       case 'locked':
         return 'ปิดบันทึกแล้ว';
       default:
-        return 'ฉบับร่าง';
+        return 'รอเยี่ยม / ฉบับร่าง';
     }
   };
+
+  if (isLoading && records.length === 0) {
+    return (
+      <div className="space-y-4">
+        <div className="h-20 bg-white border border-slate-200 rounded-xl animate-pulse" />
+        <div className="h-28 bg-white border border-slate-200 rounded-xl animate-pulse" />
+        <div className="h-72 bg-white border border-slate-200 rounded-xl animate-pulse" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -297,7 +403,7 @@ export function RegistryView({
               ดึงใบ Pre-op ที่เคยบันทึกไว้จากฐานข้อมูล Cloud
             </div>
             <p className="text-xs text-blue-900/80 mt-0.5">
-              หากเคยสร้างและบันทึกใบ Pre-op ไว้แล้ว (เช่น วันที่ 25/11/69) กรุณาเข้าสู่ระบบด้วยบัญชี Google เพื่อดึงข้อมูลทั้งหมดมาแสดงในทะเบียนนี้
+              หากเคยสร้างและบันทึกใบ Pre-op ไว้แล้ว (เช่น วันที่ 25/11/69) กรุณาเข้าสู่ระบบด้วยบัญชี Google เพื่อดึงข้อมูลทั้งหมดมาแสดงในทะเบียนผ่าตัดนี้
             </p>
           </div>
           <button
@@ -332,17 +438,17 @@ export function RegistryView({
         </div>
       )}
 
-      {/* Permanent Pre-op Registry Overview Strip */}
+      {/* Unified Surgery Folder & Registry Overview Strip */}
       <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-bold text-slate-900">
-            ทะเบียนใบ Pre-op ทั้งหมด ({registryCounts.total} ราย)
+            ทะเบียนผ่าตัดและแฟ้มใบเยี่ยมทั้งหมด ({registryCounts.total} ราย)
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            ใบ Pre-op ที่บันทึกข้อมูลแล้วทั้งหมดจะแสดงค้างไว้ในทะเบียนนี้ตลอดเวลา ไม่มีการย้ายไปที่อื่น
+          <p className="text-xs text-slate-500 mt-0.5 tabular-nums">
+            รวมแฟ้มวันผ่าตัด ({registryCounts.dateCount} วันผ่าตัด) และทะเบียน Pre-op / Post-op ไว้ในหน้าเดียว · ข้อมูลที่บันทึกแล้วแสดงค้างไว้ตลอดเวลา
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
           <button
             type="button"
             onClick={() => resetAllFilters()}
@@ -356,7 +462,39 @@ export function RegistryView({
           </button>
           <button
             type="button"
-            onClick={() => setStatusFilter('evaluated')}
+            onClick={() => {
+              setDateFrom('');
+              setDateTo('');
+              setDateScope((prev) => (prev === 'today' ? 'all' : 'today'));
+            }}
+            className={`px-2.5 py-1 rounded-md border font-medium tabular-nums transition-colors ${
+              dateScope === 'today'
+                ? 'bg-blue-50 text-blue-900 border-blue-300'
+                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            วันนี้ {registryCounts.todayCount}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setDateFrom('');
+              setDateTo('');
+              setDateScope((prev) => (prev === 'tomorrow' ? 'all' : 'tomorrow'));
+            }}
+            className={`px-2.5 py-1 rounded-md border font-medium tabular-nums transition-colors ${
+              dateScope === 'tomorrow'
+                ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            พรุ่งนี้ {registryCounts.tomorrowCount}
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setStatusFilter((prev) => (prev === 'evaluated' ? 'ALL' : 'evaluated'))
+            }
             className={`px-2.5 py-1 rounded-md border font-medium tabular-nums transition-colors ${
               statusFilter === 'evaluated'
                 ? 'bg-blue-50 text-blue-900 border-blue-300'
@@ -367,18 +505,22 @@ export function RegistryView({
           </button>
           <button
             type="button"
-            onClick={() => setStatusFilter('draft')}
+            onClick={() => setStatusFilter((prev) => (prev === 'draft' ? 'ALL' : 'draft'))}
             className={`px-2.5 py-1 rounded-md border font-medium tabular-nums transition-colors ${
               statusFilter === 'draft'
                 ? 'bg-amber-50 text-amber-900 border-amber-300'
                 : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
             }`}
           >
-            ฉบับร่าง {registryCounts.draft}
+            รอเยี่ยม {registryCounts.draft}
           </button>
           <button
             type="button"
-            onClick={() => setStatusFilter('post_op_completed')}
+            onClick={() =>
+              setStatusFilter((prev) =>
+                prev === 'post_op_completed' ? 'ALL' : 'post_op_completed',
+              )
+            }
             className={`px-2.5 py-1 rounded-md border font-medium tabular-nums transition-colors ${
               statusFilter === 'post_op_completed'
                 ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
@@ -396,7 +538,7 @@ export function RegistryView({
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="flex flex-wrap items-end gap-2.5 flex-1 min-w-[260px]">
             {/* Dedicated HN Search */}
-            <label className="flex flex-col gap-1 w-44 sm:w-48">
+            <label className="flex flex-col gap-1 w-40 sm:w-44">
               <span className="text-[11px] font-semibold text-slate-600">สืบค้นจาก HN</span>
               <div className="relative">
                 <Search className="w-3.5 h-3.5 text-blue-800 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -443,15 +585,16 @@ export function RegistryView({
               <span className="text-[11px] font-semibold text-slate-600">
                 {dateTo ? 'ตั้งแต่วันที่' : 'วันที่'}
               </span>
-              <div className="flex items-center gap-1">
-                <input
-                  type="date"
-                  aria-label="เลือกวันที่เริ่มต้นหรือวันที่ต้องการค้นหา"
-                  value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
-                  className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800"
-                />
-              </div>
+              <input
+                type="date"
+                aria-label="เลือกวันที่เริ่มต้นหรือวันที่ต้องการค้นหา"
+                value={dateFrom}
+                onChange={(e) => {
+                  setDateFrom(e.target.value);
+                  if (e.target.value) setDateScope('all');
+                }}
+                className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800"
+              />
             </label>
 
             {/* Optional Range End */}
@@ -461,34 +604,56 @@ export function RegistryView({
                 type="date"
                 aria-label="เลือกวันที่สิ้นสุด"
                 value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
+                onChange={(e) => {
+                  setDateTo(e.target.value);
+                  if (e.target.value) setDateScope('all');
+                }}
                 className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800"
               />
             </label>
 
-            {/* Quick Today & Clear Buttons */}
-            <div className="flex items-center gap-1.5">
+            {/* Quick Date Scope Segmented Filter */}
+            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+              {(
+                [
+                  { key: 'all', label: 'ทั้งหมด' },
+                  { key: 'upcoming', label: 'กำลังจะถึง' },
+                  { key: 'today', label: 'วันนี้' },
+                  { key: 'tomorrow', label: 'พรุ่งนี้' },
+                  { key: 'past', label: 'ย้อนหลัง' },
+                ] as const
+              ).map((scope) => (
+                <button
+                  key={scope.key}
+                  type="button"
+                  onClick={() => {
+                    setDateScope(scope.key);
+                    if (scope.key !== 'all') {
+                      setDateFrom('');
+                      setDateTo('');
+                    }
+                  }}
+                  className={`px-2 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                    dateScope === scope.key
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {scope.label}
+                </button>
+              ))}
+            </div>
+
+            {hasActiveSearchOrFilter && (
               <button
                 type="button"
-                onClick={() => {
-                  setDateFrom(getTodayIsoDate());
-                  setDateTo('');
-                }}
-                className="px-2.5 py-1.5 text-xs font-medium text-blue-900 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors whitespace-nowrap"
+                onClick={resetAllFilters}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors whitespace-nowrap"
               >
-                วันนี้
+                <RotateCcw className="w-3.5 h-3.5" />
+                ล้างค้นหา
               </button>
-              {hasActiveSearchOrFilter && (
-                <button
-                  type="button"
-                  onClick={resetAllFilters}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors whitespace-nowrap"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  ล้างค้นหา
-                </button>
-              )}
-            </div>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -537,10 +702,20 @@ export function RegistryView({
               <Download className="w-3.5 h-3.5 text-blue-800" />
               ส่งออก CSV
             </button>
+            {onCreateNewForDate && (
+              <button
+                type="button"
+                onClick={() => onCreateNewForDate(tomorrow)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-800 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5 text-blue-800" />
+                เปิดฟอร์ม (ผ่าตัดพรุ่งนี้)
+              </button>
+            )}
             <button
               type="button"
               onClick={onCreateNew}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-800 rounded-lg hover:bg-blue-900 transition-colors whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-800 rounded-lg hover:bg-blue-900 transition-colors whitespace-nowrap shrink-0"
             >
               <FilePlus2 className="w-3.5 h-3.5" />
               เพิ่มรายการใหม่
@@ -548,16 +723,16 @@ export function RegistryView({
           </div>
         </div>
 
-        {/* Row 2: General Keyword + Status / Schedule / Surgeon / Sort Filters */}
+        {/* Row 2: General Keyword + Status / Case Type / Surgeon / Ward / OR Room / Sort */}
         <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5">
-          <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[240px]">
-            <div className="relative flex-1 min-w-[200px] max-w-xs">
+          <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[240px]">
+            <div className="relative flex-1 min-w-[190px] max-w-xs">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="ค้นหา ชื่อ, วันที่ (เช่น 25/11/69), AN, หอผู้ป่วย..."
+                placeholder="ค้นหา ชื่อ, วันที่ (เช่น 25/11/69), AN, หัตถการ..."
                 className="w-full pl-8 pr-7 py-1.5 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-blue-800"
               />
               {searchQuery && (
@@ -576,7 +751,7 @@ export function RegistryView({
               {(
                 [
                   { key: 'ALL', label: 'ทั้งหมด' },
-                  { key: 'draft', label: 'ฉบับร่าง' },
+                  { key: 'draft', label: 'รอเยี่ยม' },
                   { key: 'evaluated', label: 'ประเมินแล้ว' },
                   { key: 'not_post_op', label: 'ยังไม่เยี่ยม Post-Op' },
                   { key: 'post_op_completed', label: 'Post-Op แล้ว' },
@@ -624,16 +799,43 @@ export function RegistryView({
             </select>
 
             <select
-              aria-label="เรียงลำดับข้อมูล"
-              value={sortMode}
-              onChange={(e) =>
-                setSortMode(e.target.value as 'op_surgeon_asc' | 'op_asc' | 'op_desc' | 'updated')
-              }
+              aria-label="กรองตามหอผู้ป่วย"
+              value={wardFilter}
+              onChange={(e) => setWardFilter(e.target.value)}
               className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
             >
-              <option value="op_surgeon_asc">เรียงตามวันผ่าตัด → แพทย์ผ่าตัด</option>
-              <option value="op_asc">เรียงตามวันผ่าตัด → ห้อง OR</option>
-              <option value="op_desc">เรียงตามวันผ่าตัด (ล่าสุด → เก่า)</option>
+              <option value="ALL">ทุกหอผู้ป่วย</option>
+              {availableWards.map((w) => (
+                <option key={w} value={w}>
+                  {w}
+                </option>
+              ))}
+            </select>
+
+            <select
+              aria-label="กรองห้องผ่าตัด"
+              value={roomFilter}
+              onChange={(e) => setRoomFilter(e.target.value)}
+              className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
+            >
+              <option value="ALL">ทุกห้อง OR</option>
+              {availableOrRooms.map((room) => (
+                <option key={room} value={room}>
+                  {room}
+                </option>
+              ))}
+            </select>
+
+            <select
+              aria-label="จัดกลุ่มและเรียงลำดับข้อมูล"
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as SortGroupMode)}
+              className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
+            >
+              <option value="op_surgeon_desc">วันผ่าตัด → แพทย์ผ่าตัด (ล่าสุด → เก่า)</option>
+              <option value="op_surgeon_asc">วันผ่าตัด → แพทย์ผ่าตัด (ใกล้ → ไกล)</option>
+              <option value="op_or_asc">วันผ่าตัด → ห้อง OR (ใกล้ → ไกล)</option>
+              <option value="op_desc">วันผ่าตัด (ล่าสุด → เก่า · ไม่แยกแพทย์)</option>
               <option value="updated">เรียงตามแก้ไขล่าสุด</option>
             </select>
           </div>
@@ -648,8 +850,8 @@ export function RegistryView({
       {hasActiveSearchOrFilter && filtered.length < records.length && (
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
           <span>
-            กำลังกรองแสดง <strong>{filtered.length}</strong> จากใบ Pre-op ที่บันทึกไว้ทั้งหมด{' '}
-            <strong>{records.length}</strong> รายในทะเบียน
+            กำลังกรองแสดง <strong>{filtered.length}</strong> จากใบเยี่ยมที่บันทึกไว้ทั้งหมด{' '}
+            <strong>{records.length}</strong> รายในทะเบียนผ่าตัด
           </span>
           <button
             type="button"
@@ -661,14 +863,14 @@ export function RegistryView({
         </div>
       )}
 
-      {/* Table */}
+      {/* Unified Surgery Folder & Registry Table */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         {filtered.length === 0 ? (
           <div className="p-10 text-center space-y-3">
             <p className="text-sm font-medium text-slate-700">
               {records.length > 0
-                ? 'ไม่พบข้อมูลตามเงื่อนไขที่กรอง (ข้อมูลที่บันทึกไว้ทั้งหมดยังคงอยู่ในทะเบียน)'
-                : 'ยังไม่มีใบ Pre-op ที่บันทึกไว้ในทะเบียน'}
+                ? 'ไม่พบข้อมูลตามเงื่อนไขที่กรอง (ข้อมูลที่บันทึกไว้ทั้งหมดยังคงอยู่ในทะเบียนผ่าตัด)'
+                : 'ยังไม่มีรายการที่บันทึกไว้ในทะเบียนผ่าตัด'}
             </p>
             <div className="flex items-center justify-center gap-2">
               {hasActiveSearchOrFilter && (
@@ -700,7 +902,7 @@ export function RegistryView({
                   <th className="py-2.5 px-4 font-semibold whitespace-nowrap">HN / AN</th>
                   <th className="py-2.5 px-4 font-semibold">ผู้ป่วย</th>
                   <th className="py-2.5 px-4 font-semibold">หอผู้ป่วย · การผ่าตัด</th>
-                  <th className="py-2.5 px-4 font-semibold">ASA / Plan</th>
+                  <th className="py-2.5 px-4 font-semibold">ASA / Group / Plan</th>
                   <th className="py-2.5 px-4 font-semibold">สถานะ</th>
                   <th className="py-2.5 px-4 font-semibold text-right">จัดการข้อมูล / ส่งออก</th>
                 </tr>
@@ -711,6 +913,13 @@ export function RegistryView({
                     const summary = computeClinicalSummary(r);
                     const isActive = r.id === activeId;
                     const isEmergency = getEffectiveScheduleType(r) === 'emergency';
+                    const effStatus = getEffectiveEvaluationStatus(r);
+                    const postOp = getPostOpVisitCompleteness(r.formData?.postAnesthesia);
+                    const bloodGroupText = formatBloodGroup(
+                      r.formData?.laboratory?.bloodGroup,
+                      r.formData?.laboratory?.bloodRh,
+                    );
+
                     return (
                       <tr
                         key={r.id}
@@ -720,7 +929,9 @@ export function RegistryView({
                       >
                         <td className="py-2.5 px-4 font-mono tabular-nums whitespace-nowrap">
                           <div className="font-semibold text-slate-900">
-                            {r.dateOfOperation ? formatShortThaiDate(r.dateOfOperation) : 'ยังไม่ระบุ'}
+                            {r.dateOfOperation
+                              ? formatShortThaiDate(r.dateOfOperation)
+                              : 'ยังไม่ระบุ'}
                             {r.operationTime ? ` ${r.operationTime}` : ''}
                           </div>
                           <div className="text-[11px] text-slate-500">
@@ -762,10 +973,7 @@ export function RegistryView({
                           <div className="font-mono tabular-nums font-semibold text-slate-900">
                             {summary.asaLabel}
                             {r.expectedDifficultAirway ? ' · Diff Airway' : ''}
-                            {formatBloodGroup(
-                              r.formData?.laboratory?.bloodGroup,
-                              r.formData?.laboratory?.bloodRh,
-                            ) ? (
+                            {bloodGroupText ? (
                               <span
                                 className={
                                   r.formData?.laboratory?.bloodRh === 'negative'
@@ -774,10 +982,7 @@ export function RegistryView({
                                 }
                               >
                                 {' · Gr. '}
-                                {formatBloodGroup(
-                                  r.formData?.laboratory?.bloodGroup,
-                                  r.formData?.laboratory?.bloodRh,
-                                )}
+                                {bloodGroupText}
                               </span>
                             ) : null}
                           </div>
@@ -786,33 +991,27 @@ export function RegistryView({
                           </div>
                         </td>
                         <td className="py-2.5 px-4 whitespace-nowrap">
-                          {(() => {
-                            const effStatus = getEffectiveEvaluationStatus(r);
-                            const postOp = getPostOpVisitCompleteness(r.formData?.postAnesthesia);
-                            return (
-                              <div>
-                                <div
-                                  className={`font-medium ${
-                                    effStatus === 'post_op_completed'
-                                      ? 'text-emerald-700'
-                                      : effStatus === 'evaluated'
-                                      ? 'text-blue-800'
-                                      : 'text-slate-700'
-                                  }`}
-                                >
-                                  {statusText(effStatus)}
-                                </div>
-                                {!postOp.isComplete && (
-                                  <div className="text-[11px] text-amber-700 font-medium">
-                                    ยังไม่ได้เยี่ยมหลังผ่าตัด
-                                    {postOp.hasAnyInput
-                                      ? ` (ข้อมูลไม่ครบ ${postOp.filledCount}/${postOp.totalRequired})`
-                                      : ''}
-                                  </div>
-                                )}
+                          <div>
+                            <div
+                              className={`font-medium ${
+                                effStatus === 'post_op_completed'
+                                  ? 'text-emerald-700'
+                                  : effStatus === 'evaluated'
+                                  ? 'text-blue-800'
+                                  : 'text-amber-700'
+                              }`}
+                            >
+                              {statusText(effStatus)}
+                            </div>
+                            {!postOp.isComplete && (
+                              <div className="text-[11px] text-amber-700 font-medium">
+                                ยังไม่ได้เยี่ยมหลังผ่าตัด
+                                {postOp.hasAnyInput
+                                  ? ` (ข้อมูลไม่ครบ ${postOp.filledCount}/${postOp.totalRequired})`
+                                  : ''}
                               </div>
-                            );
-                          })()}
+                            )}
+                          </div>
                         </td>
                         <td className="py-2.5 px-4 text-right whitespace-nowrap">
                           <div className="inline-flex items-center gap-1">
@@ -829,10 +1028,14 @@ export function RegistryView({
                               type="button"
                               onClick={() => onEdit(r)}
                               title="เปิดแก้ไขใบ Pre-op ในแบบฟอร์ม"
-                              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-800 hover:bg-blue-50 rounded transition-colors"
+                              className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded transition-colors ${
+                                effStatus === 'draft'
+                                  ? 'text-white bg-blue-800 hover:bg-blue-900'
+                                  : 'text-blue-800 hover:bg-blue-50'
+                              }`}
                             >
                               <Edit3 className="w-3.5 h-3.5" />
-                              แก้ไข
+                              {effStatus === 'draft' ? 'กรอกต่อ' : 'แก้ไข'}
                             </button>
                             {onOpenPostOp && (
                               <button
@@ -892,9 +1095,14 @@ export function RegistryView({
                     const meta = isUnspecified
                       ? { label: 'ยังไม่ระบุวันที่ทำผ่าตัด', relativeTag: '' }
                       : formatThaiScheduleDate(group.date);
+                    const draftInGroup = group.items.filter(
+                      (i) => getEffectiveEvaluationStatus(i) === 'draft',
+                    ).length;
+                    const doneInGroup = group.items.length - draftInGroup;
+
                     return (
                       <React.Fragment key={group.date}>
-                        <tr className="bg-slate-50/90 border-t border-slate-200">
+                        <tr className="bg-slate-100/80 border-t border-slate-200">
                           <td colSpan={7} className="py-2 px-4">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -918,24 +1126,74 @@ export function RegistryView({
                                     · {meta.relativeTag}
                                   </span>
                                 )}
-                                <span className="text-slate-500 tabular-nums">
-                                  · {group.items.length} เคส
+                                <span className="text-slate-600 tabular-nums">
+                                  · {group.items.length} เคส (รอเยี่ยม {draftInGroup} · เยี่ยมแล้ว{' '}
+                                  {doneInGroup})
                                 </span>
                               </div>
-                              {!isUnspecified && onCreateNewForDate && (
+                              <div className="flex items-center gap-1.5">
+                                {!isUnspecified && onCreateNewForDate && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onCreateNewForDate(group.date)}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-blue-800 bg-white border border-slate-300 rounded hover:bg-blue-50 transition-colors"
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                    เพิ่มฟอร์มวันนี้
+                                  </button>
+                                )}
                                 <button
                                   type="button"
-                                  onClick={() => onCreateNewForDate(group.date)}
-                                  className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-blue-800 bg-white border border-slate-300 rounded hover:bg-blue-50 transition-colors"
+                                  onClick={() =>
+                                    exportEvaluationsCsv(
+                                      group.items,
+                                      `bangplee_or_${isUnspecified ? 'unscheduled' : group.date}`,
+                                    )
+                                  }
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors"
                                 >
-                                  <Plus className="w-3 h-3" />
-                                  เพิ่มฟอร์มวันนี้
+                                  <Download className="w-3 h-3" />
+                                  CSV วันนี้
                                 </button>
-                              )}
+                              </div>
                             </div>
                           </td>
                         </tr>
-                        {group.items.map(renderRow)}
+
+                        {showSurgeonSubgroups
+                          ? group.surgeonGroups.map((sGrp) => (
+                              <React.Fragment key={`${group.date}__${sGrp.surgeon}`}>
+                                <tr className="bg-slate-50/70 border-t border-slate-200/80">
+                                  <td colSpan={7} className="py-1.5 px-4">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <div className="flex items-center gap-1.5 text-xs">
+                                        <UserRound className="w-3.5 h-3.5 text-blue-800 shrink-0" />
+                                        <span className="font-semibold text-slate-800">
+                                          แพทย์ผ่าตัด: {sGrp.surgeon}
+                                        </span>
+                                        <span className="text-slate-500 tabular-nums">
+                                          · {sGrp.items.length} เคส
+                                        </span>
+                                      </div>
+                                      {!isUnspecified && !sGrp.isUnspecified && onCreateNewForDate && (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            onCreateNewForDate(group.date, undefined, sGrp.surgeon)
+                                          }
+                                          className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-blue-800 bg-white border border-slate-300 rounded hover:bg-blue-50 transition-colors"
+                                        >
+                                          <Plus className="w-3 h-3" />
+                                          เพิ่มเคสแพทย์นี้
+                                        </button>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                                {sGrp.items.map(renderRow)}
+                              </React.Fragment>
+                            ))
+                          : group.items.map(renderRow)}
                       </React.Fragment>
                     );
                   });
@@ -946,7 +1204,7 @@ export function RegistryView({
         )}
       </div>
 
-      {/* Inline Pre-op Sheet Preview Modal (View without leaving ทะเบียน) */}
+      {/* Inline Pre-op Sheet Preview Modal (View without leaving ทะเบียนผ่าตัด) */}
       {previewRecord && (
         <div
           role="dialog"
@@ -961,8 +1219,11 @@ export function RegistryView({
                   ใบประเมิน Pre-op: {previewRecord.patientName} (HN: {previewRecord.hn || '—'})
                 </h3>
                 <p className="text-xs text-slate-500">
-                  วันผ่าตัด: {previewRecord.dateOfOperation || 'ยังไม่ระบุ'} ·{' '}
-                  {previewRecord.operation || previewRecord.diagnosis || '—'}
+                  วันผ่าตัด:{' '}
+                  {previewRecord.dateOfOperation
+                    ? formatShortThaiDate(previewRecord.dateOfOperation)
+                    : 'ยังไม่ระบุ'}{' '}
+                  · {previewRecord.operation || previewRecord.diagnosis || '—'}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2 shrink-0">

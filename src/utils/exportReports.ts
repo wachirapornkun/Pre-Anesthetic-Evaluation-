@@ -180,6 +180,31 @@ export function exportEvaluationJson(record: PreAnestheticEvaluation) {
   URL.revokeObjectURL(url);
 }
 
+export function exportAllEvaluationsJson(
+  records: PreAnestheticEvaluation[],
+  filenamePrefix = 'bangplee_pre_op_backup',
+) {
+  const payload = {
+    app: 'Bangplee Pre-Anesthetic Evaluation',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    count: records.length,
+    records,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: 'application/json;charset=utf-8;',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `${filenamePrefix}_${dateStamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function esc(str: string): string {
   return String(str || '')
     .replace(/&/g, '&amp;')

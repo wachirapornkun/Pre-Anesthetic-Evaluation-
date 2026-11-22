@@ -1441,6 +1441,83 @@ export function getDateSearchTokens(isoDate: string): string {
     .toLowerCase();
 }
 
+const THAI_NAME_PREFIX_RE = /^(?:เด็กชาย|เด็กหญิง|นางสาว|นาย|นาง|น\.ส\.|ด\.ช\.|ด\.ญ\.)\s*/i;
+
+export function normalizeSearchCode(val: string | undefined): string {
+  return (val || '').replace(/[\s-]/g, '').toLowerCase();
+}
+
+export function stripLeadingZeros(val: string): string {
+  return val.replace(/^0+(?=\d)/, '');
+}
+
+export function matchesEvaluationSearch(
+  record: PreAnestheticEvaluation,
+  rawQuery: string,
+): boolean {
+  const trimmed = (rawQuery || '').trim().toLowerCase();
+  if (!trimmed) return true;
+
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return true;
+
+  const hnNorm = normalizeSearchCode(record.hn);
+  const hnNoZero = stripLeadingZeros(hnNorm);
+  const anNorm = normalizeSearchCode(record.an);
+  const anNoZero = stripLeadingZeros(anNorm);
+  const nameLower = (record.patientName || '').toLowerCase();
+  const nameCompact = nameLower.replace(THAI_NAME_PREFIX_RE, '').replace(/\s+/g, '');
+
+  const dateHaystack = [
+    getDateSearchTokens(record.dateOfOperation || ''),
+    getDateSearchTokens(record.dateOfVisit || ''),
+    getDateSearchTokens(record.formData?.postAnesthesia?.visitDate || ''),
+    getDateSearchTokens(record.formData?.postOpComplication?.periOpDate || ''),
+    getDateSearchTokens(record.formData?.postOpComplication?.postOpDate || ''),
+    getDateSearchTokens(record.formData?.laboratory?.cbcDate || ''),
+    getDateSearchTokens(record.formData?.laboratory?.chemDate || ''),
+    getDateSearchTokens(record.formData?.laboratory?.labDate || ''),
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const textHaystack = [
+    nameLower,
+    (record.hn || '').toLowerCase(),
+    (record.an || '').toLowerCase(),
+    (record.ward || '').toLowerCase(),
+    (record.bed || '').toLowerCase(),
+    (record.specialty || '').toLowerCase(),
+    (record.surgeon || '').toLowerCase(),
+    (record.orRoom || '').toLowerCase(),
+    (record.diagnosis || '').toLowerCase(),
+    (record.operation || '').toLowerCase(),
+    (record.formData?.history?.presentIllness || '').toLowerCase(),
+    (record.formData?.history?.medication || '').toLowerCase(),
+    (record.formData?.history?.otherUnderlying || []).join(' ').toLowerCase(),
+    (record.formData?.consult || '').toLowerCase(),
+    (record.formData?.problemList || []).join(' ').toLowerCase(),
+    dateHaystack,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return tokens.every((tok) => {
+    if (textHaystack.includes(tok)) return true;
+    const tokCode = normalizeSearchCode(tok);
+    if (tokCode) {
+      if (hnNorm.includes(tokCode) || anNorm.includes(tokCode)) return true;
+      const tokNoZero = stripLeadingZeros(tokCode);
+      if (tokNoZero && (hnNoZero.includes(tokNoZero) || anNoZero.includes(tokNoZero))) {
+        return true;
+      }
+    }
+    const tokCompact = tok.replace(THAI_NAME_PREFIX_RE, '').replace(/\s+/g, '');
+    if (tokCompact && nameCompact.includes(tokCompact)) return true;
+    return false;
+  });
+}
+
 export function hydrateEvaluationRecord(
   rawInput: unknown,
   fallbackId?: string,

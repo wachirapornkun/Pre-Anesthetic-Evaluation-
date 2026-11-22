@@ -5,9 +5,9 @@ import {
   formatShortThaiDate,
   formatThaiScheduleDate,
   formatWardWithBed,
-  getDateSearchTokens,
   getEffectiveEvaluationStatus,
   getPostOpVisitCompleteness,
+  matchesEvaluationSearch,
   PreAnestheticEvaluation,
 } from '../types/evaluation';
 
@@ -66,15 +66,23 @@ export function CaseFolderSidebar({
   }, [records, wardOptions]);
 
   const groupedFolders = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    const qNorm = q.replace(/[\s-]/g, '');
     const filtered = records
       .filter((r) => {
         if (dateFilter) {
           const opDate = (r.dateOfOperation || '').trim();
           const visitDate = (r.dateOfVisit || '').trim();
           const postOpDate = (r.formData?.postAnesthesia?.visitDate || '').trim();
-          if (opDate !== dateFilter && visitDate !== dateFilter && postOpDate !== dateFilter) {
+          const cbcDate = (r.formData?.laboratory?.cbcDate || '').trim();
+          const chemDate = (r.formData?.laboratory?.chemDate || '').trim();
+          const labDate = (r.formData?.laboratory?.labDate || '').trim();
+          if (
+            opDate !== dateFilter &&
+            visitDate !== dateFilter &&
+            postOpDate !== dateFilter &&
+            cbcDate !== dateFilter &&
+            chemDate !== dateFilter &&
+            labDate !== dateFilter
+          ) {
             return false;
           }
         }
@@ -95,20 +103,7 @@ export function CaseFolderSidebar({
         ) {
           return false;
         }
-        if (!q) return true;
-        return (
-          (r.patientName || '').toLowerCase().includes(q) ||
-          (r.hn || '').toLowerCase().includes(q) ||
-          (r.hn || '').replace(/[\s-]/g, '').toLowerCase().includes(qNorm) ||
-          (r.an || '').toLowerCase().includes(q) ||
-          (r.surgeon || '').toLowerCase().includes(q) ||
-          (r.ward || '').toLowerCase().includes(q) ||
-          (r.bed || '').toLowerCase().includes(q) ||
-          (r.operation || '').toLowerCase().includes(q) ||
-          (r.diagnosis || '').toLowerCase().includes(q) ||
-          getDateSearchTokens(r.dateOfOperation || '').includes(q) ||
-          getDateSearchTokens(r.dateOfVisit || '').includes(q)
-        );
+        return matchesEvaluationSearch(r, searchQuery);
       })
       .sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
 

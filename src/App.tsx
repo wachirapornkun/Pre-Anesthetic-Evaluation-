@@ -27,6 +27,7 @@ import {
   Printer,
   RefreshCw,
   Save,
+  Search,
   UploadCloud,
   X,
 } from 'lucide-react';
@@ -95,6 +96,7 @@ interface NewFormScheduleDraft {
 }
 
 const LOCAL_RECORDS_STORAGE_KEY = 'bph_local_evaluations_v1';
+const ACTIVE_DRAFT_STORAGE_KEY = 'bph_active_draft_v1';
 
 function loadSavedLocalRecords(): PreAnestheticEvaluation[] {
   try {
@@ -118,6 +120,22 @@ function loadSavedLocalRecords(): PreAnestheticEvaluation[] {
   }
 }
 
+function loadActiveDraftOrEmpty(): PreAnestheticEvaluation {
+  try {
+    const raw = localStorage.getItem(ACTIVE_DRAFT_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const hydrated = hydrateEvaluationRecord(parsed, undefined, 'local');
+      if (hydrated && !isSampleEvaluationRecord(hydrated)) {
+        return hydrated;
+      }
+    }
+  } catch {
+    // ignore storage error
+  }
+  return createEmptyEvaluation('local');
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('form');
   const [printSheetMode, setPrintSheetMode] = useState<PrintSheetMode>('both');
@@ -130,8 +148,9 @@ export default function App() {
   const [isLoadingRecords, setIsLoadingRecords] = useState(true);
   const [isPullingCloud, setIsPullingCloud] = useState(false);
   const [showFolderSidebar, setShowFolderSidebar] = useState(true);
+  const [registryFocusNonce, setRegistryFocusNonce] = useState(0);
   const [currentForm, setCurrentForm] = useState<PreAnestheticEvaluation>(() =>
-    createEmptyEvaluation('local'),
+    loadActiveDraftOrEmpty(),
   );
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncingLocal, setIsSyncingLocal] = useState(false);
@@ -141,6 +160,7 @@ export default function App() {
   const purgedSampleIdsRef = useRef<Set<string>>(new Set());
   const knownCloudIdsRef = useRef<Set<string>>(new Set());
   const deletedIdsRef = useRef<Set<string>>(new Set());
+  const autoSyncedUidRef = useRef<string | null>(null);
   const [isNewFormModalOpen, setIsNewFormModalOpen] = useState(false);
   const [newFormDraft, setNewFormDraft] = useState<NewFormScheduleDraft>(() => ({
     hn: '',
@@ -312,6 +332,26 @@ export default function App() {
       // ignore storage quota errors
     }
   }, [localRecords]);
+
+  // Auto-save active form draft so unsaved work is never lost on refresh
+  useEffect(() => {
+    try {
+      const hasDraftInput = Boolean(
+        currentForm.patientName.trim() ||
+          currentForm.hn.trim() ||
+          currentForm.an.trim() ||
+          currentForm.diagnosis.trim() ||
+          currentForm.operation.trim(),
+      );
+      if (hasDraftInput) {
+        localStorage.setItem(ACTIVE_DRAFT_STORAGE_KEY, JSON.stringify(currentForm));
+      } else {
+        localStorage.removeItem(ACTIVE_DRAFT_STORAGE_KEY);
+      }
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [currentForm]);
 
   // Listen to Firebase Auth state
   useEffect(() => {
@@ -990,6 +1030,7 @@ export default function App() {
     age: sanitized.age,
     gender: sanitized.gender ?? '',
     ward: sanitized.ward,
+    bed: sanitized.bed ?? '',
     specialty: sanitized.specialty,
     dateOfVisit: sanitized.dateOfVisit,
     dateOfOperation: sanitized.dateOfOperation,
@@ -1124,27 +1165,64 @@ export default function App() {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
-      const rawList = Array.isArray(parsed) ? parsed : [parsed];
+      const rawList = Array.isArray(parsed)
+        ? parsed
+        : parsed && typeof parsed === 'object' && Array.isArray((parsed as { records?: unknown }).records)
+        ? ((parsed as { records: unknown[] }).records)
+        : [parsed];
       let importedCount = 0;
+      let updatedCount = 0;
+
+      const existingById = new Map(records.map((r) => [r.id, r]));
+      const existingBySignature = new Map<string, PreAnestheticEvaluation>();
+      records.forEach((r) => {
+        const hnKey = (r.hn || '').replace(/[\s-]/g, '').toLowerCase();
+        const opKey = (r.dateOfOperation || '').trim();
+        const nameKey = (r.patientName || '').trim().toLowerCase();
+        if (hnKey && opKey) {
+          existingBySignature.set(`hn:${hnKey}|op:${opKey}`, r);
+        } else if (nameKey && opKey) {
+          existingBySignature.set(`name:${nameKey}|op:${opKey}`, r);
+        }
+      });
 
       for (const item of rawList) {
+        const rawObj = item && typeof item === 'object' ? (item as Partial<PreAnestheticEvaluation>) : null;
+        const incomingId = typeof rawObj?.id === 'string' && rawObj.id.trim() ? rawObj.id.trim() : '';
+        const incomingHn = typeof rawObj?.hn === 'string' ? rawObj.hn.replace(/[\s-]/g, '').toLowerCase() : '';
+        const incomingOp = typeof rawObj?.dateOfOperation === 'string' ? rawObj.dateOfOperation.trim() : '';
+        const incomingName = typeof rawObj?.patientName === 'string' ? rawObj.patientName.trim().toLowerCase() : '';
+
+        const matchedExisting =
+          (incomingId && existingById.get(incomingId)) ||
+          (incomingHn && incomingOp ? existingBySignature.get(`hn:${incomingHn}|op:${incomingOp}`) : undefined) ||
+          (incomingName && incomingOp ? existingBySignature.get(`name:${incomingName}|op:${incomingOp}`) : undefined);
+
+        const targetId = matchedExisting?.id || incomingId || generateEvaluationId();
         const hydrated = hydrateEvaluationRecord(
           item,
-          generateEvaluationId(),
+          targetId,
           user?.uid || 'local',
         );
         if (!hydrated) continue;
+        hydrated.id = targetId;
         if (!hydrated.patientName.trim()) {
           hydrated.patientName = hydrated.hn ? `ผู้ป่วย HN ${hydrated.hn}` : 'ผู้ป่วย (นำเข้า)';
         }
         const saved = await saveEvaluationRecord(hydrated, { silentSuccess: true });
-        if (saved) importedCount += 1;
+        if (saved) {
+          if (matchedExisting) updatedCount += 1;
+          else importedCount += 1;
+        }
       }
 
-      if (importedCount > 0) {
+      const totalProcessed = importedCount + updatedCount;
+      if (totalProcessed > 0) {
         showNotice(
           'success',
-          `นำเข้าใบ Pre-op เข้าทะเบียนเรียบร้อยแล้ว (${importedCount} รายการ)`,
+          `นำเข้าข้อมูลใบ Pre-op เรียบร้อย (เพิ่มใหม่ ${importedCount} ราย${
+            updatedCount > 0 ? ` · อัปเดตข้อมูลเดิม ${updatedCount} ราย` : ''
+          })`,
         );
       } else {
         showNotice('error', 'ไม่พบข้อมูลใบ Pre-op ที่ถูกต้องในไฟล์ JSON นี้');
@@ -1229,6 +1307,19 @@ export default function App() {
       setIsSyncingLocal(false);
     }
   };
+
+  // Automatically upload local-only records to Cloud once after sign-in finishes loading
+  useEffect(() => {
+    if (!authReady || !user || isLoadingRecords || isSyncingLocal) return;
+    if (unsyncedLocalRecords.length === 0) {
+      autoSyncedUidRef.current = user.uid;
+      return;
+    }
+    if (autoSyncedUidRef.current === user.uid) return;
+    autoSyncedUidRef.current = user.uid;
+    void handleSyncLocalToCloud();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authReady, user, isLoadingRecords, unsyncedLocalRecords.length]);
 
   const countCasesOnDate = (targetDate: string, targetRoom?: string): number =>
     records.filter(
@@ -1696,6 +1787,18 @@ export default function App() {
 
             <button
               type="button"
+              onClick={() => {
+                setActiveTab('registry');
+                setRegistryFocusNonce((n) => n + 1);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors whitespace-nowrap shrink-0"
+            >
+              <Search className="w-3.5 h-3.5 text-blue-800" />
+              ค้นหาใบ Pre-op เก่า
+            </button>
+
+            <button
+              type="button"
               onClick={handleCreateNew}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-800 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0"
             >
@@ -1885,7 +1988,11 @@ export default function App() {
             surgeonOptions={surgeonOptions}
             isLoading={isLoadingRecords && records.length === 0}
             userEmail={user?.email ?? null}
+            cloudCount={cloudRecords.length}
+            unsyncedLocalCount={unsyncedLocalRecords.length}
+            isSyncingLocal={isSyncingLocal}
             isPullingCloud={isPullingCloud || (Boolean(user) && isLoadingRecords)}
+            focusSearchNonce={registryFocusNonce}
             unsavedCurrentForm={
               !savedIdSet.has(currentForm.id) &&
               Boolean(currentForm.patientName.trim() || currentForm.hn.trim())
@@ -1894,6 +2001,7 @@ export default function App() {
             }
             onSaveCurrentForm={handleSave}
             onSignIn={handleSignIn}
+            onSyncLocalToCloud={() => void handleSyncLocalToCloud()}
             onPullFromCloud={() => void handlePullFromCloud()}
             onImportJsonFile={handleImportJsonFile}
             onEdit={handleEditRecord}

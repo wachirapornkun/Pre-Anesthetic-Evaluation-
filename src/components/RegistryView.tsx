@@ -1,9 +1,11 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Archive,
   Calendar,
   ClipboardCheck,
   CloudDownload,
   Copy,
+  Database,
   Download,
   Edit3,
   Eye,
@@ -17,6 +19,7 @@ import {
   Search,
   Trash2,
   Upload,
+  UploadCloud,
   UserRound,
   X,
 } from 'lucide-react';
@@ -29,16 +32,20 @@ import {
   formatShortThaiDate,
   formatThaiScheduleDate,
   formatWardWithBed,
-  getDateSearchTokens,
   getEffectiveEvaluationStatus,
   getEffectiveScheduleType,
   getPostOpVisitCompleteness,
   getTodayIsoDate,
   isPreOpVisited,
+  matchesEvaluationSearch,
   OR_ROOM_OPTIONS,
   PreAnestheticEvaluation,
 } from '../types/evaluation';
-import { exportEvaluationsCsv, exportSingleHtmlReport } from '../utils/exportReports';
+import {
+  exportAllEvaluationsJson,
+  exportEvaluationsCsv,
+  exportSingleHtmlReport,
+} from '../utils/exportReports';
 import { A4PrintSheet } from './A4PrintSheet';
 
 function getUpdatedMillis(ts: unknown): number {
@@ -57,10 +64,15 @@ interface RegistryViewProps {
   surgeonOptions: string[];
   isLoading?: boolean;
   userEmail?: string | null;
+  cloudCount?: number;
+  unsyncedLocalCount?: number;
+  isSyncingLocal?: boolean;
   isPullingCloud?: boolean;
+  focusSearchNonce?: number;
   unsavedCurrentForm?: PreAnestheticEvaluation | null;
   onSaveCurrentForm?: () => void;
   onSignIn?: () => void;
+  onSyncLocalToCloud?: () => void;
   onPullFromCloud?: () => void;
   onImportJsonFile?: (file: File) => void;
   onEdit: (record: PreAnestheticEvaluation) => void;
@@ -75,10 +87,6 @@ interface RegistryViewProps {
 type DateScope = 'all' | 'upcoming' | 'today' | 'tomorrow' | 'past';
 type SortGroupMode = 'op_surgeon_desc' | 'op_surgeon_asc' | 'op_or_asc' | 'op_desc' | 'updated';
 
-function normalizeCode(val: string | undefined): string {
-  return (val || '').replace(/[\s-]/g, '').toLowerCase();
-}
-
 export function RegistryView({
   records,
   activeId,
@@ -86,10 +94,15 @@ export function RegistryView({
   surgeonOptions,
   isLoading = false,
   userEmail,
+  cloudCount = 0,
+  unsyncedLocalCount = 0,
+  isSyncingLocal = false,
   isPullingCloud = false,
+  focusSearchNonce = 0,
   unsavedCurrentForm,
   onSaveCurrentForm,
   onSignIn,
+  onSyncLocalToCloud,
   onPullFromCloud,
   onImportJsonFile,
   onEdit,
@@ -104,7 +117,7 @@ export function RegistryView({
   const tomorrow = addDaysToIsoDate(today, 1);
 
   const jsonInputRef = useRef<HTMLInputElement | null>(null);
-  const [hnQuery, setHnQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [dateScope, setDateScope] = useState<DateScope>('all');
   const [statusFilter, setStatusFilter] = useState<
@@ -124,9 +137,15 @@ export function RegistryView({
   );
   const [isDeleting, setIsDeleting] = useState(false);
 
+  useEffect(() => {
+    if (focusSearchNonce > 0) {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    }
+  }, [focusSearchNonce]);
+
   const hasActiveSearchOrFilter = Boolean(
-    hnQuery.trim() ||
-      searchQuery.trim() ||
+    searchQuery.trim() ||
       dateScope !== 'all' ||
       dateFrom ||
       dateTo ||
@@ -138,7 +157,6 @@ export function RegistryView({
   );
 
   const resetAllFilters = () => {
-    setHnQuery('');
     setSearchQuery('');
     setDateScope('all');
     setDateField('all');
@@ -218,8 +236,6 @@ export function RegistryView({
   }, [records, today, tomorrow]);
 
   const filtered = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    const normHn = normalizeCode(hnQuery);
     const list = records.filter((r) => {
       const opDate = (r.dateOfOperation || '').trim();
       if (dateScope === 'upcoming' && (!opDate || opDate < today)) return false;
@@ -253,12 +269,13 @@ export function RegistryView({
       if (wardFilter !== 'ALL' && (r.ward || '').trim() !== wardFilter) return false;
       if (roomFilter !== 'ALL' && (r.orRoom || '').trim() !== roomFilter) return false;
 
-      if (normHn) {
-        if (!normalizeCode(r.hn).includes(normHn)) return false;
-      }
-
       if (dateFrom || dateTo) {
         const visitDate = (r.dateOfVisit || '').trim();
+        const labDates = [
+          (r.formData?.laboratory?.cbcDate || '').trim(),
+          (r.formData?.laboratory?.chemDate || '').trim(),
+          (r.formData?.laboratory?.labDate || '').trim(),
+        ].filter(Boolean);
         const postOpDates = [
           (r.formData?.postAnesthesia?.visitDate || '').trim(),
           (r.formData?.postOpComplication?.postOpDate || '').trim(),
@@ -272,7 +289,7 @@ export function RegistryView({
             ? [visitDate].filter(Boolean)
             : dateField === 'post_op'
             ? postOpDates
-            : [opDate, visitDate, ...postOpDates].filter(Boolean);
+            : [opDate, visitDate, ...postOpDates, ...labDates].filter(Boolean);
 
         if (candidateDates.length === 0) return false;
 
@@ -289,22 +306,7 @@ export function RegistryView({
         if (!matchesDate) return false;
       }
 
-      if (!q) return true;
-      return (
-        (r.patientName || '').toLowerCase().includes(q) ||
-        (r.hn || '').toLowerCase().includes(q) ||
-        normalizeCode(r.hn).includes(normalizeCode(q)) ||
-        (r.an || '').toLowerCase().includes(q) ||
-        (r.ward || '').toLowerCase().includes(q) ||
-        (r.bed || '').toLowerCase().includes(q) ||
-        (r.surgeon || '').toLowerCase().includes(q) ||
-        (r.orRoom || '').toLowerCase().includes(q) ||
-        (r.diagnosis || '').toLowerCase().includes(q) ||
-        (r.operation || '').toLowerCase().includes(q) ||
-        getDateSearchTokens(r.dateOfOperation || '').includes(q) ||
-        getDateSearchTokens(r.dateOfVisit || '').includes(q) ||
-        getDateSearchTokens(r.formData?.postAnesthesia?.visitDate || '').includes(q)
-      );
+      return matchesEvaluationSearch(r, searchQuery);
     });
 
     if (sortMode === 'op_surgeon_desc') {
@@ -325,7 +327,6 @@ export function RegistryView({
     dateScope,
     today,
     tomorrow,
-    hnQuery,
     searchQuery,
     statusFilter,
     scheduleFilter,
@@ -397,27 +398,108 @@ export function RegistryView({
 
   return (
     <div className="space-y-4">
-      {/* Cloud Sync / Recovery Banner when not signed in */}
-      {!userEmail && onSignIn && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      {/* Storage & Backup Archive Bar */}
+      <div
+        className={`rounded-xl border px-4 py-3 flex flex-wrap items-center justify-between gap-3 ${
+          userEmail
+            ? 'bg-emerald-50/60 border-emerald-200'
+            : 'bg-blue-50 border-blue-200'
+        }`}
+      >
+        <div className="flex items-start gap-2.5 min-w-0">
+          <Database
+            className={`w-4 h-4 mt-0.5 shrink-0 ${
+              userEmail ? 'text-emerald-800' : 'text-blue-800'
+            }`}
+          />
           <div className="min-w-0">
-            <div className="text-xs font-bold text-blue-950">
-              ดึงใบ Pre-op ที่เคยบันทึกไว้จากฐานข้อมูล Cloud
+            <div className="text-xs font-bold text-slate-900">
+              {userEmail
+                ? `แหล่งจัดเก็บข้อมูล: ฐานข้อมูล Cloud (${userEmail}) · ${cloudCount} ราย${
+                    unsyncedLocalCount > 0 ? ` · ในเครื่องรอซิงค์ ${unsyncedLocalCount} ราย` : ''
+                  }`
+                : `แหล่งจัดเก็บปัจจุบัน: เฉพาะในเครื่องนี้ (${records.length} ราย) — ยังไม่ได้เชื่อมต่อ Cloud`}
             </div>
-            <p className="text-xs text-blue-900/80 mt-0.5">
-              หากเคยสร้างและบันทึกใบ Pre-op ไว้แล้ว (เช่น วันที่ 25/11/69) กรุณาเข้าสู่ระบบด้วยบัญชี Google เพื่อดึงข้อมูลทั้งหมดมาแสดงในทะเบียนผ่าตัดนี้
+            <p className="text-xs text-slate-600 mt-0.5">
+              {userEmail
+                ? 'ใบ Pre-op ทุกใบถูกเก็บถาวรบน Cloud ผูกกับบัญชี Google นี้ สามารถค้นหาย้อนหลังได้ทุกเครื่อง และดาวน์โหลดไฟล์สำรอง (.json) เก็บไว้ในคอมพิวเตอร์/Google Drive เพิ่มเติมได้'
+                : 'หากต้องการค้นหาข้อมูลเก่าข้ามเครื่องหรือเปิดจากลิงก์อื่น แนะนำให้เข้าสู่ระบบ Google เพื่อจัดเก็บบน Cloud ถาวร หรือดาวน์โหลดไฟล์สำรอง (.json) เก็บไว้'}
             </p>
           </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {!userEmail && onSignIn && (
+            <button
+              type="button"
+              onClick={onSignIn}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-800 rounded-lg hover:bg-blue-900 transition-colors whitespace-nowrap"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              เข้าสู่ระบบ Google (เก็บบน Cloud)
+            </button>
+          )}
+          {userEmail && unsyncedLocalCount > 0 && onSyncLocalToCloud && (
+            <button
+              type="button"
+              disabled={isSyncingLocal}
+              onClick={onSyncLocalToCloud}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-700 rounded-lg hover:bg-emerald-800 disabled:opacity-60 transition-colors whitespace-nowrap"
+            >
+              <UploadCloud className="w-3.5 h-3.5" />
+              {isSyncingLocal
+                ? 'กำลังซิงค์...'
+                : `ซิงค์ขึ้น Cloud (${unsyncedLocalCount} ราย)`}
+            </button>
+          )}
+          {userEmail && onPullFromCloud && (
+            <button
+              type="button"
+              onClick={onPullFromCloud}
+              disabled={isPullingCloud}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-950 bg-white border border-emerald-300 rounded-lg hover:bg-emerald-50 disabled:opacity-60 transition-colors whitespace-nowrap"
+            >
+              <CloudDownload className="w-3.5 h-3.5" />
+              {isPullingCloud ? 'กำลังดึงข้อมูล...' : 'ดึงข้อมูลล่าสุดจาก Cloud'}
+            </button>
+          )}
           <button
             type="button"
-            onClick={onSignIn}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-blue-800 rounded-lg hover:bg-blue-900 transition-colors whitespace-nowrap shrink-0"
+            onClick={() => exportAllEvaluationsJson(records)}
+            disabled={records.length === 0}
+            title="ดาวน์โหลดใบ Pre-op และ Post-op ทั้งหมดเก็บเป็นไฟล์สำรอง (.json)"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-800 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors whitespace-nowrap"
           >
-            <LogIn className="w-3.5 h-3.5" />
-            เข้าสู่ระบบ Google เพื่อดึงข้อมูล
+            <Archive className="w-3.5 h-3.5 text-blue-800" />
+            สำรองข้อมูลทั้งหมด (.json)
           </button>
+          {onImportJsonFile && (
+            <>
+              <input
+                ref={jsonInputRef}
+                type="file"
+                accept=".json,application/json"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) {
+                    onImportJsonFile(f);
+                  }
+                  e.target.value = '';
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => jsonInputRef.current?.click()}
+                title="นำเข้าใบ Pre-op เดี่ยว หรือไฟล์สำรองทั้งหมด (.json) กลับเข้าทะเบียน"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-800 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap"
+              >
+                <Upload className="w-3.5 h-3.5 text-blue-800" />
+                นำเข้าไฟล์สำรอง (.json)
+              </button>
+            </>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Unsaved open Pre-op form reminder */}
       {unsavedCurrentForm && onSaveCurrentForm && (
@@ -536,26 +618,29 @@ export function RegistryView({
 
       {/* Search & Controls Toolbar */}
       <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-        {/* Row 1: Primary HN & Date Lookup + Main Actions */}
+        {/* Row 1: Unified Quick Search + Date Lookup + Primary Actions */}
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="flex flex-wrap items-end gap-2.5 flex-1 min-w-[260px]">
-            {/* Dedicated HN Search */}
-            <label className="flex flex-col gap-1 w-40 sm:w-44">
-              <span className="text-[11px] font-semibold text-slate-600">สืบค้นจาก HN</span>
+            {/* Unified Smart Search (HN / AN / Name / Date BE-CE / Doctor / Ward / Operation) */}
+            <label className="flex flex-col gap-1 flex-1 min-w-[240px] max-w-md">
+              <span className="text-[11px] font-semibold text-slate-700">
+                ค้นหาใบ Pre-op เก่า (HN, AN, ชื่อ-สกุล, วันที่ พ.ศ. เช่น 25/11/69, แพทย์, หัตถการ)
+              </span>
               <div className="relative">
                 <Search className="w-3.5 h-3.5 text-blue-800 absolute left-2.5 top-1/2 -translate-y-1/2" />
                 <input
+                  ref={searchInputRef}
                   type="text"
-                  value={hnQuery}
-                  onChange={(e) => setHnQuery(e.target.value)}
-                  placeholder="พิมพ์เลข HN..."
-                  className="w-full pl-8 pr-7 py-1.5 text-xs font-mono tabular-nums bg-white border border-slate-300 rounded-lg text-slate-900 placeholder:font-sans placeholder:text-slate-400 focus:outline-none focus:border-blue-800 focus:ring-1 focus:ring-blue-800"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="พิมพ์เลข HN (ไม่ต้องใส่ 0 นำหน้าก็ได้), ชื่อผู้ป่วย หรือวันที่ เช่น 25/11/69..."
+                  className="w-full pl-8 pr-7 py-1.5 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-800 focus:ring-1 focus:ring-blue-800"
                 />
-                {hnQuery && (
+                {searchQuery && (
                   <button
                     type="button"
-                    onClick={() => setHnQuery('')}
-                    aria-label="ล้างเลข HN"
+                    onClick={() => setSearchQuery('')}
+                    aria-label="ล้างคำค้นหา"
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
                   >
                     <X className="w-3.5 h-3.5" />
@@ -566,7 +651,7 @@ export function RegistryView({
 
             {/* Date Field Scope */}
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-semibold text-slate-600">ค้นหาตามวันที่</span>
+              <span className="text-[11px] font-semibold text-slate-600">กรองตามวันที่</span>
               <select
                 aria-label="ประเภทวันที่ที่ต้องการค้นหา"
                 value={dateField}
@@ -575,7 +660,7 @@ export function RegistryView({
                 }
                 className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
               >
-                <option value="all">ทุกวันที่ (ผ่าตัด / เยี่ยม)</option>
+                <option value="all">ทุกวันที่ (ผ่าตัด / เยี่ยม / Lab)</option>
                 <option value="operation">วันที่ทำผ่าตัด</option>
                 <option value="visit">วันที่เยี่ยม Pre-op</option>
                 <option value="post_op">วันที่เยี่ยม Post-op</option>
@@ -585,7 +670,8 @@ export function RegistryView({
             {/* Single Date or Date Range Start */}
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-semibold text-slate-600">
-                {dateTo ? 'ตั้งแต่วันที่' : 'วันที่'}
+                {dateTo ? 'ตั้งแต่วันที่' : 'เลือกวันที่'}
+                {dateFrom ? ` (${formatShortThaiDate(dateFrom)})` : ''}
               </span>
               <input
                 type="date"
@@ -601,7 +687,9 @@ export function RegistryView({
 
             {/* Optional Range End */}
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium text-slate-500">ถึงวันที่ (ไม่บังคับ)</span>
+              <span className="text-[11px] font-medium text-slate-500">
+                ถึงวันที่ (ไม่บังคับ){dateTo ? ` (${formatShortThaiDate(dateTo)})` : ''}
+              </span>
               <input
                 type="date"
                 aria-label="เลือกวันที่สิ้นสุด"
@@ -659,42 +747,6 @@ export function RegistryView({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {userEmail && onPullFromCloud && (
-              <button
-                type="button"
-                onClick={onPullFromCloud}
-                disabled={isPullingCloud}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-900 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-60 transition-colors whitespace-nowrap shrink-0"
-              >
-                <CloudDownload className="w-3.5 h-3.5" />
-                {isPullingCloud ? 'กำลังดึงข้อมูล...' : 'ดึงข้อมูลจาก Cloud'}
-              </button>
-            )}
-            {onImportJsonFile && (
-              <>
-                <input
-                  ref={jsonInputRef}
-                  type="file"
-                  accept=".json,application/json"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) {
-                      onImportJsonFile(f);
-                    }
-                    e.target.value = '';
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => jsonInputRef.current?.click()}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0"
-                >
-                  <Upload className="w-3.5 h-3.5 text-blue-800" />
-                  นำเข้า JSON
-                </button>
-              </>
-            )}
             <button
               type="button"
               onClick={() => exportEvaluationsCsv(filtered)}
@@ -725,29 +777,9 @@ export function RegistryView({
           </div>
         </div>
 
-        {/* Row 2: General Keyword + Status / Case Type / Surgeon / Ward / OR Room / Sort */}
+        {/* Row 2: Status / Case Type / Surgeon / Ward / OR Room / Sort */}
         <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[240px]">
-            <div className="relative flex-1 min-w-[190px] max-w-xs">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="ค้นหา ชื่อ, วันที่ (เช่น 25/11/69), AN, หัตถการ..."
-                className="w-full pl-8 pr-7 py-1.5 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-blue-800"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  aria-label="ล้างคำค้นหา"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
 
             <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg overflow-x-auto">
               {(

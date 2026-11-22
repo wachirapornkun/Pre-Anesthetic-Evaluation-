@@ -134,7 +134,7 @@
         },
         "formData": {
           "type": "object",
-          "description": "Structured clinical sections (history including DM/HT/DLP/CKD/Heart underlying diseases with per-disease detail fields and general underlyingDetail, medication, drinking/smoking/drug addiction details with quit duration, physicalExam including oxygen/ventilator support, per-tooth missingTeeth/looseTeeth markings, and 2.2 airway detail fields, investigation, laboratory including labDate, cbcDate, chemDate, Anti-HIV negative/positive, Lactate, Trop I, dynamic customLabs list, bloodGroup A/B/AB/O and bloodRh positive/negative, blood component T&S, no_blood/ไม่มีจองเลือด, and readiness status/detail, premedication, consultTypes (none/med/cardio/neuro/chest/nephro/other) and consult detail, problemList, anestheticPlan including GA, RA, and optional MAC macSelected/macDetail, preparationOrders, postAnesthesia, and optional postOpComplication ANE-FM-006-01 Peri-op/Post-op complication checklist, outcomes, incident report, severity A-I, administration errors, remark, and recorder signatures)"
+          "description": "Structured clinical sections (history including DM/HT/DLP/CKD/Heart underlying diseases with per-disease detail fields and general underlyingDetail, medication, drinking/smoking/drug addiction details with quit duration, physicalExam including oxygen/ventilator support, per-tooth missingTeeth/looseTeeth markings, and 2.2 airway detail fields, investigation, laboratory including labDate, cbcDate, chemDate, Anti-HIV negative/positive, HBsAg negative/positive, Lactate, Trop I, TFT (ft3, ft4, tsh), Blood Gas (bgType ABG/VBG, bgPh, bgPco2, bgPo2, bgHco3, bgBe, bgSao2, bgFio2), dynamic customLabs list, bloodGroup A/B/AB/O and bloodRh positive/negative, blood component T&S, PRC, FFP, Plt, Cryoprecipitate (prepCryo), no_blood/ไม่มีจองเลือด, and readiness status/detail, premedication, consultTypes (none/med/cardio/neuro/chest/nephro/other) and consult detail, problemList, anestheticPlan including GA, RA, and optional MAC macSelected/macDetail, preparationOrders, postAnesthesia, optional postOpComplication ANE-FM-006-01 Peri-op/Post-op complication checklist/outcomes/severity/remark/recorders, optional surgeryPostponement tracking postponed surgery date and clinical reasons, and optional preOpNotVisited tracking draft pre-op not-visited status and reasons)"
         },
         "createdAt": {
           "type": "string",
@@ -414,7 +414,7 @@
       "schema": {
         "$ref": "#/entities/PreAnestheticEvaluation"
       },
-      "description": "Clinician-owned pre-anesthetic evaluation records."
+      "description": "Shared department pre-anesthetic & post-op evaluation records readable and collaboratively editable by all verified clinicians, with immutable creator provenance (ownerId)."
     },
     "/medicationCatalogs/{catalogId}": {
       "schema": {

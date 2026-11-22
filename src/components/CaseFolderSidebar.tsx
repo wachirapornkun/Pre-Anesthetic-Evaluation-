@@ -10,6 +10,7 @@ import {
   matchesEvaluationSearch,
   PreAnestheticEvaluation,
 } from '../types/evaluation';
+import { ThaiDateInput } from './ThaiDateInput';
 
 interface CaseFolderSidebarProps {
   records: PreAnestheticEvaluation[];
@@ -264,13 +265,14 @@ export function CaseFolderSidebar({
             )}
           </div>
           <div className="flex items-center gap-1">
-            <input
-              type="date"
-              aria-label="สืบค้นตามวันที่"
-              title="สืบค้นตามวันที่ผ่าตัดหรือวันที่เยี่ยม"
+            <ThaiDateInput
+              ariaLabel="สืบค้นตามวันที่ (พ.ศ.)"
+              title="สืบค้นตามวันที่ผ่าตัดหรือวันที่เยี่ยม (พ.ศ.)"
               value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value)}
-              className="flex-1 min-w-0 bg-white border border-slate-300 rounded-md px-2 py-1 text-[11px] font-mono tabular-nums text-slate-800 focus:outline-none focus:border-blue-800"
+              onChange={(next) => setDateFilter(next)}
+              placeholder="วันที่ พ.ศ. (วว/ดด/ปปปป)"
+              wrapperClassName="flex-1 min-w-0"
+              className="w-full bg-white border border-slate-300 rounded-md px-2 py-1 text-[11px] font-mono tabular-nums text-slate-800 focus:outline-none focus:border-blue-800"
             />
             {dateFilter && (
               <button

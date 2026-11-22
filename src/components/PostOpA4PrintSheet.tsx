@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   createEmptyPostOpComplication,
+  formatThaiDateBE,
   formatWardWithBed,
   POST_OP_ADMIN_ERROR_OPTIONS,
   POST_OP_INCIDENT_OPTIONS,
@@ -106,7 +107,7 @@ export function PostOpA4PrintSheet({
         </span>
         <span>
           <strong>Date of Op:</strong>{' '}
-          <span className="font-mono">{evaluation.dateOfOperation || '__________'}</span>
+          <span className="font-mono">{formatThaiDateBE(evaluation.dateOfOperation) || '__________'}</span>
         </span>
       </div>
 
@@ -241,7 +242,7 @@ export function PostOpA4PrintSheet({
                   <strong>{pc.periOpRecorder || '_________________'}</strong>
                 </span>
                 <span>
-                  วันที่ <strong className="font-mono">{pc.periOpDate || '________'}</strong> เวลา{' '}
+                  วันที่ <strong className="font-mono">{formatThaiDateBE(pc.periOpDate) || '________'}</strong> เวลา{' '}
                   <strong className="font-mono">{pc.periOpTime || '______'}</strong>
                 </span>
               </div>
@@ -251,7 +252,7 @@ export function PostOpA4PrintSheet({
                   <strong>{pc.postOpRecorder || '_________________'}</strong>
                 </span>
                 <span>
-                  วันที่ <strong className="font-mono">{pc.postOpDate || '________'}</strong> เวลา{' '}
+                  วันที่ <strong className="font-mono">{formatThaiDateBE(pc.postOpDate) || '________'}</strong> เวลา{' '}
                   <strong className="font-mono">{pc.postOpTime || '______'}</strong>
                 </span>
               </div>
@@ -267,7 +268,7 @@ export function PostOpA4PrintSheet({
             </span>
             <span>
               Summarized by: <strong>{pa.summarizedBy || '________________'}</strong> &nbsp; date:{' '}
-              <strong className="font-mono">{pa.summarizedDate || '________'}</strong>
+              <strong className="font-mono">{formatThaiDateBE(pa.summarizedDate) || '________'}</strong>
             </span>
           </div>
           <div className="font-mono">
@@ -285,7 +286,7 @@ export function PostOpA4PrintSheet({
             </span>
             <span>
               visit by: <strong>{pa.visitBy || '________________'}</strong> &nbsp; date:{' '}
-              <strong className="font-mono">{pa.visitDate || '________'}</strong>
+              <strong className="font-mono">{formatThaiDateBE(pa.visitDate) || '________'}</strong>
             </span>
           </div>
         </div>

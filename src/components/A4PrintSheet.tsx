@@ -1,16 +1,21 @@
 import React from 'react';
 import {
   BLOOD_PREP_STATUS_OPTIONS,
+  computeBloodGasPfRatio,
   CONSULT_TYPE_OPTIONS,
   formatBloodGroup,
   formatDrinkingDetail,
   formatDrugAddictionDetail,
   formatOxygenSupportSummary,
+  formatPostponementReasons,
+  formatPreOpNotVisitedReasons,
   formatShortThaiDate,
   formatSmokingDetail,
+  formatThaiDateBE,
   formatToothMarksSummary,
   formatWardWithBed,
   getMedicationLines,
+  hasBloodGasValues,
   PreAnestheticEvaluation,
 } from '../types/evaluation';
 import {
@@ -92,7 +97,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
               สาขา: <strong>{evaluation.specialty || '________'}</strong>
             </span>
             <span>
-              Date of visit: <strong className="font-mono">{evaluation.dateOfVisit || '________'}</strong>
+              Date of visit: <strong className="font-mono">{formatThaiDateBE(evaluation.dateOfVisit) || '________'}</strong>
             </span>
           </div>
           <div className="flex flex-wrap gap-x-3 gap-y-0.5">
@@ -106,7 +111,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
               Surgeon: <strong>{evaluation.surgeon || '____________________'}</strong>
             </span>
             <span>
-              Date of operation: <strong className="font-mono">{evaluation.dateOfOperation || '________'}</strong>
+              Date of operation: <strong className="font-mono">{formatThaiDateBE(evaluation.dateOfOperation) || '________'}</strong>
             </span>
             <span>
               Time: <strong className="font-mono">{evaluation.operationTime || '______'}</strong>
@@ -117,6 +122,26 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
               </span>
             )}
           </div>
+          {fd.surgeryPostponement?.isPostponed && (
+            <div className="text-[10px] text-amber-950 bg-amber-50 border border-amber-300 px-1.5 py-0.5 rounded-xs">
+              <strong>เลื่อนวันผ่าตัด:</strong>{' '}
+              {fd.surgeryPostponement.originalDateOfOperation
+                ? `เดิม ${formatThaiDateBE(fd.surgeryPostponement.originalDateOfOperation)}`
+                : ''}
+              {fd.surgeryPostponement.postponedToDate
+                ? ` → ใหม่ ${formatThaiDateBE(fd.surgeryPostponement.postponedToDate)}`
+                : ' → ยังไม่ระบุวันใหม่'}
+              {formatPostponementReasons(fd.surgeryPostponement)
+                ? ` · เหตุผล: ${formatPostponementReasons(fd.surgeryPostponement)}`
+                : ''}
+            </div>
+          )}
+          {fd.preOpNotVisited?.isNotVisited && (
+            <div className="text-[10px] text-rose-950 bg-rose-50 border border-rose-300 px-1.5 py-0.5 rounded-xs">
+              <strong>ฉบับร่าง (ไม่ได้เยี่ยม Pre-op):</strong>{' '}
+              {formatPreOpNotVisitedReasons(fd.preOpNotVisited) || 'ยังไม่ระบุเหตุผล'}
+            </div>
+          )}
         </div>
 
         {/* Two Columns */}
@@ -409,10 +434,47 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                 <strong className="font-mono">{lab.lactate || '—'}</strong> · Trop I:{' '}
                 <strong className="font-mono">{lab.tropI || '—'}</strong>
               </div>
+              {(lab.ft3?.trim() || lab.ft4?.trim() || lab.tsh?.trim()) && (
+                <div className="font-mono">
+                  TFT: FT3=<strong>{lab.ft3 || '—'}</strong> · FT4=
+                  <strong>{lab.ft4 || '—'}</strong> · TSH=<strong>{lab.tsh || '—'}</strong>
+                </div>
+              )}
+              {hasBloodGasValues(lab) && (() => {
+                const isVbg = lab.bgType === 'VBG';
+                const isAbg = lab.bgType === 'ABG';
+                const bgTitle = isVbg ? 'VBG' : isAbg ? 'ABG' : 'Blood Gas';
+                const pco2Label = isVbg ? 'PvCO2' : isAbg ? 'PaCO2' : 'pCO2';
+                const po2Label = isVbg ? 'PvO2' : isAbg ? 'PaO2' : 'pO2';
+                const satLabel = isVbg ? 'SvO2' : isAbg ? 'SaO2' : 'O2Sat';
+                const pfRatio = computeBloodGasPfRatio(lab);
+                return (
+                  <div className="font-mono">
+                    {bgTitle}: pH=<strong>{lab.bgPh || '—'}</strong> · {pco2Label}=
+                    <strong>{lab.bgPco2 || '—'}</strong> · {po2Label}=
+                    <strong>{lab.bgPo2 || '—'}</strong> · HCO3=
+                    <strong>{lab.bgHco3 || '—'}</strong> · BE=
+                    <strong>{lab.bgBe || '—'}</strong> · {satLabel}=
+                    <strong>{lab.bgSao2 ? `${lab.bgSao2}%` : '—'}</strong>
+                    {lab.bgFio2?.trim() ? (
+                      <>
+                        {' '}· FiO2=<strong>{lab.bgFio2}</strong>
+                      </>
+                    ) : null}
+                    {pfRatio !== null ? (
+                      <>
+                        {' '}· P/F=<strong>{pfRatio}</strong>
+                      </>
+                    ) : null}
+                  </div>
+                );
+              })()}
               <div>
                 Anti-HIV:{' '}
                 {mark(lab.antiHiv === 'negative', 'Negative')}
-                {mark(lab.antiHiv === 'positive', 'Positive')}
+                {mark(lab.antiHiv === 'positive', 'Positive')} · HBsAg:{' '}
+                {mark(lab.hbsAg === 'negative', 'Negative')}
+                {mark(lab.hbsAg === 'positive', 'Positive')}
                 {lab.other ? <> · Other: {lab.other}</> : ''}
               </div>
               {(lab.customLabs || []).some((c) => c.name.trim() || c.value.trim()) && (
@@ -433,7 +495,8 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                   <strong>{formatBloodGroup(lab.bloodGroup, lab.bloodRh) || '—'}</strong> · Blood
                   component prepare: {box(Boolean(lab.prepTs), 'T&S')} PRC=
                   <strong>{lab.prepPrc || '—'}</strong>u · FFP=
-                  <strong>{lab.prepFfp || '—'}</strong>u · Plt=<strong>{lab.prepPlt || '—'}</strong>u
+                  <strong>{lab.prepFfp || '—'}</strong>u · Plt=<strong>{lab.prepPlt || '—'}</strong>u · Cryo=
+                  <strong>{lab.prepCryo || '—'}</strong>u
                 </div>
                 <div className="flex flex-wrap items-center gap-x-1">
                   {BLOOD_PREP_STATUS_OPTIONS.map((opt) => (

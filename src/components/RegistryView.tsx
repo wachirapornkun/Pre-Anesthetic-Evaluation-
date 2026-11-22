@@ -29,6 +29,8 @@ import {
   compareElectiveSchedule,
   computeClinicalSummary,
   formatBloodGroup,
+  formatPostponementReasons,
+  formatPreOpNotVisitedReasons,
   formatShortThaiDate,
   formatThaiScheduleDate,
   formatWardWithBed,
@@ -36,7 +38,9 @@ import {
   getEffectiveScheduleType,
   getPostOpVisitCompleteness,
   getTodayIsoDate,
+  isPreOpDraftNotVisited,
   isPreOpVisited,
+  isSurgeryPostponed,
   matchesEvaluationSearch,
   OR_ROOM_OPTIONS,
   PreAnestheticEvaluation,
@@ -47,6 +51,7 @@ import {
   exportSingleHtmlReport,
 } from '../utils/exportReports';
 import { A4PrintSheet } from './A4PrintSheet';
+import { ThaiDateInput } from './ThaiDateInput';
 
 function getUpdatedMillis(ts: unknown): number {
   if (!ts) return 0;
@@ -121,7 +126,7 @@ export function RegistryView({
   const [searchQuery, setSearchQuery] = useState('');
   const [dateScope, setDateScope] = useState<DateScope>('all');
   const [statusFilter, setStatusFilter] = useState<
-    'ALL' | 'draft' | 'evaluated' | 'not_post_op' | 'post_op_completed'
+    'ALL' | 'draft' | 'not_visited' | 'postponed' | 'evaluated' | 'not_post_op' | 'post_op_completed'
   >('ALL');
   const [scheduleFilter, setScheduleFilter] = useState<'ALL' | 'elective' | 'emergency'>('ALL');
   const [surgeonFilter, setSurgeonFilter] = useState('ALL');
@@ -195,6 +200,8 @@ export function RegistryView({
 
   const registryCounts = useMemo(() => {
     let draft = 0;
+    let notVisited = 0;
+    let postponed = 0;
     let preOpDone = 0;
     let postOpDone = 0;
     let todayCount = 0;
@@ -212,6 +219,8 @@ export function RegistryView({
         if (opDate >= today) upcomingCount += 1;
       }
       if (eff === 'draft') draft += 1;
+      if (isPreOpDraftNotVisited(r)) notVisited += 1;
+      if (isSurgeryPostponed(r)) postponed += 1;
       if (
         isPreOpVisited(r) ||
         eff === 'evaluated' ||
@@ -226,6 +235,8 @@ export function RegistryView({
     return {
       total: records.length,
       draft,
+      notVisited,
+      postponed,
       preOpDone,
       postOpDone,
       todayCount,
@@ -246,6 +257,8 @@ export function RegistryView({
       const effStatus = getEffectiveEvaluationStatus(r);
       const postOpCheck = getPostOpVisitCompleteness(r.formData?.postAnesthesia);
       if (statusFilter === 'not_post_op' && postOpCheck.isComplete) return false;
+      if (statusFilter === 'postponed' && !isSurgeryPostponed(r)) return false;
+      if (statusFilter === 'not_visited' && !isPreOpDraftNotVisited(r)) return false;
       if (statusFilter === 'evaluated') {
         const hasPreOp =
           isPreOpVisited(r) ||
@@ -256,6 +269,8 @@ export function RegistryView({
       } else if (
         statusFilter !== 'ALL' &&
         statusFilter !== 'not_post_op' &&
+        statusFilter !== 'postponed' &&
+        statusFilter !== 'not_visited' &&
         effStatus !== statusFilter
       ) {
         return false;
@@ -601,6 +616,32 @@ export function RegistryView({
           <button
             type="button"
             onClick={() =>
+              setStatusFilter((prev) => (prev === 'postponed' ? 'ALL' : 'postponed'))
+            }
+            className={`px-2.5 py-1 rounded-md border font-medium tabular-nums transition-colors ${
+              statusFilter === 'postponed'
+                ? 'bg-amber-50 text-amber-950 border-amber-400'
+                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            เลื่อนผ่าตัด {registryCounts.postponed}
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setStatusFilter((prev) => (prev === 'not_visited' ? 'ALL' : 'not_visited'))
+            }
+            className={`px-2.5 py-1 rounded-md border font-medium tabular-nums transition-colors ${
+              statusFilter === 'not_visited'
+                ? 'bg-rose-50 text-rose-900 border-rose-300'
+                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            ไม่ได้เยี่ยม Pre-op {registryCounts.notVisited}
+          </button>
+          <button
+            type="button"
+            onClick={() =>
               setStatusFilter((prev) =>
                 prev === 'post_op_completed' ? 'ALL' : 'post_op_completed',
               )
@@ -670,35 +711,34 @@ export function RegistryView({
             {/* Single Date or Date Range Start */}
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-semibold text-slate-600">
-                {dateTo ? 'ตั้งแต่วันที่' : 'เลือกวันที่'}
-                {dateFrom ? ` (${formatShortThaiDate(dateFrom)})` : ''}
+                {dateTo ? 'ตั้งแต่วันที่ (พ.ศ.)' : 'เลือกวันที่ (พ.ศ.)'}
               </span>
-              <input
-                type="date"
-                aria-label="เลือกวันที่เริ่มต้นหรือวันที่ต้องการค้นหา"
+              <ThaiDateInput
+                ariaLabel="เลือกวันที่เริ่มต้นหรือวันที่ต้องการค้นหา (พ.ศ.)"
                 value={dateFrom}
-                onChange={(e) => {
-                  setDateFrom(e.target.value);
-                  if (e.target.value) setDateScope('all');
+                onChange={(next) => {
+                  setDateFrom(next);
+                  if (next) setDateScope('all');
                 }}
-                className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800"
+                placeholder="วว/ดด/ปปปป"
+                className="w-36 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800"
               />
             </label>
 
             {/* Optional Range End */}
             <label className="flex flex-col gap-1">
               <span className="text-[11px] font-medium text-slate-500">
-                ถึงวันที่ (ไม่บังคับ){dateTo ? ` (${formatShortThaiDate(dateTo)})` : ''}
+                ถึงวันที่ (พ.ศ., ไม่บังคับ)
               </span>
-              <input
-                type="date"
-                aria-label="เลือกวันที่สิ้นสุด"
+              <ThaiDateInput
+                ariaLabel="เลือกวันที่สิ้นสุด (พ.ศ.)"
                 value={dateTo}
-                onChange={(e) => {
-                  setDateTo(e.target.value);
-                  if (e.target.value) setDateScope('all');
+                onChange={(next) => {
+                  setDateTo(next);
+                  if (next) setDateScope('all');
                 }}
-                className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800"
+                placeholder="วว/ดด/ปปปป"
+                className="w-36 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800"
               />
             </label>
 
@@ -786,6 +826,8 @@ export function RegistryView({
                 [
                   { key: 'ALL', label: 'ทั้งหมด' },
                   { key: 'draft', label: 'รอเยี่ยม' },
+                  { key: 'postponed', label: 'เลื่อนผ่าตัด' },
+                  { key: 'not_visited', label: 'ไม่ได้เยี่ยม' },
                   { key: 'evaluated', label: 'ประเมินแล้ว' },
                   { key: 'not_post_op', label: 'ยังไม่เยี่ยม Post-Op' },
                   { key: 'post_op_completed', label: 'Post-Op แล้ว' },
@@ -976,6 +1018,17 @@ export function RegistryView({
                               {isEmergency ? 'Emergency' : 'Elective'}
                             </span>
                           </div>
+                          {r.formData?.surgeryPostponement?.isPostponed && (
+                            <div
+                              className="text-[11px] font-sans font-medium text-amber-800 max-w-[200px] truncate"
+                              title={formatPostponementReasons(r.formData.surgeryPostponement)}
+                            >
+                              เลื่อนผ่าตัด
+                              {r.formData.surgeryPostponement.postponedToDate
+                                ? ` → ${formatShortThaiDate(r.formData.surgeryPostponement.postponedToDate)}`
+                                : ''}
+                            </div>
+                          )}
                         </td>
                         <td className="py-2.5 px-4 font-mono tabular-nums text-slate-700 whitespace-nowrap">
                           <div>{r.hn || '—'}</div>
@@ -1035,9 +1088,29 @@ export function RegistryView({
                                   : 'text-amber-700'
                               }`}
                             >
-                              {statusText(effStatus)}
+                              {r.formData?.preOpNotVisited?.isNotVisited
+                                ? 'ฉบับร่าง · ไม่ได้เยี่ยม Pre-op'
+                                : statusText(effStatus)}
                             </div>
-                            {!postOp.isComplete && (
+                            {r.formData?.preOpNotVisited?.isNotVisited &&
+                              formatPreOpNotVisitedReasons(r.formData.preOpNotVisited, true) && (
+                                <div
+                                  className="text-[11px] text-rose-700 max-w-[220px] truncate"
+                                  title={formatPreOpNotVisitedReasons(r.formData.preOpNotVisited)}
+                                >
+                                  เหตุผล: {formatPreOpNotVisitedReasons(r.formData.preOpNotVisited, true)}
+                                </div>
+                              )}
+                            {r.formData?.surgeryPostponement?.isPostponed &&
+                              formatPostponementReasons(r.formData.surgeryPostponement, true) && (
+                                <div
+                                  className="text-[11px] text-amber-800 max-w-[220px] truncate"
+                                  title={formatPostponementReasons(r.formData.surgeryPostponement)}
+                                >
+                                  เลื่อน: {formatPostponementReasons(r.formData.surgeryPostponement, true)}
+                                </div>
+                              )}
+                            {!postOp.isComplete && !r.formData?.preOpNotVisited?.isNotVisited && (
                               <div className="text-[11px] text-amber-700 font-medium">
                                 ยังไม่ได้เยี่ยมหลังผ่าตัด
                                 {postOp.hasAnyInput

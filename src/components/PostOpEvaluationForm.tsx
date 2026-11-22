@@ -18,6 +18,7 @@ import {
   createEmptyPostOpComplication,
   DEFAULT_SUMMARIZER_LIST,
   EvaluationFormData,
+  formatThaiDateBE,
   getPostOpVisitCompleteness,
   inferPatientGender,
   PatientGender,
@@ -38,6 +39,7 @@ import {
 } from '../types/evaluation';
 import { BphLogo } from './MedicalDiagrams';
 import { OperationInput } from './OperationInput';
+import { ThaiDateInput } from './ThaiDateInput';
 import { handleFormTabNavigation } from '../utils/formTabNavigation';
 
 interface PostOpEvaluationFormProps {
@@ -467,7 +469,7 @@ export function PostOpEvaluationForm({
                     {rec.age ? ` (${rec.age} ปี)` : ''}
                     {rec.hn ? ` · HN ${rec.hn}` : ''}
                     {rec.operation ? ` · ${rec.operation}` : ''}
-                    {rec.dateOfOperation ? ` [${rec.dateOfOperation}]` : ''}
+                    {rec.dateOfOperation ? ` [${formatThaiDateBE(rec.dateOfOperation)}]` : ''}
                   </option>
                 ))}
               </select>
@@ -679,11 +681,12 @@ export function PostOpEvaluationForm({
                   <span className="text-[11px] font-medium text-slate-600">
                     วันที่ทำผ่าตัด (Date of Op)
                   </span>
-                  <input
-                    type="date"
+                  <ThaiDateInput
+                    ariaLabel="วันที่ทำผ่าตัด (พ.ศ.)"
                     value={value.dateOfOperation}
-                    onChange={(e) => onChange({ ...value, dateOfOperation: e.target.value })}
-                    className={`${inputBase} font-mono tabular-nums`}
+                    onChange={(next) => onChange({ ...value, dateOfOperation: next })}
+                    wrapperClassName="w-full"
+                    className={`${inputBase} w-full font-mono tabular-nums`}
                   />
                 </label>
 
@@ -992,11 +995,13 @@ export function PostOpEvaluationForm({
               </label>
               <label className="flex flex-col gap-0.5 text-xs">
                 <span className="text-[11px] font-medium text-slate-600">วันที่</span>
-                <input
-                  type="date"
+                <ThaiDateInput
+                  ariaLabel="วันที่บันทึก Peri op (พ.ศ.)"
                   value={pc.periOpDate}
-                  onChange={(e) => updatePostOpComp({ periOpDate: e.target.value })}
-                  className={`${inputBase} font-mono tabular-nums text-xs`}
+                  onChange={(next) => updatePostOpComp({ periOpDate: next })}
+                  placeholder="วว/ดด/ปปปป"
+                  wrapperClassName="w-full"
+                  className={`${inputBase} w-full font-mono tabular-nums text-xs`}
                 />
               </label>
               <label className="flex flex-col gap-0.5 text-xs">
@@ -1027,11 +1032,13 @@ export function PostOpEvaluationForm({
               </label>
               <label className="flex flex-col gap-0.5 text-xs">
                 <span className="text-[11px] font-medium text-slate-600">วันที่</span>
-                <input
-                  type="date"
+                <ThaiDateInput
+                  ariaLabel="วันที่บันทึก Post op (พ.ศ.)"
                   value={pc.postOpDate}
-                  onChange={(e) => updatePostOpComp({ postOpDate: e.target.value })}
-                  className={`${inputBase} font-mono tabular-nums text-xs`}
+                  onChange={(next) => updatePostOpComp({ postOpDate: next })}
+                  placeholder="วว/ดด/ปปปป"
+                  wrapperClassName="w-full"
+                  className={`${inputBase} w-full font-mono tabular-nums text-xs`}
                 />
               </label>
               <label className="flex flex-col gap-0.5 text-xs">
@@ -1146,11 +1153,12 @@ export function PostOpEvaluationForm({
               </div>
               <label className="inline-flex items-center gap-1.5 text-xs">
                 <span className="text-slate-600 font-medium">date</span>
-                <input
-                  type="date"
+                <ThaiDateInput
+                  ariaLabel="วันที่สรุป Summarized date (พ.ศ.)"
                   value={pa.summarizedDate}
-                  onChange={(e) => updatePostAnesthesia({ summarizedDate: e.target.value })}
-                  className={`${inputBase} font-mono tabular-nums text-xs`}
+                  onChange={(next) => updatePostAnesthesia({ summarizedDate: next })}
+                  placeholder="วว/ดด/ปปปป"
+                  className={`${inputBase} w-36 font-mono tabular-nums text-xs`}
                 />
               </label>
             </div>
@@ -1516,11 +1524,12 @@ export function PostOpEvaluationForm({
                 <span className="text-slate-600 font-medium">
                   date <span className="text-red-600">*</span>
                 </span>
-                <input
-                  type="date"
+                <ThaiDateInput
+                  ariaLabel="วันที่เยี่ยมหลังผ่าตัด visit date (พ.ศ.)"
                   value={pa.visitDate}
-                  onChange={(e) => updatePostAnesthesia({ visitDate: e.target.value })}
-                  className={`${inputBase} font-mono tabular-nums text-xs ${missingHighlight(Boolean(pa.visitDate.trim()))}`}
+                  onChange={(next) => updatePostAnesthesia({ visitDate: next })}
+                  placeholder="วว/ดด/ปปปป"
+                  className={`${inputBase} w-36 font-mono tabular-nums text-xs ${missingHighlight(Boolean(pa.visitDate.trim()))}`}
                 />
               </label>
             </div>

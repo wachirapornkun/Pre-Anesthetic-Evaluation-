@@ -2,19 +2,29 @@ import React, { useMemo, useState } from 'react';
 import { Download, FilePlus2, Printer, RotateCcw } from 'lucide-react';
 import {
   AsaClass,
+  formatPostponementReasons,
+  formatPreOpNotVisitedReasons,
+  formatThaiDateBE,
   generateAutoProblemEntries,
+  getEffectiveEvaluationStatus,
   getEffectiveScheduleType,
   getPostOpVisitCompleteness,
   inferPatientGender,
   isPostOpVisited,
+  isPreOpDraftNotVisited,
   isPreOpVisited,
+  isSurgeryPostponed,
   parseAgeInYears,
   POST_OP_ALL_COMPLICATIONS,
   POST_OP_OUTCOME_OPTIONS,
   POST_OP_SEVERITY_LEVELS,
   PostOpComplicationKey,
+  PRE_OP_NOT_VISITED_REASON_OPTIONS,
   PreAnestheticEvaluation,
+  PreOpNotVisitedReasonKey,
   summarizePostOpComplications,
+  SURGERY_POSTPONEMENT_REASON_OPTIONS,
+  SurgeryPostponementReasonKey,
 } from '../types/evaluation';
 import { exportEvaluationsCsv } from '../utils/exportReports';
 import {
@@ -38,8 +48,11 @@ interface DashboardViewProps {
 }
 
 const LEGACY_POST_OP_COMP_KEY = '__LEGACY_POST_ANESTHESIA__';
+const UNSPECIFIED_REASON_KEY = '__UNSPECIFIED_REASON__';
 type ComplicationItemKey = PostOpComplicationKey | typeof LEGACY_POST_OP_COMP_KEY;
 type ActiveComplicationFilter = { phase: 'peri' | 'post'; key: ComplicationItemKey } | null;
+type ActivePostponementFilter = 'ALL_POSTPONED' | SurgeryPostponementReasonKey | typeof UNSPECIFIED_REASON_KEY | null;
+type ActiveNotVisitedFilter = 'ALL_NOT_VISITED' | 'ALL_DRAFTS' | PreOpNotVisitedReasonKey | typeof UNSPECIFIED_REASON_KEY | null;
 
 function getShortComplicationLabel(key: PostOpComplicationKey, fallbackLabel: string): string {
   if (key === 'hypotension') return 'Hypotension';
@@ -227,6 +240,10 @@ export function DashboardView({
   const [operationFilter, setOperationFilter] = useState<string>('ALL');
   const [asaFilter, setAsaFilter] = useState<string>('ALL');
   const [complicationFilter, setComplicationFilter] = useState<ActiveComplicationFilter>(null);
+  const [postponementFilter, setPostponementFilter] = useState<ActivePostponementFilter>(null);
+  const [notVisitedFilter, setNotVisitedFilter] = useState<ActiveNotVisitedFilter>(null);
+  const [showAllPostponedList, setShowAllPostponedList] = useState<boolean>(false);
+  const [showAllNotVisitedList, setShowAllNotVisitedList] = useState<boolean>(false);
   const [showAllPeriComplications, setShowAllPeriComplications] = useState<boolean>(false);
   const [showAllPostComplications, setShowAllPostComplications] = useState<boolean>(false);
   const [operationSortBy, setOperationSortBy] = useState<'risk' | 'count'>('risk');
@@ -281,13 +298,17 @@ export function DashboardView({
     wardFilter !== 'ALL' ||
     operationFilter !== 'ALL' ||
     asaFilter !== 'ALL' ||
-    complicationFilter !== null;
+    complicationFilter !== null ||
+    postponementFilter !== null ||
+    notVisitedFilter !== null;
 
   const resetFilters = () => {
     setWardFilter('ALL');
     setOperationFilter('ALL');
     setAsaFilter('ALL');
     setComplicationFilter(null);
+    setPostponementFilter(null);
+    setNotVisitedFilter(null);
   };
 
   const baseFiltered = useMemo(() => {
@@ -312,24 +333,56 @@ export function DashboardView({
   }, [records, wardFilter, operationFilter, asaFilter]);
 
   const filtered = useMemo(() => {
-    if (!complicationFilter) return baseFiltered;
     return baseFiltered.filter((r) => {
-      const pc = r.formData?.postOpComplication;
-      const periList = pc?.periOpComplications ?? [];
-      const postList = pc?.postOpComplications ?? [];
-      if (complicationFilter.key === LEGACY_POST_OP_COMP_KEY) {
-        return (
-          r.formData?.postAnesthesia?.complicationStatus === 'yes' &&
-          periList.length === 0 &&
-          postList.length === 0
-        );
+      if (complicationFilter) {
+        const pc = r.formData?.postOpComplication;
+        const periList = pc?.periOpComplications ?? [];
+        const postList = pc?.postOpComplications ?? [];
+        if (complicationFilter.key === LEGACY_POST_OP_COMP_KEY) {
+          if (
+            !(
+              r.formData?.postAnesthesia?.complicationStatus === 'yes' &&
+              periList.length === 0 &&
+              postList.length === 0
+            )
+          ) {
+            return false;
+          }
+        } else if (complicationFilter.phase === 'peri') {
+          if (!periList.includes(complicationFilter.key)) return false;
+        } else {
+          if (!postList.includes(complicationFilter.key)) return false;
+        }
       }
-      if (complicationFilter.phase === 'peri') {
-        return periList.includes(complicationFilter.key);
+
+      if (postponementFilter) {
+        const sp = r.formData?.surgeryPostponement;
+        if (!sp?.isPostponed) return false;
+        if (postponementFilter === UNSPECIFIED_REASON_KEY) {
+          if ((sp.reasons ?? []).length > 0) return false;
+        } else if (postponementFilter !== 'ALL_POSTPONED') {
+          if (!(sp.reasons ?? []).includes(postponementFilter)) return false;
+        }
       }
-      return postList.includes(complicationFilter.key);
+
+      if (notVisitedFilter) {
+        const nv = r.formData?.preOpNotVisited;
+        const isDraft = getEffectiveEvaluationStatus(r) === 'draft';
+        if (notVisitedFilter === 'ALL_DRAFTS') {
+          if (!isDraft) return false;
+        } else if (notVisitedFilter === 'ALL_NOT_VISITED') {
+          if (!nv?.isNotVisited) return false;
+        } else if (notVisitedFilter === UNSPECIFIED_REASON_KEY) {
+          if (!isDraft) return false;
+          if (nv?.isNotVisited && (nv.reasons ?? []).length > 0) return false;
+        } else {
+          if (!nv?.isNotVisited || !(nv.reasons ?? []).includes(notVisitedFilter)) return false;
+        }
+      }
+
+      return true;
     });
-  }, [baseFiltered, complicationFilter]);
+  }, [baseFiltered, complicationFilter, postponementFilter, notVisitedFilter]);
 
   const sortedFiltered = useMemo(() => {
     const list = [...filtered];
@@ -366,10 +419,12 @@ export function DashboardView({
     let prcUnits = 0;
     let ffpUnits = 0;
     let pltUnits = 0;
+    let cryoUnits = 0;
     filtered.forEach((r) => {
       prcUnits += parseInt(r.formData.laboratory.prepPrc || '0', 10) || 0;
       ffpUnits += parseInt(r.formData.laboratory.prepFfp || '0', 10) || 0;
       pltUnits += parseInt(r.formData.laboratory.prepPlt || '0', 10) || 0;
+      cryoUnits += parseInt(r.formData.laboratory.prepCryo || '0', 10) || 0;
     });
 
     // ASA Class I-VI split Elective vs Emergency
@@ -845,6 +900,163 @@ export function DashboardView({
       };
     })();
 
+    const postponementSummary = (() => {
+      const reasonMap = new Map<
+        SurgeryPostponementReasonKey | typeof UNSPECIFIED_REASON_KEY,
+        {
+          key: SurgeryPostponementReasonKey | typeof UNSPECIFIED_REASON_KEY;
+          label: string;
+          count: number;
+          sampleDetails: string[];
+        }
+      >();
+      for (const opt of SURGERY_POSTPONEMENT_REASON_OPTIONS) {
+        reasonMap.set(opt.key, {
+          key: opt.key,
+          label: opt.label,
+          count: 0,
+          sampleDetails: [],
+        });
+      }
+      const postponedRecords: PreAnestheticEvaluation[] = [];
+      let unspecifiedCount = 0;
+
+      baseFiltered.forEach((r) => {
+        const sp = r.formData?.surgeryPostponement;
+        if (!sp?.isPostponed) return;
+        postponedRecords.push(r);
+        const reasons = Array.isArray(sp.reasons) ? sp.reasons : [];
+        if (reasons.length === 0) {
+          unspecifiedCount += 1;
+        } else {
+          reasons.forEach((k) => {
+            const entry = reasonMap.get(k);
+            if (!entry) return;
+            entry.count += 1;
+            const detail =
+              k === 'other'
+                ? (sp.otherReasonDetail || sp.note || '').trim()
+                : (sp.note || '').trim();
+            if (detail && !entry.sampleDetails.includes(detail) && entry.sampleDetails.length < 3) {
+              entry.sampleDetails.push(detail);
+            }
+          });
+        }
+      });
+
+      const rankedReasons = Array.from(reasonMap.values())
+        .filter((item) => item.count > 0)
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'th'));
+
+      if (unspecifiedCount > 0) {
+        rankedReasons.push({
+          key: UNSPECIFIED_REASON_KEY,
+          label: 'ยังไม่ระบุเหตุผลที่เลื่อน',
+          count: unspecifiedCount,
+          sampleDetails: [],
+        });
+      }
+
+      const ratePct =
+        baseFiltered.length > 0
+          ? Math.round((postponedRecords.length / baseFiltered.length) * 1000) / 10
+          : 0;
+
+      return {
+        totalBase: baseFiltered.length,
+        totalPostponed: postponedRecords.length,
+        ratePct,
+        rankedReasons,
+        postponedRecords,
+      };
+    })();
+
+    const preOpDraftSummary = (() => {
+      const reasonMap = new Map<
+        PreOpNotVisitedReasonKey | typeof UNSPECIFIED_REASON_KEY,
+        {
+          key: PreOpNotVisitedReasonKey | typeof UNSPECIFIED_REASON_KEY;
+          label: string;
+          count: number;
+          sampleDetails: string[];
+        }
+      >();
+      for (const opt of PRE_OP_NOT_VISITED_REASON_OPTIONS) {
+        reasonMap.set(opt.key, {
+          key: opt.key,
+          label: opt.label,
+          count: 0,
+          sampleDetails: [],
+        });
+      }
+
+      const draftRecords: PreAnestheticEvaluation[] = [];
+      const notVisitedRecords: PreAnestheticEvaluation[] = [];
+      let pendingReasonCount = 0;
+
+      baseFiltered.forEach((r) => {
+        const isDraft = getEffectiveEvaluationStatus(r) === 'draft';
+        const nv = r.formData?.preOpNotVisited;
+        const isNv = Boolean(nv?.isNotVisited);
+        if (isDraft) draftRecords.push(r);
+        if (isNv) {
+          notVisitedRecords.push(r);
+          const reasons = Array.isArray(nv?.reasons) ? nv.reasons : [];
+          if (reasons.length === 0) {
+            pendingReasonCount += 1;
+          } else {
+            reasons.forEach((k) => {
+              const entry = reasonMap.get(k);
+              if (!entry) return;
+              entry.count += 1;
+              const detail =
+                k === 'other'
+                  ? (nv?.otherReasonDetail || nv?.note || '').trim()
+                  : (nv?.note || '').trim();
+              if (
+                detail &&
+                !entry.sampleDetails.includes(detail) &&
+                entry.sampleDetails.length < 3
+              ) {
+                entry.sampleDetails.push(detail);
+              }
+            });
+          }
+        } else if (isDraft) {
+          pendingReasonCount += 1;
+        }
+      });
+
+      const rankedReasons = Array.from(reasonMap.values())
+        .filter((item) => item.count > 0)
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'th'));
+
+      if (pendingReasonCount > 0) {
+        rankedReasons.push({
+          key: UNSPECIFIED_REASON_KEY,
+          label: 'ฉบับร่างรอเยี่ยม / ยังไม่ระบุเหตุผล',
+          count: pendingReasonCount,
+          sampleDetails: [],
+        });
+      }
+
+      const displayList =
+        notVisitedRecords.length > 0
+          ? [
+              ...notVisitedRecords,
+              ...draftRecords.filter((d) => !notVisitedRecords.some((n) => n.id === d.id)),
+            ]
+          : draftRecords;
+
+      return {
+        totalBase: baseFiltered.length,
+        totalDrafts: draftRecords.length,
+        notVisitedCount: notVisitedRecords.length,
+        rankedReasons,
+        displayList,
+      };
+    })();
+
     return {
       total,
       electiveCount,
@@ -857,6 +1069,7 @@ export function DashboardView({
       prcUnits,
       ffpUnits,
       pltUnits,
+      cryoUnits,
       asaSplitRows,
       anesthesiaCategory,
       anesthesiaDonutSegments,
@@ -870,6 +1083,8 @@ export function DashboardView({
       wardList,
       operationList,
       postOpComplicationSummary,
+      postponementSummary,
+      preOpDraftSummary,
     };
   }, [filtered, baseFiltered, riskById, operationSortBy]);
 
@@ -1035,7 +1250,7 @@ export function DashboardView({
       </div>
 
       {/* KPI Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         <div className="bg-white border border-slate-200 rounded-xl p-4">
           <div className="text-xs font-medium text-slate-500">จำนวนผู้ป่วยประเมินทั้งหมด</div>
           <div className="mt-1.5 text-2xl font-bold font-mono tabular-nums text-slate-900">
@@ -1073,18 +1288,371 @@ export function DashboardView({
             <span className="text-sm font-normal text-slate-500"> / {stats.total}</span>
           </div>
           <div className="mt-1 text-xs text-slate-500 tabular-nums">
-            ยังไม่ได้เยี่ยมหลังผ่าตัด: {stats.postOpPending} ราย · ภาวะแทรกซ้อน: {stats.complications} ราย
+            รอเยี่ยมหลังผ่าตัด: {stats.postOpPending} · แทรกซ้อน: {stats.complications}
           </div>
         </div>
 
         <div className="bg-white border border-slate-200 rounded-xl p-4">
           <div className="text-xs font-medium text-slate-500">การจองเลือดรวม (Units)</div>
           <div className="mt-1.5 text-2xl font-bold font-mono tabular-nums text-blue-900">
-            {stats.prcUnits + stats.ffpUnits + stats.pltUnits}
+            {stats.prcUnits + stats.ffpUnits + stats.pltUnits + stats.cryoUnits}
           </div>
           <div className="mt-1 text-xs font-mono tabular-nums text-slate-500">
-            PRC {stats.prcUnits} · FFP {stats.ffpUnits} · Plt {stats.pltUnits}
+            PRC {stats.prcUnits} · FFP {stats.ffpUnits} · Plt {stats.pltUnits} · Cryo {stats.cryoUnits}
           </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-xl p-4">
+          <div className="text-xs font-medium text-slate-500">เลื่อนผ่าตัด / ไม่ได้เยี่ยม Pre-op</div>
+          <div className="mt-1.5 text-2xl font-bold font-mono tabular-nums text-amber-800">
+            {stats.postponementSummary.totalPostponed}
+            <span className="text-sm font-normal text-slate-500">
+              {' '}
+              / {stats.preOpDraftSummary.notVisitedCount}
+            </span>
+          </div>
+          <div className="mt-1 text-xs text-slate-500 tabular-nums">
+            เลื่อน {stats.postponementSummary.ratePct}% · ฉบับร่าง {stats.preOpDraftSummary.totalDrafts} ราย
+          </div>
+        </div>
+      </div>
+
+      {/* Surgery Postponement & Pre-op Draft / Not-Visited Analytics Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* LEFT: Surgery Postponements Summary */}
+        <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-2 pb-3 border-b border-slate-100">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">
+                สรุปการเลื่อนวันผ่าตัด (Surgery Postponement)
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                เก็บข้อมูลเหตุผลการเลื่อนผ่าตัด เช่น ไม่มีเลือด, พบ PE, หายใจเหนื่อย, Investigation / Consult เพิ่ม · คลิกเพื่อกรองรายชื่อ
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() =>
+                  setPostponementFilter((prev) =>
+                    prev === 'ALL_POSTPONED' ? null : 'ALL_POSTPONED',
+                  )
+                }
+                className={`text-xs font-mono tabular-nums px-2 py-1 rounded-md border transition-colors whitespace-nowrap ${
+                  postponementFilter === 'ALL_POSTPONED'
+                    ? 'bg-amber-100 border-amber-400 text-amber-950 font-semibold'
+                    : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                {stats.postponementSummary.totalPostponed} ราย ({stats.postponementSummary.ratePct}%)
+              </button>
+              {postponementFilter && (
+                <button
+                  type="button"
+                  onClick={() => setPostponementFilter(null)}
+                  className="no-print text-xs font-medium text-amber-800 hover:underline whitespace-nowrap"
+                >
+                  ล้างกรอง
+                </button>
+              )}
+            </div>
+          </div>
+
+          {stats.postponementSummary.totalPostponed === 0 ? (
+            <div className="py-8 px-4 text-center border border-dashed border-slate-200 rounded-lg bg-slate-50/50 space-y-1">
+              <p className="text-xs font-medium text-slate-700">
+                ยังไม่มีรายการเลื่อนวันผ่าตัดในช่วงข้อมูลที่เลือก
+              </p>
+              <p className="text-[11px] text-slate-500">
+                ติ๊กช่อง &ldquo;เลื่อนวันผ่าตัด&rdquo; ในแบบฟอร์ม Pre-op พร้อมระบุเหตุผลเพื่อเก็บสถิติที่นี่
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="divide-y divide-slate-100">
+                {(() => {
+                  const maxReason = Math.max(
+                    1,
+                    ...stats.postponementSummary.rankedReasons.map((r) => r.count),
+                  );
+                  return stats.postponementSummary.rankedReasons.map((item, idx) => {
+                    const barPct = Math.round((item.count / maxReason) * 100);
+                    const isSelected = postponementFilter === item.key;
+                    const sharePct =
+                      stats.postponementSummary.totalPostponed > 0
+                        ? Math.round((item.count / stats.postponementSummary.totalPostponed) * 100)
+                        : 0;
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() =>
+                          setPostponementFilter(isSelected ? null : item.key)
+                        }
+                        className={`w-full py-2 px-2 -mx-2 rounded-lg text-left grid grid-cols-[minmax(0,1fr)_88px_74px] items-center gap-3 text-xs transition-colors ${
+                          isSelected
+                            ? 'bg-amber-50 text-amber-950'
+                            : 'hover:bg-slate-50 text-slate-800'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-[11px] text-slate-400 shrink-0">
+                              {idx + 1}.
+                            </span>
+                            <span className="font-medium truncate">{item.label}</span>
+                          </div>
+                          {item.sampleDetails.length > 0 && (
+                            <div className="text-[11px] text-slate-500 truncate pl-4 mt-0.5">
+                              {item.sampleDetails.join(', ')}
+                            </div>
+                          )}
+                        </div>
+                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${
+                              isSelected ? 'bg-amber-700' : 'bg-amber-500'
+                            }`}
+                            style={{ width: `${barPct}%` }}
+                          />
+                        </div>
+                        <span className="text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
+                          {item.count} ราย ({sharePct}%)
+                        </span>
+                      </button>
+                    );
+                  });
+                })()}
+              </div>
+
+              <div className="border-t border-slate-100 pt-3 space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600">
+                  <span>รายชื่อผู้ป่วยที่เลื่อนผ่าตัด (คลิกเพื่อเปิดดู/แก้ไข)</span>
+                  {stats.postponementSummary.postponedRecords.length > 5 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllPostponedList((prev) => !prev)}
+                      className="no-print text-blue-800 hover:underline font-medium"
+                    >
+                      {showAllPostponedList
+                        ? 'แสดง 5 รายการแรก'
+                        : `ดูทั้งหมด (${stats.postponementSummary.postponedRecords.length} ราย)`}
+                    </button>
+                  )}
+                </div>
+                <div className="divide-y divide-slate-100 max-h-52 overflow-y-auto pr-1">
+                  {(showAllPostponedList
+                    ? stats.postponementSummary.postponedRecords
+                    : stats.postponementSummary.postponedRecords.slice(0, 5)
+                  ).map((rec) => {
+                    const sp = rec.formData?.surgeryPostponement;
+                    const reasonStr = formatPostponementReasons(sp, true);
+                    return (
+                      <button
+                        key={rec.id}
+                        type="button"
+                        onClick={() => onSelectRecord(rec)}
+                        className="w-full py-2 px-2 -mx-2 rounded-md text-left hover:bg-amber-50/60 transition-colors flex flex-wrap items-baseline justify-between gap-2 text-xs"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <span className="font-mono tabular-nums text-slate-500 mr-1.5">
+                            {rec.hn || '—'}
+                          </span>
+                          <span className="font-semibold text-slate-900">{rec.patientName}</span>
+                          {reasonStr && (
+                            <div className="text-[11px] text-amber-900 truncate mt-0.5">
+                              {reasonStr}
+                            </div>
+                          )}
+                        </div>
+                        <span className="font-mono tabular-nums text-[11px] text-slate-600 whitespace-nowrap shrink-0">
+                          {sp?.originalDateOfOperation
+                            ? formatThaiDateBE(sp.originalDateOfOperation)
+                            : formatThaiDateBE(rec.dateOfOperation) || '—'}
+                          {' → '}
+                          <strong className="text-amber-900">
+                            {sp?.postponedToDate ? formatThaiDateBE(sp.postponedToDate) : 'รอระบุวัน'}
+                          </strong>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* RIGHT: Pre-op Draft / Not-Visited Summary */}
+        <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-2 pb-3 border-b border-slate-100">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">
+                ใบเยี่ยม Pre-op ฉบับร่าง / ไม่ได้เยี่ยมผู้ป่วย
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                ติดตามใบเยี่ยม Pre-op ฉบับร่างและเหตุผลที่ไม่ได้เยี่ยม เช่น ผู้ป่วยไม่มาตามนัด ยกเลิกผ่าตัด อื่นๆ · คลิกเพื่อกรองรายชื่อ
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() =>
+                  setNotVisitedFilter((prev) =>
+                    prev === 'ALL_NOT_VISITED' ? null : 'ALL_NOT_VISITED',
+                  )
+                }
+                className={`text-xs font-mono tabular-nums px-2 py-1 rounded-md border transition-colors whitespace-nowrap ${
+                  notVisitedFilter === 'ALL_NOT_VISITED'
+                    ? 'bg-rose-100 border-rose-400 text-rose-950 font-semibold'
+                    : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                ไม่ได้เยี่ยม {stats.preOpDraftSummary.notVisitedCount} · ร่าง{' '}
+                {stats.preOpDraftSummary.totalDrafts}
+              </button>
+              {notVisitedFilter && (
+                <button
+                  type="button"
+                  onClick={() => setNotVisitedFilter(null)}
+                  className="no-print text-xs font-medium text-rose-800 hover:underline whitespace-nowrap"
+                >
+                  ล้างกรอง
+                </button>
+              )}
+            </div>
+          </div>
+
+          {stats.preOpDraftSummary.totalDrafts === 0 &&
+          stats.preOpDraftSummary.notVisitedCount === 0 ? (
+            <div className="py-8 px-4 text-center border border-dashed border-slate-200 rounded-lg bg-slate-50/50 space-y-1">
+              <p className="text-xs font-medium text-slate-700">
+                ไม่มีใบเยี่ยม Pre-op ฉบับร่างหรือเคสที่ไม่ได้เยี่ยมในช่วงข้อมูลนี้
+              </p>
+              <p className="text-[11px] text-slate-500">
+                หากไม่ได้เยี่ยมผู้ป่วย ให้ติ๊ก &ldquo;ใบเยี่ยม Pre-op ฉบับร่าง (ไม่ได้เยี่ยม)&rdquo; และระบุเหตุผลในแบบฟอร์ม
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="divide-y divide-slate-100">
+                {(() => {
+                  const maxReason = Math.max(
+                    1,
+                    ...stats.preOpDraftSummary.rankedReasons.map((r) => r.count),
+                  );
+                  const denom = Math.max(
+                    1,
+                    stats.preOpDraftSummary.totalDrafts,
+                    stats.preOpDraftSummary.notVisitedCount,
+                  );
+                  return stats.preOpDraftSummary.rankedReasons.map((item, idx) => {
+                    const barPct = Math.round((item.count / maxReason) * 100);
+                    const isSelected = notVisitedFilter === item.key;
+                    const sharePct = Math.round((item.count / denom) * 100);
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() =>
+                          setNotVisitedFilter(isSelected ? null : item.key)
+                        }
+                        className={`w-full py-2 px-2 -mx-2 rounded-lg text-left grid grid-cols-[minmax(0,1fr)_88px_74px] items-center gap-3 text-xs transition-colors ${
+                          isSelected
+                            ? 'bg-rose-50 text-rose-950'
+                            : 'hover:bg-slate-50 text-slate-800'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-[11px] text-slate-400 shrink-0">
+                              {idx + 1}.
+                            </span>
+                            <span className="font-medium truncate">{item.label}</span>
+                          </div>
+                          {item.sampleDetails.length > 0 && (
+                            <div className="text-[11px] text-slate-500 truncate pl-4 mt-0.5">
+                              {item.sampleDetails.join(', ')}
+                            </div>
+                          )}
+                        </div>
+                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${
+                              isSelected
+                                ? 'bg-rose-700'
+                                : item.key === UNSPECIFIED_REASON_KEY
+                                ? 'bg-slate-400'
+                                : 'bg-rose-500'
+                            }`}
+                            style={{ width: `${barPct}%` }}
+                          />
+                        </div>
+                        <span className="text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
+                          {item.count} ราย ({sharePct}%)
+                        </span>
+                      </button>
+                    );
+                  });
+                })()}
+              </div>
+
+              <div className="border-t border-slate-100 pt-3 space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600">
+                  <span>รายชื่อเคสฉบับร่าง / ไม่ได้เยี่ยม Pre-op (คลิกเพื่อเปิดกรอก/ระบุเหตุผล)</span>
+                  {stats.preOpDraftSummary.displayList.length > 5 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllNotVisitedList((prev) => !prev)}
+                      className="no-print text-blue-800 hover:underline font-medium"
+                    >
+                      {showAllNotVisitedList
+                        ? 'แสดง 5 รายการแรก'
+                        : `ดูทั้งหมด (${stats.preOpDraftSummary.displayList.length} ราย)`}
+                    </button>
+                  )}
+                </div>
+                <div className="divide-y divide-slate-100 max-h-52 overflow-y-auto pr-1">
+                  {(showAllNotVisitedList
+                    ? stats.preOpDraftSummary.displayList
+                    : stats.preOpDraftSummary.displayList.slice(0, 5)
+                  ).map((rec) => {
+                    const nv = rec.formData?.preOpNotVisited;
+                    const reasonStr = formatPreOpNotVisitedReasons(nv, true);
+                    return (
+                      <button
+                        key={rec.id}
+                        type="button"
+                        onClick={() => onSelectRecord(rec)}
+                        className="w-full py-2 px-2 -mx-2 rounded-md text-left hover:bg-rose-50/60 transition-colors flex flex-wrap items-baseline justify-between gap-2 text-xs"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <span className="font-mono tabular-nums text-slate-500 mr-1.5">
+                            {rec.hn || '—'}
+                          </span>
+                          <span className="font-semibold text-slate-900">{rec.patientName}</span>
+                          <div
+                            className={`text-[11px] truncate mt-0.5 ${
+                              nv?.isNotVisited ? 'text-rose-800' : 'text-slate-500'
+                            }`}
+                          >
+                            {nv?.isNotVisited
+                              ? reasonStr || 'ไม่ได้เยี่ยม Pre-op (ยังไม่ระบุเหตุผล)'
+                              : 'ฉบับร่าง (รอเยี่ยม Pre-op)'}
+                          </div>
+                        </div>
+                        <span className="font-mono tabular-nums text-[11px] text-slate-600 whitespace-nowrap shrink-0">
+                          {rec.dateOfOperation
+                            ? formatThaiDateBE(rec.dateOfOperation)
+                            : 'ไม่ระบุวันผ่าตัด'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -1838,6 +2406,14 @@ export function DashboardView({
                   const risk = riskById.get(r.id) ?? computeCaseRiskProfile(r);
                   const compSummary = summarizePostOpComplications(r.formData?.postOpComplication);
                   const flags: string[] = [...risk.topProblems];
+                  if (isSurgeryPostponed(r)) {
+                    const pReason = formatPostponementReasons(r.formData?.surgeryPostponement, true);
+                    flags.unshift(pReason ? `เลื่อนผ่าตัด (${pReason})` : 'เลื่อนผ่าตัด');
+                  }
+                  if (isPreOpDraftNotVisited(r)) {
+                    const nvReason = formatPreOpNotVisitedReasons(r.formData?.preOpNotVisited, true);
+                    flags.unshift(nvReason ? `ไม่ได้เยี่ยม (${nvReason})` : 'ไม่ได้เยี่ยม Pre-op');
+                  }
                   if (compSummary) {
                     flags.push(compSummary);
                   } else if (r.hasComplication && !flags.some((f) => /complication/i.test(f))) {
@@ -1875,9 +2451,9 @@ export function DashboardView({
                         {flags.length > 0 ? (
                           <span
                             className={`font-medium ${
-                              risk.score >= 75 || r.hasComplication
+                              risk.score >= 75 || r.hasComplication || isPreOpDraftNotVisited(r)
                                 ? 'text-red-700'
-                                : risk.score >= 50
+                                : risk.score >= 50 || isSurgeryPostponed(r)
                                 ? 'text-amber-800'
                                 : 'text-slate-700'
                             }`}
@@ -1889,7 +2465,14 @@ export function DashboardView({
                         )}
                       </td>
                       <td className="py-2.5 px-4 text-right font-mono tabular-nums text-slate-600 whitespace-nowrap">
-                        {r.dateOfOperation || '—'}
+                        <div>{r.dateOfOperation ? formatThaiDateBE(r.dateOfOperation) : '—'}</div>
+                        {r.formData?.surgeryPostponement?.isPostponed &&
+                          r.formData.surgeryPostponement.postponedToDate &&
+                          r.formData.surgeryPostponement.postponedToDate !== r.dateOfOperation && (
+                            <div className="text-[11px] text-amber-800 font-semibold">
+                              → {formatThaiDateBE(r.formData.surgeryPostponement.postponedToDate)}
+                            </div>
+                          )}
                       </td>
                       {onSelectRecordPostOp && (
                         <td className="no-print py-2.5 px-4 text-right whitespace-nowrap">

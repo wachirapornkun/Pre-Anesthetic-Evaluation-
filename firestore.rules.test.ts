@@ -26,10 +26,10 @@ export const DIRTY_DOZEN_CASES: DirtyDozenCase[] = [
   },
   {
     id: 3,
-    name: 'Cross-tenant read',
-    operation: 'get',
+    name: 'Unauthorized delete by non-owner',
+    operation: 'delete',
     expected: 'PERMISSION_DENIED',
-    description: 'Reject get when existing().ownerId != request.auth.uid',
+    description: 'Reject delete when non-admin existing().ownerId != request.auth.uid',
   },
   {
     id: 4,

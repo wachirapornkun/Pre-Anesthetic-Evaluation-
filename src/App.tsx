@@ -39,6 +39,7 @@ import { PostOpA4PrintSheet } from './components/PostOpA4PrintSheet';
 import { PostOpEvaluationForm } from './components/PostOpEvaluationForm';
 import { PreAnestheticForm } from './components/PreAnestheticForm';
 import { RegistryView } from './components/RegistryView';
+import { ThaiDateInput } from './components/ThaiDateInput';
 import {
   auth,
   db,
@@ -61,6 +62,7 @@ import {
   DEFAULT_SURGEON_LIST,
   DEFAULT_THYROID_ITEMS,
   DEFAULT_WARD_LIST,
+  formatThaiDateBE,
   formatThaiScheduleDate,
   generateEvaluationId,
   getTodayIsoDate,
@@ -98,6 +100,7 @@ interface NewFormScheduleDraft {
 
 const LOCAL_RECORDS_STORAGE_KEY = 'bph_local_evaluations_v1';
 const ACTIVE_DRAFT_STORAGE_KEY = 'bph_active_draft_v1';
+const SHARED_EVALUATION_STATUSES = ['draft', 'evaluated', 'post_op_completed', 'locked'] as const;
 
 function loadSavedLocalRecords(): PreAnestheticEvaluation[] {
   try {
@@ -165,6 +168,7 @@ export default function App() {
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const purgedSampleIdsRef = useRef<Set<string>>(new Set());
   const knownCloudIdsRef = useRef<Set<string>>(new Set());
+  const inFlightWritesRef = useRef<Map<string, Promise<void>>>(new Map());
   const deletedIdsRef = useRef<Set<string>>(new Set());
   const autoSyncedUidRef = useRef<string | null>(null);
   const lastLocalFpRef = useRef<Map<string, string>>(new Map());
@@ -387,14 +391,17 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Attach Firestore listener ONLY when authReady and user is authenticated
+  // Attach shared real-time Firestore listener ONLY when authReady and user is authenticated
   useEffect(() => {
     if (!authReady || !user) return;
 
     setIsLoadingRecords(true);
     setCloudError(null);
     const path = 'evaluations';
-    const q = query(collection(db, path), where('ownerId', '==', user.uid));
+    const q = query(
+      collection(db, path),
+      where('status', 'in', [...SHARED_EVALUATION_STATUSES]),
+    );
 
     const unsubscribe = onSnapshot(
       q,
@@ -406,7 +413,7 @@ export default function App() {
             const raw = docSnap.data() as PreAnestheticEvaluation;
             const docId = docSnap.id || raw?.id;
             if (isSampleEvaluationRecord({ id: docId, hn: raw?.hn ?? '', patientName: raw?.patientName ?? '' })) {
-              if (docId && !purgedSampleIdsRef.current.has(docId)) {
+              if (docId && raw?.ownerId === user.uid && !purgedSampleIdsRef.current.has(docId)) {
                 sampleIdsToDelete.push(docId);
               }
               return;
@@ -421,7 +428,8 @@ export default function App() {
         });
         items.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
         const nextCloudIds = new Set(items.map((item) => item.id));
-        knownCloudIdsRef.current = nextCloudIds;
+        nextCloudIds.forEach((id) => knownCloudIdsRef.current.add(id));
+        deletedIdsRef.current.forEach((id) => knownCloudIdsRef.current.delete(id));
         items.forEach((item) => {
           const fp = buildRecordFingerprint(item);
           lastCloudFpRef.current.set(item.id, fp);
@@ -1040,7 +1048,22 @@ export default function App() {
     }
   };
 
-  // Always keep all saved Pre-op evaluations permanently visible in ทะเบียน (Cloud + local mirror)
+  const resolvePreservedOwnerId = (
+    rec: PreAnestheticEvaluation,
+    activeUid: string,
+  ): string => {
+    const cloudMatch = cloudRecords.find((r) => r.id === rec.id);
+    if (cloudMatch?.ownerId && cloudMatch.ownerId !== 'local') {
+      return cloudMatch.ownerId;
+    }
+    const existingOwner = (rec.ownerId || '').trim();
+    if (existingOwner && existingOwner !== 'local') {
+      return existingOwner;
+    }
+    return activeUid;
+  };
+
+  // Always keep all saved Pre-op evaluations permanently visible in ทะเบียน (shared Cloud + local mirror)
   const records = useMemo(() => {
     if (!user) return localRecords;
     const cloudIdSet = new Set(cloudRecords.map((r) => r.id));
@@ -1075,7 +1098,12 @@ export default function App() {
   const unsyncedLocalRecords = useMemo(() => {
     if (!user || isLoadingRecords) return [];
     const cloudIdSet = new Set(cloudRecords.map((r) => r.id));
-    return localRecords.filter((r) => !cloudIdSet.has(r.id));
+    return localRecords.filter(
+      (r) =>
+        !cloudIdSet.has(r.id) &&
+        r.status !== 'locked' &&
+        Boolean(r.patientName.trim() || r.hn.trim()),
+    );
   }, [user, isLoadingRecords, cloudRecords, localRecords]);
   const savedIdSet = useMemo(() => new Set(records.map((r) => r.id)), [records]);
 
@@ -1112,46 +1140,71 @@ export default function App() {
     updatedAt: serverTimestamp(),
   });
 
-  const upsertEvaluationToCloud = async (sanitized: PreAnestheticEvaluation): Promise<void> => {
-    const docRef = doc(db, 'evaluations', sanitized.id);
-    const isKnownExisting =
-      knownCloudIdsRef.current.has(sanitized.id) ||
-      cloudRecords.some((r) => r.id === sanitized.id);
-    const updatePayload = buildCloudUpdatePayload(sanitized);
+  const upsertEvaluationToCloud = (
+    sanitized: PreAnestheticEvaluation,
+    activeUid: string,
+  ): Promise<void> => {
+    const docId = sanitized.id;
+    const prevInFlight = inFlightWritesRef.current.get(docId) ?? Promise.resolve();
 
-    if (isKnownExisting) {
-      try {
-        await updateDoc(docRef, updatePayload);
-      } catch (error) {
-        if (getFirestoreErrorCode(error) === 'not-found') {
-          await setDoc(docRef, {
-            ...sanitized,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-        } else {
-          throw error;
+    const run = prevInFlight
+      .catch(() => {
+        // Previous write error shouldn't block subsequent writes for this doc
+      })
+      .then(async () => {
+        if (!sanitized.patientName.trim()) {
+          throw new Error('patientName is required for Firestore evaluation write');
         }
-      }
-    } else {
-      try {
-        await setDoc(docRef, {
+        const docRef = doc(db, 'evaluations', docId);
+        const isKnownExisting =
+          knownCloudIdsRef.current.has(docId) ||
+          cloudRecords.some((r) => r.id === docId);
+        const updatePayload = buildCloudUpdatePayload(sanitized);
+        const createPayload = {
           ...sanitized,
+          ownerId: activeUid,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
-        });
-      } catch (error) {
-        // If the document already exists on Cloud (e.g. before onSnapshot refreshed),
-        // setDoc triggers update rules and fails createdAt immutability — retry with updateDoc.
-        if (getFirestoreErrorCode(error) === 'permission-denied') {
-          await updateDoc(docRef, updatePayload);
-        } else {
-          throw error;
-        }
-      }
-    }
+        };
 
-    knownCloudIdsRef.current.add(sanitized.id);
+        if (isKnownExisting) {
+          try {
+            await updateDoc(docRef, updatePayload);
+          } catch (error) {
+            const code = getFirestoreErrorCode(error);
+            // If the document does not exist on the server (e.g. deleted remotely or stale local ID),
+            // Firestore rules evaluating existing() can return permission-denied or not-found — try create once.
+            if (code === 'not-found' || code === 'permission-denied') {
+              await setDoc(docRef, createPayload);
+            } else {
+              throw error;
+            }
+          }
+        } else {
+          try {
+            await setDoc(docRef, createPayload);
+          } catch (error) {
+            // If the document already exists on Cloud (e.g. created by a colleague or before onSnapshot refreshed),
+            // setDoc triggers update rules and fails createdAt/ownerId immutability — retry with updateDoc.
+            if (getFirestoreErrorCode(error) === 'permission-denied') {
+              await updateDoc(docRef, updatePayload);
+            } else {
+              throw error;
+            }
+          }
+        }
+
+        knownCloudIdsRef.current.add(docId);
+      });
+
+    inFlightWritesRef.current.set(docId, run);
+    const cleanup = () => {
+      if (inFlightWritesRef.current.get(docId) === run) {
+        inFlightWritesRef.current.delete(docId);
+      }
+    };
+    void run.then(cleanup, cleanup);
+    return run;
   };
 
   const handlePullFromCloud = async (targetUser?: User | null) => {
@@ -1162,7 +1215,10 @@ export default function App() {
     }
     setIsPullingCloud(true);
     const path = 'evaluations';
-    const q = query(collection(db, path), where('ownerId', '==', activeUser.uid));
+    const q = query(
+      collection(db, path),
+      where('status', 'in', [...SHARED_EVALUATION_STATUSES]),
+    );
     try {
       let snapshot;
       try {
@@ -1188,7 +1244,8 @@ export default function App() {
       });
       items.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
       const nextCloudIds = new Set(items.map((item) => item.id));
-      knownCloudIdsRef.current = nextCloudIds;
+      nextCloudIds.forEach((id) => knownCloudIdsRef.current.add(id));
+      deletedIdsRef.current.forEach((id) => knownCloudIdsRef.current.delete(id));
       setCloudRecords(items);
       setCloudError(null);
       setLocalRecords((prev) => {
@@ -1202,8 +1259,8 @@ export default function App() {
       showNotice(
         'success',
         items.length > 0
-          ? `ดึงข้อมูลใบ Pre-op จาก Cloud เรียบร้อยทั้งหมด ${items.length} รายการ แสดงในทะเบียนแล้ว`
-          : 'เชื่อมต่อ Cloud สำเร็จ (ยังไม่พบใบ Pre-op ที่บันทึกไว้ในบัญชีนี้)',
+          ? `ดึงข้อมูลใบ Pre-op ทั้งหมดจาก Cloud เรียบร้อย (${items.length} รายการ) แสดงในทะเบียนและพร้อมแก้ไขร่วมกันแล้ว`
+          : 'เชื่อมต่อ Cloud สำเร็จ (ยังไม่พบใบ Pre-op ที่บันทึกไว้บน Cloud)',
       );
     } catch (error) {
       logFirestoreError(error, OperationType.LIST, path);
@@ -1260,7 +1317,9 @@ export default function App() {
           (incomingHn && incomingOp ? existingBySignature.get(`hn:${incomingHn}|op:${incomingOp}`) : undefined) ||
           (incomingName && incomingOp ? existingBySignature.get(`name:${incomingName}|op:${incomingOp}`) : undefined);
 
-        const targetId = matchedExisting?.id || incomingId || generateEvaluationId();
+        // Only reuse an imported document ID if it already matches one of this clinician's own records;
+        // otherwise mint a fresh ID so importing another user's JSON never collides with their Cloud doc.
+        const targetId = matchedExisting?.id || (!user && incomingId ? incomingId : generateEvaluationId());
         const hydrated = hydrateEvaluationRecord(
           item,
           targetId,
@@ -1326,9 +1385,19 @@ export default function App() {
 
     try {
       for (const rec of unsyncedLocalRecords) {
-        const sanitized = sanitizeEvaluationForFirestore(rec, user.uid);
+        if (rec.status === 'locked') {
+          continue;
+        }
+        const resolvedName =
+          rec.patientName.trim() || (rec.hn.trim() ? `ผู้ป่วย HN ${rec.hn.trim()}` : '');
+        if (!resolvedName) continue;
+        const preservedOwner = resolvePreservedOwnerId(rec, user.uid);
+        const sanitized = sanitizeEvaluationForFirestore(
+          { ...rec, patientName: resolvedName },
+          preservedOwner,
+        );
         try {
-          await upsertEvaluationToCloud(sanitized);
+          await upsertEvaluationToCloud(sanitized, user.uid);
           syncedRecords.push(sanitized);
         } catch (error) {
           lastError = error;
@@ -1417,12 +1486,13 @@ export default function App() {
       }, 300);
     }
 
-    if (needsCloud && user) {
+    if (needsCloud && user && targetSnapshot.status !== 'locked' && user.emailVerified !== false) {
       const activeUid = user.uid;
+      const preservedOwner = resolvePreservedOwnerId(targetSnapshot, activeUid);
       cloudTimer = setTimeout(() => {
         if (deletedIdsRef.current.has(targetSnapshot.id)) return;
-        const sanitizedCloud = sanitizeEvaluationForFirestore(targetSnapshot, activeUid);
-        upsertEvaluationToCloud(sanitizedCloud)
+        const sanitizedCloud = sanitizeEvaluationForFirestore(targetSnapshot, preservedOwner);
+        upsertEvaluationToCloud(sanitizedCloud, activeUid)
           .then(() => {
             lastCloudFpRef.current.set(sanitizedCloud.id, fp);
             lastLocalFpRef.current.set(sanitizedCloud.id, fp);
@@ -1576,14 +1646,15 @@ export default function App() {
         return { record: sanitized, savedToLocalFallback: false };
       }
 
-      const sanitized = sanitizeEvaluationForFirestore(recordToSave, user.uid);
+      const preservedOwner = resolvePreservedOwnerId(recordToSave, user.uid);
+      const sanitized = sanitizeEvaluationForFirestore(recordToSave, preservedOwner);
       const docPath = `evaluations/${sanitized.id}`;
       const isExisting =
         knownCloudIdsRef.current.has(sanitized.id) ||
         cloudRecords.some((r) => r.id === sanitized.id);
 
       try {
-        await upsertEvaluationToCloud(sanitized);
+        await upsertEvaluationToCloud(sanitized, user.uid);
       } catch (error) {
         logFirestoreError(
           error,
@@ -1637,7 +1708,7 @@ export default function App() {
       if (!options?.silentSuccess) {
         showNotice(
           'success',
-          `บันทึกใบ Pre-op ของ ${sanitized.patientName}${sanitized.dateOfOperation ? ` (วันผ่าตัด ${sanitized.dateOfOperation})` : ''} เก็บไว้ในทะเบียนเรียบร้อยแล้ว (แสดงในทะเบียนตลอดเวลา)`,
+          `บันทึกใบ Pre-op ของ ${sanitized.patientName}${sanitized.dateOfOperation ? ` (วันผ่าตัด ${formatThaiDateBE(sanitized.dateOfOperation)})` : ''} เก็บไว้ในทะเบียนเรียบร้อยแล้ว (แสดงในทะเบียนตลอดเวลา)`,
         );
       }
       return { record: sanitized, savedToLocalFallback: false };
@@ -1685,7 +1756,11 @@ export default function App() {
     } catch (error) {
       deletedIdsRef.current.delete(recordId);
       logFirestoreError(error, OperationType.DELETE, docPath);
-      showNotice('error', `ลบข้อมูลไม่สำเร็จ: ${getFriendlyFirestoreErrorMessage(error)}`);
+      const msg =
+        getFirestoreErrorCode(error) === 'permission-denied'
+          ? 'ลบได้เฉพาะรายการที่คุณเป็นผู้สร้าง (หรือผู้ดูแลระบบ) เท่านั้น แต่คุณสามารถเปิดดูและแก้ไขข้อมูลรายการนี้ได้ตามปกติ'
+          : `ลบข้อมูลไม่สำเร็จ: ${getFriendlyFirestoreErrorMessage(error)}`;
+      showNotice('error', msg);
     }
   };
 
@@ -1693,6 +1768,7 @@ export default function App() {
     const copy: PreAnestheticEvaluation = {
       ...record,
       id: generateEvaluationId(),
+      ownerId: user?.uid || 'local',
       patientName: `${record.patientName} (สำเนา)`,
       status: 'draft',
     };
@@ -1856,7 +1932,7 @@ export default function App() {
             </span>
             <span aria-hidden="true">·</span>
             <span className="font-mono tabular-nums text-blue-900 font-medium">
-              วันผ่าตัด: {currentForm.dateOfOperation || 'ยังไม่ระบุ'}
+              วันผ่าตัด: {currentForm.dateOfOperation ? formatThaiDateBE(currentForm.dateOfOperation) : 'ยังไม่ระบุ'}
             </span>
             {currentForm.surgeon?.trim() && (
               <>
@@ -2395,17 +2471,18 @@ export default function App() {
                       </div>
                     </div>
 
-                    <input
+                    <ThaiDateInput
                       id="new-form-op-date"
-                      type="date"
+                      ariaLabel="วันที่ทำผ่าตัด (พ.ศ.)"
                       required
                       value={newFormDraft.dateOfOperation}
-                      onChange={(e) =>
+                      onChange={(next) =>
                         setNewFormDraft((prev) => ({
                           ...prev,
-                          dateOfOperation: e.target.value,
+                          dateOfOperation: next,
                         }))
                       }
+                      wrapperClassName="w-full"
                       className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800 focus:ring-1 focus:ring-blue-800"
                     />
 

@@ -2,13 +2,17 @@ import {
   BLOOD_PREP_STATUS_OPTIONS,
   computeClinicalSummary,
   CONSULT_TYPE_OPTIONS,
+  formatBloodGasSummary,
   formatBloodGroup,
   formatConsultSummary,
   formatDrinkingDetail,
   formatDrugAddictionDetail,
   formatOxygenSupportSummary,
+  formatPostponementReasons,
+  formatPreOpNotVisitedReasons,
   formatShortThaiDate,
   formatSmokingDetail,
+  formatThaiDateBE,
   formatThousandsWithCommas,
   formatToothMarksSummary,
   formatUnderlyingDiseaseTag,
@@ -71,11 +75,22 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
     'BUN',
     'Cr',
     'INR',
+    'FT3',
+    'FT4',
+    'TSH',
+    'HBsAg',
+    'Blood Gas (ABG/VBG)',
     'Consult Med/Cardio',
     'Anesthetic Plan',
     'Blood Group',
-    'Blood Prep (PRC/FFP/Plt)',
+    'Blood Prep (PRC/FFP/Plt/Cryo)',
     'Post-Op Complication',
+    'Surgery Postponed (เลื่อนผ่าตัด)',
+    'Original Operation Date (วันผ่าตัดเดิม)',
+    'Postponed To Date (วันผ่าตัดใหม่)',
+    'Postponement Reasons (เหตุผลที่เลื่อนผ่าตัด)',
+    'Pre-op Not Visited (ไม่ได้เยี่ยม Pre-op)',
+    'Pre-op Not Visited Reasons (เหตุผลที่ไม่ได้เยี่ยม)',
     'Status',
   ];
 
@@ -90,8 +105,8 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
       r.ward,
       r.bed || '',
       r.specialty || '',
-      r.dateOfVisit,
-      r.dateOfOperation,
+      formatThaiDateBE(r.dateOfVisit),
+      formatThaiDateBE(r.dateOfOperation),
       r.operationTime || '',
       r.scheduleType === 'emergency' || (!r.scheduleType && r.asaEmergency) ? 'Emergency' : 'Elective',
       r.orRoom || '',
@@ -126,8 +141,8 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
         : fd.history.drugAddictionStatus === 'no'
         ? 'No'
         : '',
-      fd.laboratory.cbcDate || (!fd.laboratory.chemDate ? fd.laboratory.labDate : '') || '',
-      fd.laboratory.chemDate || (!fd.laboratory.cbcDate ? fd.laboratory.labDate : '') || '',
+      formatThaiDateBE(fd.laboratory.cbcDate || (!fd.laboratory.chemDate ? fd.laboratory.labDate : '') || ''),
+      formatThaiDateBE(fd.laboratory.chemDate || (!fd.laboratory.cbcDate ? fd.laboratory.labDate : '') || ''),
       fd.laboratory.hb,
       fd.laboratory.hct,
       formatThousandsWithCommas(fd.laboratory.wbc),
@@ -137,6 +152,15 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
       fd.laboratory.bun,
       fd.laboratory.cr,
       fd.laboratory.inr,
+      fd.laboratory.ft3 || '',
+      fd.laboratory.ft4 || '',
+      fd.laboratory.tsh || '',
+      fd.laboratory.hbsAg === 'negative'
+        ? 'Negative'
+        : fd.laboratory.hbsAg === 'positive'
+        ? 'Positive'
+        : '',
+      formatBloodGasSummary(fd.laboratory),
       formatConsultSummary(fd.consultTypes, fd.consult),
       summary.planSummary,
       formatBloodGroup(fd.laboratory.bloodGroup, fd.laboratory.bloodRh),
@@ -147,6 +171,20 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
         ? summarizePostOpComplications(fd.postOpComplication)
         : fd.postAnesthesia.complicationStatus === 'no'
         ? 'No'
+        : '',
+      fd.surgeryPostponement?.isPostponed ? 'Yes' : 'No',
+      fd.surgeryPostponement?.isPostponed
+        ? formatThaiDateBE(fd.surgeryPostponement.originalDateOfOperation || '')
+        : '',
+      fd.surgeryPostponement?.isPostponed
+        ? formatThaiDateBE(fd.surgeryPostponement.postponedToDate || '')
+        : '',
+      fd.surgeryPostponement?.isPostponed
+        ? formatPostponementReasons(fd.surgeryPostponement)
+        : '',
+      fd.preOpNotVisited?.isNotVisited ? 'Yes' : 'No',
+      fd.preOpNotVisited?.isNotVisited
+        ? formatPreOpNotVisitedReasons(fd.preOpNotVisited)
         : '',
       getEffectiveEvaluationStatus(r),
     ]
@@ -276,15 +314,39 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
         AN: <span class="val">${esc(record.an || '-')}</span> &nbsp;
         Ward: <span class="val">${esc(formatWardWithBed(record.ward, record.bed) || '-')}</span> &nbsp;
         สาขา: <span class="val">${esc(record.specialty || '-')}</span> &nbsp;
-        Date of visit: <span class="val">${esc(record.dateOfVisit || '-')}</span>
+        Date of visit: <span class="val">${esc(formatThaiDateBE(record.dateOfVisit) || '-')}</span>
       </div>
       <div class="field">
         Diagnosis: <span class="val">${esc(record.diagnosis || '-')}</span> &nbsp;
         Operation: <span class="val">${esc(record.operation || '-')}</span> &nbsp;
         Surgeon: <span class="val">${esc(record.surgeon || '-')}</span> &nbsp;
-        Date of operation: <span class="val">${esc(record.dateOfOperation || '-')}</span> &nbsp;
+        Date of operation: <span class="val">${esc(formatThaiDateBE(record.dateOfOperation) || '-')}</span> &nbsp;
         Time: <span class="val">${esc(record.operationTime || '-')}</span>
       </div>
+      ${
+        fd.surgeryPostponement?.isPostponed
+          ? `<div class="field" style="background:#fffbeb;border:1px solid #f59e0b;padding:2px 6px;"><strong>เลื่อนวันผ่าตัด:</strong> ${
+              fd.surgeryPostponement.originalDateOfOperation
+                ? `เดิม ${esc(formatThaiDateBE(fd.surgeryPostponement.originalDateOfOperation))}`
+                : ''
+            }${
+              fd.surgeryPostponement.postponedToDate
+                ? ` → ใหม่ ${esc(formatThaiDateBE(fd.surgeryPostponement.postponedToDate))}`
+                : ' → ยังไม่ระบุวันใหม่'
+            }${
+              formatPostponementReasons(fd.surgeryPostponement)
+                ? ` · เหตุผล: ${esc(formatPostponementReasons(fd.surgeryPostponement))}`
+                : ''
+            }</div>`
+          : ''
+      }
+      ${
+        fd.preOpNotVisited?.isNotVisited
+          ? `<div class="field" style="background:#fff1f2;border:1px solid #fda4af;padding:2px 6px;"><strong>ฉบับร่าง (ไม่ได้เยี่ยม Pre-op):</strong> ${esc(
+              formatPreOpNotVisitedReasons(fd.preOpNotVisited) || 'ยังไม่ระบุเหตุผล',
+            )}</div>`
+          : ''
+      }
     </div>
 
     <div class="cols">
@@ -375,7 +437,17 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
         <div class="field"><strong>Coag:</strong> PT ${esc(lab.pt || '-')} s · PTT ${esc(lab.ptt || '-')} s · INR ${esc(lab.inr || '-')}</div>
         <div class="field"><strong>LFT:</strong> SGOT ${esc(lab.sgot || '-')} · SGPT ${esc(lab.sgpt || '-')} · ALP ${esc(lab.alp || '-')} · Alb ${esc(lab.alb || '-')}</div>
         <div class="field"><strong>Glucose:</strong> ${esc(lab.glucose || '-')} mg/dl · <strong>HbA1C:</strong> ${esc(lab.hba1c || '-')} · <strong>Lactate:</strong> ${esc(lab.lactate || '-')} · <strong>Trop I:</strong> ${esc(lab.tropI || '-')}</div>
-        <div class="field"><strong>Anti-HIV:</strong> ${radioMark(lab.antiHiv === 'negative', 'Negative')} ${radioMark(lab.antiHiv === 'positive', 'Positive')}${lab.other ? ` · <strong>Other:</strong> ${esc(lab.other)}` : ''}</div>
+        ${
+          lab.ft3?.trim() || lab.ft4?.trim() || lab.tsh?.trim()
+            ? `<div class="field"><strong>TFT:</strong> FT3 ${esc(lab.ft3 || '-')} · FT4 ${esc(lab.ft4 || '-')} · TSH ${esc(lab.tsh || '-')}</div>`
+            : ''
+        }
+        ${
+          formatBloodGasSummary(lab)
+            ? `<div class="field"><strong>${esc(lab.bgType === 'VBG' ? 'VBG' : lab.bgType === 'ABG' ? 'ABG' : 'Blood Gas')}:</strong> ${esc(formatBloodGasSummary(lab).replace(/^(?:ABG|VBG|Blood Gas):\s*/, ''))}</div>`
+            : ''
+        }
+        <div class="field"><strong>Anti-HIV:</strong> ${radioMark(lab.antiHiv === 'negative', 'Negative')} ${radioMark(lab.antiHiv === 'positive', 'Positive')} · <strong>HBsAg:</strong> ${radioMark(lab.hbsAg === 'negative', 'Negative')} ${radioMark(lab.hbsAg === 'positive', 'Positive')}${lab.other ? ` · <strong>Other:</strong> ${esc(lab.other)}` : ''}</div>
         ${
           (lab.customLabs || []).some((c) => c.name.trim() || c.value.trim())
             ? `<div class="field"><strong>Lab เพิ่มเติม:</strong> ${(lab.customLabs || [])
@@ -384,7 +456,7 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
                 .join(' · ')}</div>`
             : ''
         }
-        <div class="field"><strong>Group เลือด:</strong> ${esc(formatBloodGroup(lab.bloodGroup, lab.bloodRh) || '-')} · <strong>Blood component prepare:</strong> ${checkMark(Boolean(lab.prepTs), 'T&S')} PRC ${esc(lab.prepPrc || '-')} u · FFP ${esc(lab.prepFfp || '-')} u · Plt ${esc(lab.prepPlt || '-')} u<br/>${BLOOD_PREP_STATUS_OPTIONS.map((opt) =>
+        <div class="field"><strong>Group เลือด:</strong> ${esc(formatBloodGroup(lab.bloodGroup, lab.bloodRh) || '-')} · <strong>Blood component prepare:</strong> ${checkMark(Boolean(lab.prepTs), 'T&S')} PRC ${esc(lab.prepPrc || '-')} u · FFP ${esc(lab.prepFfp || '-')} u · Plt ${esc(lab.prepPlt || '-')} u · Cryo ${esc(lab.prepCryo || '-')} u<br/>${BLOOD_PREP_STATUS_OPTIONS.map((opt) =>
           checkMark(
             (lab.prepStatuses || []).includes(opt.value),
             opt.value === 'other' && lab.prepStatusDetail
@@ -425,10 +497,10 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
       }${fd.postOpComplication?.severityLevel ? ` · ระดับความรุนแรง: ${esc(fd.postOpComplication.severityLevel)}` : ''}${
         fd.postOpComplication?.remark?.trim() ? ` · Remark: ${esc(fd.postOpComplication.remark.trim())}` : ''
       }</div>
-      <div class="field"><strong>Post Anesthesia Evaluation</strong> &nbsp; Summarized by: <span class="val">${esc(pa.summarizedBy || '-')}</span> Date: <span class="val">${esc(pa.summarizedDate || '-')}</span></div>
+      <div class="field"><strong>Post Anesthesia Evaluation</strong> &nbsp; Summarized by: <span class="val">${esc(pa.summarizedBy || '-')}</span> Date: <span class="val">${esc(formatThaiDateBE(pa.summarizedDate) || '-')}</span></div>
       <div class="field">Vital signs: BP ${esc(pa.bp || '-')} mmHg · P ${esc(pa.pulse || '-')} bpm · RR ${esc(pa.rr || '-')} bpm · T ${esc(pa.temp || '-')} °C · SpO2 ${esc(pa.spo2 || '-')} % · PS ${esc(pa.painScore || '-')} คะแนน</div>
       <div class="field"><strong>Post anesthesia complication:</strong> ${radioMark(pa.complicationStatus === 'no', 'No')} ${radioMark(pa.complicationStatus === 'yes', 'Yes')} ${esc(pa.complicationDetail)}</div>
-      <div class="field" style="text-align:right;">visit by: <span class="val">${esc(pa.visitBy || '-')}</span> Date: <span class="val">${esc(pa.visitDate || '-')}</span></div>
+      <div class="field" style="text-align:right;">visit by: <span class="val">${esc(pa.visitBy || '-')}</span> Date: <span class="val">${esc(formatThaiDateBE(pa.visitDate) || '-')}</span></div>
     </div>
   </div>
   <div class="footer-code">ANE-FM-002-03 &amp; ANE-FM-006-01</div>

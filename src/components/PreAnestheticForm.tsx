@@ -3,9 +3,11 @@ import {
   AlertTriangle,
   ArrowDownWideNarrow,
   ArrowRight,
+  Calendar,
   Check,
   CheckCircle2,
   Edit2,
+  FileText,
   Plus,
   RotateCcw,
   Trash2,
@@ -24,9 +26,12 @@ import {
   BLOOD_PREP_STATUS_OPTIONS,
   BloodPrepStatus,
   calculateBmi,
+  computeBloodGasPfRatio,
   CONSULT_TYPE_OPTIONS,
   ConsultType,
   createEmptyOxygenSupport,
+  createEmptyPreOpNotVisited,
+  createEmptySurgeryPostponement,
   DEFAULT_OXYGEN_OTHER_PRESETS,
   DEFAULT_SPECIALTY_LIST,
   DEFAULT_SURGEON_LIST,
@@ -36,7 +41,10 @@ import {
   DurationUnit,
   EvaluationFormData,
   formatOxygenSupportSummary,
+  formatPostponementReasons,
+  formatPreOpNotVisitedReasons,
   formatShortThaiDate,
+  formatThaiDateBE,
   formatThaiScheduleDate,
   formatToothMarksSummary,
   GaMethod,
@@ -52,9 +60,16 @@ import {
   OR_ROOM_OPTIONS,
   OxygenSupportData,
   PatientGender,
+  PRE_OP_NOT_VISITED_REASON_OPTIONS,
   PreAnestheticEvaluation,
+  PreOpNotVisitedData,
+  PreOpNotVisitedReasonKey,
   RaMethod,
+  refreshAutoProblems,
   sortProblemListBySeverity,
+  SURGERY_POSTPONEMENT_REASON_OPTIONS,
+  SurgeryPostponementData,
+  SurgeryPostponementReasonKey,
   syncPremedicationWithMedications,
   syncProblemListWithPatientData,
   ToothCondition,
@@ -71,6 +86,7 @@ import {
 } from './MedicalDiagrams';
 import { MedicationGroupSelector } from './MedicationGroupSelector';
 import { OperationInput } from './OperationInput';
+import { ThaiDateInput } from './ThaiDateInput';
 
 interface PreAnestheticFormProps {
   value: PreAnestheticEvaluation;
@@ -237,12 +253,83 @@ export function PreAnestheticForm({
   const lab = fd.laboratory;
   const pm = fd.premedication;
   const ap = fd.anestheticPlan;
+  const sp = fd.surgeryPostponement ?? createEmptySurgeryPostponement();
+  const nv = fd.preOpNotVisited ?? createEmptyPreOpNotVisited();
 
   const updateTop = <K extends keyof PreAnestheticEvaluation>(
     key: K,
     val: PreAnestheticEvaluation[K],
   ) => {
     onChange({ ...value, [key]: val });
+  };
+
+  const updatePostponement = (patch: Partial<SurgeryPostponementData>) => {
+    const nextSp: SurgeryPostponementData = {
+      ...sp,
+      ...patch,
+    };
+    onChange({
+      ...value,
+      formData: {
+        ...fd,
+        surgeryPostponement: nextSp,
+      },
+    });
+  };
+
+  const togglePostponementReason = (reasonKey: SurgeryPostponementReasonKey) => {
+    const exists = sp.reasons.includes(reasonKey);
+    const nextReasons = exists
+      ? sp.reasons.filter((k) => k !== reasonKey)
+      : [...sp.reasons, reasonKey];
+    updatePostponement({
+      isPostponed: true,
+      originalDateOfOperation: sp.originalDateOfOperation || value.dateOfOperation || '',
+      reasons: nextReasons,
+    });
+  };
+
+  const handleApplyPostponedDateAsMain = () => {
+    if (!sp.postponedToDate) return;
+    const preservedOriginal = sp.originalDateOfOperation || value.dateOfOperation || '';
+    onChange({
+      ...value,
+      dateOfOperation: sp.postponedToDate,
+      formData: {
+        ...fd,
+        surgeryPostponement: {
+          ...sp,
+          isPostponed: true,
+          originalDateOfOperation: preservedOriginal,
+        },
+      },
+    });
+  };
+
+  const updateNotVisited = (patch: Partial<PreOpNotVisitedData>) => {
+    const nextNv: PreOpNotVisitedData = {
+      ...nv,
+      ...patch,
+    };
+    onChange({
+      ...value,
+      status: nextNv.isNotVisited && value.status !== 'locked' ? 'draft' : value.status,
+      formData: {
+        ...fd,
+        preOpNotVisited: nextNv,
+      },
+    });
+  };
+
+  const toggleNotVisitedReason = (reasonKey: PreOpNotVisitedReasonKey) => {
+    const exists = nv.reasons.includes(reasonKey);
+    const nextReasons = exists
+      ? nv.reasons.filter((k) => k !== reasonKey)
+      : [...nv.reasons, reasonKey];
+    updateNotVisited({
+      isNotVisited: true,
+      reasons: nextReasons,
+    });
   };
 
   const updateFormData = (patch: Partial<EvaluationFormData>) => {
@@ -400,6 +487,7 @@ export function PreAnestheticForm({
         prepPrc: '',
         prepFfp: '',
         prepPlt: '',
+        prepCryo: '',
         prepStatuses: ['no_blood', ...preserved],
       });
       return;
@@ -416,7 +504,10 @@ export function PreAnestheticForm({
     updateLabPatch({ prepStatuses: next });
   };
 
-  const updateBloodPrepUnit = (field: 'prepPrc' | 'prepFfp' | 'prepPlt', val: string) => {
+  const updateBloodPrepUnit = (
+    field: 'prepPrc' | 'prepFfp' | 'prepPlt' | 'prepCryo',
+    val: string,
+  ) => {
     const current = Array.isArray(lab.prepStatuses) ? lab.prepStatuses : [];
     const nextStatuses = val.trim() ? current.filter((s) => s !== 'no_blood') : current;
     updateLabPatch({ [field]: val, prepStatuses: nextStatuses });
@@ -840,12 +931,13 @@ export function PreAnestheticForm({
             })()}
           </div>
           <label className="lg:col-span-2 flex flex-col gap-1">
-            <span className="text-xs font-medium text-slate-600">Date of visit</span>
-            <input
-              type="date"
+            <span className="text-xs font-medium text-slate-600">Date of visit (พ.ศ.)</span>
+            <ThaiDateInput
+              ariaLabel="Date of visit (วันที่เยี่ยม พ.ศ.)"
               value={value.dateOfVisit}
-              onChange={(e) => updateTop('dateOfVisit', e.target.value)}
-              className={`${inputBase} font-mono tabular-nums`}
+              onChange={(next) => updateTop('dateOfVisit', next)}
+              wrapperClassName="w-full"
+              className={`${inputBase} w-full font-mono tabular-nums`}
             />
           </label>
         </div>
@@ -1039,12 +1131,12 @@ export function PreAnestheticForm({
                 })()}
               </div>
             </div>
-            <input
-              type="date"
-              aria-label="Date of operation (วันที่ทำผ่าตัด)"
+            <ThaiDateInput
+              ariaLabel="Date of operation (วันที่ทำผ่าตัด พ.ศ.)"
               value={value.dateOfOperation}
-              onChange={(e) => updateTop('dateOfOperation', e.target.value)}
-              className={`${inputBase} font-mono tabular-nums`}
+              onChange={(next) => updateTop('dateOfOperation', next)}
+              wrapperClassName="w-full"
+              className={`${inputBase} w-full font-mono tabular-nums`}
             />
             {value.dateOfOperation && (
               <span className="text-[11px] text-blue-900 truncate">
@@ -1266,6 +1358,284 @@ export function PreAnestheticForm({
             )}
           </div>
         )}
+
+        {/* Surgery Postponement & Pre-op Draft / Not-Visited Status Controls */}
+        <div className="pt-2.5 border-t border-slate-200 space-y-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <label
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium cursor-pointer transition-colors ${
+                sp.isPostponed
+                  ? 'bg-amber-50 border-amber-400 text-amber-950'
+                  : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={sp.isPostponed}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  updatePostponement({
+                    isPostponed: checked,
+                    originalDateOfOperation:
+                      checked && !sp.originalDateOfOperation
+                        ? value.dateOfOperation || ''
+                        : sp.originalDateOfOperation,
+                  });
+                }}
+                className="rounded border-slate-300 text-amber-700 focus:ring-amber-600"
+              />
+              <Calendar className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+              <span>เลื่อนวันผ่าตัด</span>
+              {sp.isPostponed && sp.postponedToDate && (
+                <span className="font-mono tabular-nums text-[11px] text-amber-800">
+                  → {formatThaiDateBE(sp.postponedToDate)}
+                </span>
+              )}
+            </label>
+
+            <label
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium cursor-pointer transition-colors ${
+                nv.isNotVisited
+                  ? 'bg-rose-50 border-rose-300 text-rose-950'
+                  : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={nv.isNotVisited}
+                onChange={(e) => updateNotVisited({ isNotVisited: e.target.checked })}
+                className="rounded border-slate-300 text-rose-700 focus:ring-rose-600"
+              />
+              <FileText className="w-3.5 h-3.5 text-rose-700 shrink-0" />
+              <span>ใบเยี่ยม Pre-op ฉบับร่าง (ไม่ได้เยี่ยม)</span>
+            </label>
+
+            {sp.isPostponed && formatPostponementReasons(sp, true) && (
+              <span className="text-[11px] text-amber-900 truncate max-w-md">
+                เหตุผลเลื่อน: {formatPostponementReasons(sp, true)}
+              </span>
+            )}
+            {nv.isNotVisited && formatPreOpNotVisitedReasons(nv, true) && (
+              <span className="text-[11px] text-rose-800 truncate max-w-md">
+                ไม่ได้เยี่ยม: {formatPreOpNotVisitedReasons(nv, true)}
+              </span>
+            )}
+          </div>
+
+          {sp.isPostponed && (
+            <div className="bg-amber-50/70 border border-amber-200 rounded-lg p-3 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs font-semibold text-amber-950">
+                  บันทึกการเลื่อนวันผ่าตัด (ข้อมูลจะถูกสรุปอัตโนมัติในหน้าแดชบอร์ด)
+                </div>
+                <button
+                  type="button"
+                  onClick={() => updatePostponement(createEmptySurgeryPostponement())}
+                  className="text-[11px] font-medium text-amber-800 hover:text-amber-950 hover:underline"
+                >
+                  ยกเลิกการเลื่อน
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+                <label className="sm:col-span-4 flex flex-col gap-1">
+                  <span className="text-[11px] font-medium text-amber-950">
+                    วันผ่าตัดเดิม (พ.ศ.)
+                  </span>
+                  <ThaiDateInput
+                    ariaLabel="วันผ่าตัดเดิม (พ.ศ.)"
+                    value={sp.originalDateOfOperation}
+                    onChange={(next) => updatePostponement({ originalDateOfOperation: next })}
+                    wrapperClassName="w-full"
+                    className={`${inputBase} w-full font-mono tabular-nums`}
+                  />
+                </label>
+
+                <label className="sm:col-span-4 flex flex-col gap-1">
+                  <span className="text-[11px] font-medium text-amber-950">
+                    เลื่อนไปวันที่ผ่าตัดใหม่ (พ.ศ. · เว้นว่างได้หากยังไม่กำหนด)
+                  </span>
+                  <ThaiDateInput
+                    ariaLabel="เลื่อนไปวันที่ผ่าตัดใหม่ (พ.ศ.)"
+                    value={sp.postponedToDate}
+                    onChange={(next) => updatePostponement({ postponedToDate: next })}
+                    wrapperClassName="w-full"
+                    className={`${inputBase} w-full font-mono tabular-nums`}
+                  />
+                </label>
+
+                <div className="sm:col-span-4 flex items-center gap-2">
+                  {sp.postponedToDate && sp.postponedToDate !== value.dateOfOperation && (
+                    <button
+                      type="button"
+                      onClick={handleApplyPostponedDateAsMain}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-amber-950 bg-white border border-amber-300 rounded-md hover:bg-amber-100 transition-colors whitespace-nowrap"
+                    >
+                      <ArrowRight className="w-3.5 h-3.5" />
+                      อัปเดตเป็นวันผ่าตัดหลัก
+                    </button>
+                  )}
+                  {sp.postponedToDate && sp.postponedToDate === value.dateOfOperation && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-800">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      อัปเดตวันผ่าตัดหลักแล้ว
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="text-[11px] font-medium text-amber-950">
+                  เหตุผลที่เลื่อนผ่าตัด (เลือกได้มากกว่า 1 ข้อ)
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+                  {SURGERY_POSTPONEMENT_REASON_OPTIONS.map((opt) => {
+                    const checked = sp.reasons.includes(opt.key);
+                    return (
+                      <label
+                        key={opt.key}
+                        className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md border text-xs cursor-pointer transition-colors ${
+                          checked
+                            ? 'bg-amber-100/90 border-amber-400 text-amber-950 font-medium'
+                            : 'bg-white border-amber-200/80 text-slate-700 hover:bg-amber-50'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => togglePostponementReason(opt.key)}
+                          className="rounded border-slate-300 text-amber-700 focus:ring-amber-600"
+                        />
+                        <span className="truncate">{opt.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {sp.reasons.includes('other') && (
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] font-medium text-amber-950">
+                      ระบุเหตุผลอื่นๆ ที่เลื่อนผ่าตัด
+                    </span>
+                    <input
+                      type="text"
+                      value={sp.otherReasonDetail}
+                      onChange={(e) => updatePostponement({ otherReasonDetail: e.target.value })}
+                      placeholder="เช่น มีไข้ / ติดเชื้อเฉียบพลัน / รอปรับยา..."
+                      maxLength={300}
+                      className={inputBase}
+                    />
+                  </label>
+                )}
+                <label
+                  className={`flex flex-col gap-1 ${
+                    sp.reasons.includes('other') ? '' : 'sm:col-span-2'
+                  }`}
+                >
+                  <span className="text-[11px] font-medium text-amber-950">
+                    รายละเอียดเพิ่มเติม / แผนติดตาม (เช่น จอง PRC 2 u, รอ Echo, Consult Med)
+                  </span>
+                  <input
+                    type="text"
+                    value={sp.note}
+                    onChange={(e) => updatePostponement({ note: e.target.value })}
+                    placeholder="ระบุรายละเอียดประกอบการเลื่อนผ่าตัด (ไม่บังคับ)..."
+                    maxLength={500}
+                    className={inputBase}
+                  />
+                </label>
+              </div>
+            </div>
+          )}
+
+          {nv.isNotVisited && (
+            <div className="bg-rose-50/60 border border-rose-200 rounded-lg p-3 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-semibold text-rose-950">
+                    ใบเยี่ยม Pre-op ฉบับร่าง — ไม่ได้เยี่ยมผู้ป่วย
+                  </div>
+                  <p className="text-[11px] text-rose-800/90 mt-0.5">
+                    บันทึกนี้จะคงสถานะเป็นฉบับร่าง (Draft) และเก็บสถิติเหตุผลที่ไม่ได้เยี่ยมไว้ในหน้าแดชบอร์ด
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => updateNotVisited(createEmptyPreOpNotVisited())}
+                  className="text-[11px] font-medium text-rose-800 hover:text-rose-950 hover:underline"
+                >
+                  ยกเลิก (กลับมาเยี่ยมตามปกติ)
+                </button>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="text-[11px] font-medium text-rose-950">
+                  เหตุผลที่ไม่ได้เยี่ยม Pre-op (เลือกได้มากกว่า 1 ข้อ)
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+                  {PRE_OP_NOT_VISITED_REASON_OPTIONS.map((opt) => {
+                    const checked = nv.reasons.includes(opt.key);
+                    return (
+                      <label
+                        key={opt.key}
+                        className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md border text-xs cursor-pointer transition-colors ${
+                          checked
+                            ? 'bg-rose-100/90 border-rose-400 text-rose-950 font-medium'
+                            : 'bg-white border-rose-200/80 text-slate-700 hover:bg-rose-50'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleNotVisitedReason(opt.key)}
+                          className="rounded border-slate-300 text-rose-700 focus:ring-rose-600"
+                        />
+                        <span className="truncate">{opt.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {nv.reasons.includes('other') && (
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] font-medium text-rose-950">
+                      ระบุเหตุผลอื่นๆ ที่ไม่ได้เยี่ยม
+                    </span>
+                    <input
+                      type="text"
+                      value={nv.otherReasonDetail}
+                      onChange={(e) => updateNotVisited({ otherReasonDetail: e.target.value })}
+                      placeholder="ระบุเหตุผลอื่นๆ..."
+                      maxLength={300}
+                      className={inputBase}
+                    />
+                  </label>
+                )}
+                <label
+                  className={`flex flex-col gap-1 ${
+                    nv.reasons.includes('other') ? '' : 'sm:col-span-2'
+                  }`}
+                >
+                  <span className="text-[11px] font-medium text-rose-950">
+                    หมายเหตุเพิ่มเติม (ไม่บังคับ)
+                  </span>
+                  <input
+                    type="text"
+                    value={nv.note}
+                    onChange={(e) => updateNotVisited({ note: e.target.value })}
+                    placeholder="ระบุรายละเอียดเพิ่มเติม เช่น แจ้งหอผู้ป่วยแล้ว / นัดตรวจใหม่..."
+                    maxLength={500}
+                    className={inputBase}
+                  />
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Main 2-Column Clinical Grid (Mirroring Paper Form Left & Right Columns) */}
@@ -3407,11 +3777,11 @@ export function PreAnestheticForm({
                   <span className="text-xs font-semibold text-slate-700 whitespace-nowrap">
                     วันที่ตรวจ CBC :
                   </span>
-                  <input
-                    type="date"
-                    aria-label="วันที่ตรวจ CBC"
+                  <ThaiDateInput
+                    ariaLabel="วันที่ตรวจ CBC (พ.ศ.)"
                     value={lab.cbcDate ?? ''}
-                    onChange={(e) => updateLabPatch({ cbcDate: e.target.value, labDate: '' })}
+                    onChange={(next) => updateLabPatch({ cbcDate: next, labDate: '' })}
+                    placeholder="วว/ดด/ปปปป"
                     className={`${inputBase} font-mono tabular-nums text-xs w-36`}
                   />
                   <button
@@ -3447,11 +3817,11 @@ export function PreAnestheticForm({
                   <span className="text-xs font-semibold text-slate-700 whitespace-nowrap">
                     วันที่ตรวจ Chemistry :
                   </span>
-                  <input
-                    type="date"
-                    aria-label="วันที่ตรวจ Chemistry"
+                  <ThaiDateInput
+                    ariaLabel="วันที่ตรวจ Chemistry (พ.ศ.)"
                     value={lab.chemDate ?? ''}
-                    onChange={(e) => updateLabPatch({ chemDate: e.target.value, labDate: '' })}
+                    onChange={(next) => updateLabPatch({ chemDate: next, labDate: '' })}
+                    placeholder="วว/ดด/ปปปป"
                     className={`${inputBase} font-mono tabular-nums text-xs w-36`}
                   />
                   <button
@@ -3607,42 +3977,253 @@ export function PreAnestheticForm({
               </label>
             </div>
 
-            {/* Anti-HIV & Other Lab */}
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">
-              <div className="sm:col-span-2 flex flex-col gap-1">
-                <span className="text-[11px] text-slate-500">Anti-HIV</span>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      updateLabPatch({
-                        antiHiv: lab.antiHiv === 'negative' ? '' : 'negative',
-                      })
-                    }
-                    className={radioBtn(lab.antiHiv === 'negative')}
-                  >
-                    {lab.antiHiv === 'negative' ? '●' : '○'} Negative
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      updateLabPatch({
-                        antiHiv: lab.antiHiv === 'positive' ? '' : 'positive',
-                      })
-                    }
-                    className={radioBtn(lab.antiHiv === 'positive', 'danger')}
-                  >
-                    {lab.antiHiv === 'positive' ? '●' : '○'} Positive
-                  </button>
+            {/* TFT (Thyroid Function Test): FT3, FT4, TSH */}
+            <div className="space-y-1">
+              <div className="text-[11px] font-medium text-slate-600">
+                TFT (Thyroid Function Test)
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <label className="flex flex-col gap-0.5">
+                  <span className="text-[11px] text-slate-500">FT3 (pg/mL)</span>
+                  <input
+                    type="text"
+                    value={lab.ft3 || ''}
+                    onChange={(e) => updateLab('ft3', e.target.value)}
+                    placeholder="2.0–4.4"
+                    maxLength={20}
+                    className={`${inputBase} font-mono tabular-nums text-xs`}
+                  />
+                </label>
+                <label className="flex flex-col gap-0.5">
+                  <span className="text-[11px] text-slate-500">FT4 (ng/dL)</span>
+                  <input
+                    type="text"
+                    value={lab.ft4 || ''}
+                    onChange={(e) => updateLab('ft4', e.target.value)}
+                    placeholder="0.8–1.8"
+                    maxLength={20}
+                    className={`${inputBase} font-mono tabular-nums text-xs`}
+                  />
+                </label>
+                <label className="flex flex-col gap-0.5">
+                  <span className="text-[11px] text-slate-500">TSH (mIU/L)</span>
+                  <input
+                    type="text"
+                    value={lab.tsh || ''}
+                    onChange={(e) => updateLab('tsh', e.target.value)}
+                    placeholder="0.27–4.2"
+                    maxLength={20}
+                    className={`${inputBase} font-mono tabular-nums text-xs`}
+                  />
+                </label>
+              </div>
+            </div>
+
+            {/* Blood Gas (ABG / VBG) */}
+            {(() => {
+              const isVbg = lab.bgType === 'VBG';
+              const isAbg = lab.bgType === 'ABG';
+              const pfRatio = computeBloodGasPfRatio(lab);
+              return (
+                <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[11px] font-medium text-slate-600">
+                        Blood Gas (ABG / VBG)
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateLabPatch({
+                              bgType: lab.bgType === 'ABG' ? '' : 'ABG',
+                            })
+                          }
+                          className={radioBtn(lab.bgType === 'ABG')}
+                        >
+                          {lab.bgType === 'ABG' ? '●' : '○'} ABG
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateLabPatch({
+                              bgType: lab.bgType === 'VBG' ? '' : 'VBG',
+                            })
+                          }
+                          className={radioBtn(lab.bgType === 'VBG')}
+                        >
+                          {lab.bgType === 'VBG' ? '●' : '○'} VBG
+                        </button>
+                      </div>
+                    </div>
+                    {pfRatio !== null && (
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-semibold border ${
+                          pfRatio < 200
+                            ? 'bg-rose-50 text-rose-700 border-rose-200'
+                            : pfRatio < 300
+                              ? 'bg-amber-50 text-amber-800 border-amber-200'
+                              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        }`}
+                      >
+                        P/F ratio: {pfRatio}
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[11px] text-slate-500">pH</span>
+                      <input
+                        type="text"
+                        value={lab.bgPh || ''}
+                        onChange={(e) => updateLab('bgPh', e.target.value)}
+                        placeholder={isVbg ? '7.31–7.41' : '7.35–7.45'}
+                        maxLength={20}
+                        className={`${inputBase} font-mono tabular-nums text-xs`}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[11px] text-slate-500">
+                        {isVbg ? 'PvCO2' : isAbg ? 'PaCO2' : 'pCO2'} (mmHg)
+                      </span>
+                      <input
+                        type="text"
+                        value={lab.bgPco2 || ''}
+                        onChange={(e) => updateLab('bgPco2', e.target.value)}
+                        placeholder={isVbg ? '41–51' : '35–45'}
+                        maxLength={20}
+                        className={`${inputBase} font-mono tabular-nums text-xs`}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[11px] text-slate-500">
+                        {isVbg ? 'PvO2' : isAbg ? 'PaO2' : 'pO2'} (mmHg)
+                      </span>
+                      <input
+                        type="text"
+                        value={lab.bgPo2 || ''}
+                        onChange={(e) => updateLab('bgPo2', e.target.value)}
+                        placeholder={isVbg ? '30–40' : '80–100'}
+                        maxLength={20}
+                        className={`${inputBase} font-mono tabular-nums text-xs`}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[11px] text-slate-500">HCO3⁻ (mEq/L)</span>
+                      <input
+                        type="text"
+                        value={lab.bgHco3 || ''}
+                        onChange={(e) => updateLab('bgHco3', e.target.value)}
+                        placeholder="22–26"
+                        maxLength={20}
+                        className={`${inputBase} font-mono tabular-nums text-xs`}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[11px] text-slate-500">BE (mEq/L)</span>
+                      <input
+                        type="text"
+                        value={lab.bgBe || ''}
+                        onChange={(e) => updateLab('bgBe', e.target.value)}
+                        placeholder="-2 ถึง +2"
+                        maxLength={20}
+                        className={`${inputBase} font-mono tabular-nums text-xs`}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-0.5">
+                      <span className="text-[11px] text-slate-500">
+                        {isVbg ? 'SvO2' : isAbg ? 'SaO2' : 'O2 Sat'} (%)
+                      </span>
+                      <input
+                        type="text"
+                        value={lab.bgSao2 || ''}
+                        onChange={(e) => updateLab('bgSao2', e.target.value)}
+                        placeholder={isVbg ? '70–75' : '95–100'}
+                        maxLength={20}
+                        className={`${inputBase} font-mono tabular-nums text-xs`}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-0.5 sm:col-span-2">
+                      <span className="text-[11px] text-slate-500">FiO2</span>
+                      <input
+                        type="text"
+                        value={lab.bgFio2 || ''}
+                        onChange={(e) => updateLab('bgFio2', e.target.value)}
+                        placeholder="เช่น 0.21 หรือ 40%"
+                        maxLength={20}
+                        className={`${inputBase} font-mono tabular-nums text-xs`}
+                      />
+                    </label>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Anti-HIV, HBsAg & Other Lab */}
+            <div className="space-y-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">Anti-HIV</span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateLabPatch({
+                          antiHiv: lab.antiHiv === 'negative' ? '' : 'negative',
+                        })
+                      }
+                      className={radioBtn(lab.antiHiv === 'negative')}
+                    >
+                      {lab.antiHiv === 'negative' ? '●' : '○'} Negative
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateLabPatch({
+                          antiHiv: lab.antiHiv === 'positive' ? '' : 'positive',
+                        })
+                      }
+                      className={radioBtn(lab.antiHiv === 'positive', 'danger')}
+                    >
+                      {lab.antiHiv === 'positive' ? '●' : '○'} Positive
+                    </button>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">HBsAg</span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateLabPatch({
+                          hbsAg: lab.hbsAg === 'negative' ? '' : 'negative',
+                        })
+                      }
+                      className={radioBtn(lab.hbsAg === 'negative')}
+                    >
+                      {lab.hbsAg === 'negative' ? '●' : '○'} Negative
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateLabPatch({
+                          hbsAg: lab.hbsAg === 'positive' ? '' : 'positive',
+                        })
+                      }
+                      className={radioBtn(lab.hbsAg === 'positive', 'danger')}
+                    >
+                      {lab.hbsAg === 'positive' ? '●' : '○'} Positive
+                    </button>
+                  </div>
                 </div>
               </div>
-              <label className="sm:col-span-2 flex flex-col gap-0.5">
+              <label className="flex flex-col gap-0.5">
                 <span className="text-[11px] text-slate-500">Other Lab</span>
                 <input
                   type="text"
                   value={lab.other}
                   onChange={(e) => updateLab('other', e.target.value)}
-                  placeholder="HBsAg, UA, ABG, etc."
+                  placeholder="Anti-HCV, UA, etc."
                   className={`${inputBase} text-xs`}
                 />
               </label>
@@ -3843,6 +4424,18 @@ export function PreAnestheticForm({
                   />
                   <span className="text-xs text-slate-500">u</span>
                 </label>
+                <label className="inline-flex items-center gap-1" title="Cryoprecipitate">
+                  <span className="text-xs text-slate-600">Cryoprecipitate</span>
+                  <input
+                    type="text"
+                    aria-label="Cryoprecipitate (units)"
+                    value={lab.prepCryo || ''}
+                    onChange={(e) => updateBloodPrepUnit('prepCryo', e.target.value)}
+                    maxLength={20}
+                    className={`${inputBase} w-12 text-center font-mono tabular-nums text-xs`}
+                  />
+                  <span className="text-xs text-slate-500">u</span>
+                </label>
               </div>
 
               <div className="flex flex-wrap items-center gap-1.5">
@@ -3992,6 +4585,21 @@ export function PreAnestheticForm({
                     >
                       <ArrowDownWideNarrow className="w-3.5 h-3.5 text-blue-800" />
                       เรียงลำดับ
+                    </button>
+                  )}
+                  {fd.problemList.some((s) => s.trim().length > 0) && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateFormData({
+                          problemList: refreshAutoProblems(value),
+                        })
+                      }
+                      title="ตรวจสอบและประมวลผล Problem list ใหม่จากข้อมูลผู้ป่วย (ลบข้อความผิดพลาดที่เกิดจากผลตรวจปกติ/No ... โดยคงข้อความที่พิมพ์เองไว้)"
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors whitespace-nowrap"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-slate-600" />
+                      ประมวลผลใหม่
                     </button>
                   )}
                   {missingAutoProblems.length > 0 && (

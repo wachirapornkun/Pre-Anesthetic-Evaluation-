@@ -60,11 +60,11 @@ service cloud.firestore {
           'preparationOrders', 'postAnesthesia', 'postOpComplication',
           'surgeryPostponement', 'preOpNotVisited'
         ])
-        && fd.history is map && fd.history.keys().size() <= 50
-        && fd.physicalExam is map && fd.physicalExam.keys().size() <= 30
-        && fd.investigation is map && fd.investigation.keys().size() <= 6
-        && fd.laboratory is map && fd.laboratory.keys().size() <= 60
-        && fd.premedication is map && fd.premedication.keys().size() <= 4
+        && fd.history is map && fd.history.keys().size() <= 65
+        && fd.physicalExam is map && fd.physicalExam.keys().size() <= 40
+        && fd.investigation is map && fd.investigation.keys().size() <= 10
+        && fd.laboratory is map && fd.laboratory.keys().size() <= 75
+        && fd.premedication is map && fd.premedication.keys().size() <= 8
         && isStr(fd.consult, 1500)
         && (!('consultTypes' in fd) || (
           fd.consultTypes is list
@@ -72,17 +72,17 @@ service cloud.firestore {
           && fd.consultTypes.hasOnly(['none', 'med', 'cardio', 'neuro', 'chest', 'nephro', 'other'])
         ))
         && isBoundedStringList(fd.problemList, 12, 250)
-        && fd.anestheticPlan is map && fd.anestheticPlan.keys().size() <= 10
+        && fd.anestheticPlan is map && fd.anestheticPlan.keys().size() <= 12
         && isBoundedStringList(fd.preparationOrders, 12, 250)
-        && fd.postAnesthesia is map && fd.postAnesthesia.keys().size() <= 14
+        && fd.postAnesthesia is map && fd.postAnesthesia.keys().size() <= 20
         && (!('postOpComplication' in fd) || (
-          fd.postOpComplication is map && fd.postOpComplication.keys().size() <= 20
+          fd.postOpComplication is map && fd.postOpComplication.keys().size() <= 30
         ))
         && (!('surgeryPostponement' in fd) || (
-          fd.surgeryPostponement is map && fd.surgeryPostponement.keys().size() <= 8
+          fd.surgeryPostponement is map && fd.surgeryPostponement.keys().size() <= 12
         ))
         && (!('preOpNotVisited' in fd) || (
-          fd.preOpNotVisited is map && fd.preOpNotVisited.keys().size() <= 6
+          fd.preOpNotVisited is map && fd.preOpNotVisited.keys().size() <= 10
         ));
     }
 

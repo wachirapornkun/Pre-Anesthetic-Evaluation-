@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
   reload,
@@ -11,6 +11,8 @@ import {
 import {
   AlertCircle,
   CheckCircle2,
+  Copy,
+  ExternalLink,
   Eye,
   EyeOff,
   KeyRound,
@@ -21,9 +23,16 @@ import {
   RefreshCw,
   ShieldCheck,
   UserPlus,
+  Wifi,
   X,
 } from 'lucide-react';
-import { auth, getFriendlyAuthErrorMessage } from '../firebase';
+import {
+  auth,
+  detectInAppBrowser,
+  diagnoseFirebaseConnection,
+  FirebaseDiagnosticResult,
+  getFriendlyAuthErrorMessage,
+} from '../firebase';
 
 type AuthMode = 'login' | 'register' | 'reset';
 
@@ -33,7 +42,7 @@ interface AuthViewProps {
   /** Current signed-in Firebase user (if signed in but unverified, shows verification step) */
   user: User | null;
   onGoogleSignIn: () => Promise<void>;
-  onAuthSuccess: (user: User) => void;
+  onAuthSuccess: (user: User) => void | Promise<void>;
   onSignOut?: () => Promise<void>;
   onContinueOffline?: () => void;
   onClose?: () => void;
@@ -60,12 +69,58 @@ export function AuthModal({
   const [resendCooldown, setResendCooldown] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
+  const [copiedUrl, setCopiedUrl] = useState(false);
+  const [isRunningDiag, setIsRunningDiag] = useState(false);
+  const [diagResult, setDiagResult] = useState<FirebaseDiagnosticResult | null>(null);
+
+  const inAppInfo = useMemo(() => detectInAppBrowser(), []);
+  const needsEmailVerification = Boolean(user && !user.emailVerified);
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
     const timer = setTimeout(() => setResendCooldown((prev) => Math.max(0, prev - 1)), 1000);
     return () => clearTimeout(timer);
   }, [resendCooldown]);
+
+  // Auto-check email verification when the user returns to this tab after clicking the email link
+  useEffect(() => {
+    if (!needsEmailVerification) return;
+    let checking = false;
+
+    const autoVerifyOnReturn = async () => {
+      if (checking) return;
+      const active = auth.currentUser;
+      if (!active || active.emailVerified) return;
+      checking = true;
+      try {
+        await reload(active);
+        if (auth.currentUser?.emailVerified) {
+          await auth.currentUser.getIdToken(true);
+          await onAuthSuccess(auth.currentUser);
+        }
+      } catch {
+        // Ignore silent background refresh errors
+      } finally {
+        checking = false;
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void autoVerifyOnReturn();
+      }
+    };
+    const handleFocus = () => {
+      void autoVerifyOnReturn();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [needsEmailVerification, onAuthSuccess]);
 
   const switchMode = (next: AuthMode) => {
     setMode(next);
@@ -75,6 +130,27 @@ export function AuthModal({
     setShowConfirmPassword(false);
     setErrorMsg(null);
     setInfoMsg(null);
+  };
+
+  const handleCopyCurrentUrl = async () => {
+    if (typeof window === 'undefined') return;
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopiedUrl(true);
+      setTimeout(() => setCopiedUrl(false), 3000);
+    } catch {
+      setInfoMsg(`คัดลอกลิงก์นี้ไปเปิดใน Chrome หรือ Safari: ${window.location.href}`);
+    }
+  };
+
+  const handleRunDiagnostics = async () => {
+    setIsRunningDiag(true);
+    try {
+      const result = await diagnoseFirebaseConnection();
+      setDiagResult(result);
+    } finally {
+      setIsRunningDiag(false);
+    }
   };
 
   const handleEmailLogin = async (e: React.FormEvent) => {
@@ -92,11 +168,18 @@ export function AuthModal({
     try {
       const cred = await signInWithEmailAndPassword(auth, trimmedEmail, password);
       setPassword('');
-      if (cred.user.emailVerified) {
-        onAuthSuccess(cred.user);
+      await reload(cred.user).catch(() => {
+        // Non-critical reload fallback
+      });
+      const refreshedUser = auth.currentUser ?? cred.user;
+      if (refreshedUser.emailVerified) {
+        await refreshedUser.getIdToken(true).catch(() => {
+          // Force fresh token so Firestore rules see email_verified: true immediately
+        });
+        await onAuthSuccess(refreshedUser);
       } else {
         setInfoMsg(
-          'เข้าสู่ระบบแล้ว แต่บัญชีนี้ยังไม่ได้ยืนยันอีเมล กรุณากดลิงก์ยืนยันในอีเมลของคุณเพื่อเปิดใช้งานซิงค์ข้อมูล Cloud',
+          'เข้าสู่ระบบแล้ว แต่บัญชีนี้ยังไม่ได้ยืนยันอีเมล กรุณากดลิงก์ยืนยันในอีเมล หรือกด "เข้าสู่ระบบด้วยบัญชี Google" เพื่อเชื่อมต่อ Cloud ทันที',
         );
       }
     } catch (error) {
@@ -139,7 +222,7 @@ export function AuthModal({
       setConfirmPassword('');
       setResendCooldown(60);
       setInfoMsg(
-        `สร้างบัญชีเรียบร้อยและส่งลิงก์ยืนยันไปยัง ${trimmedEmail} แล้ว กรุณากดลิงก์ในอีเมล (หรือตรวจสอบในโฟลเดอร์สแปม) จากนั้นกดปุ่ม "ตรวจสอบการยืนยันอีเมล"`,
+        `สร้างบัญชีเรียบร้อยและส่งลิงก์ยืนยันไปยัง ${trimmedEmail} แล้ว กรุณากดลิงก์ในอีเมล (ตรวจสอบในโฟลเดอร์สแปมด้วย) จากนั้นกลับมาหน้านี้หรือกดปุ่ม "ฉันยืนยันอีเมลแล้ว"`,
       );
     } catch (error) {
       setErrorMsg(getFriendlyAuthErrorMessage(error));
@@ -183,10 +266,10 @@ export function AuthModal({
       // Force refresh ID token so Firestore security rules receive email_verified: true immediately
       await active.getIdToken(true);
       if (auth.currentUser?.emailVerified) {
-        onAuthSuccess(auth.currentUser);
+        await onAuthSuccess(auth.currentUser);
       } else {
         setErrorMsg(
-          'ยังตรวจไม่พบการยืนยันอีเมล กรุณาเปิดอีเมลแล้วคลิกลิงก์ยืนยันก่อนกดตรวจสอบอีกครั้ง',
+          'ยังตรวจไม่พบการยืนยันอีเมล กรุณาเปิดอีเมลแล้วคลิกลิงก์ยืนยันก่อนกดตรวจสอบอีกครั้ง (หรือกดเข้าสู่ระบบด้วยบัญชี Google แทนด้านล่าง)',
         );
       }
     } catch (error) {
@@ -226,7 +309,34 @@ export function AuthModal({
     }
   };
 
-  const needsEmailVerification = Boolean(user && !user.emailVerified);
+  const googleButton = (label: string) => (
+    <button
+      type="button"
+      disabled={isSubmitting}
+      onClick={() => void handleGoogleClick()}
+      className="w-full inline-flex items-center justify-center gap-2.5 px-4 py-2.5 text-sm font-semibold text-[#243040] bg-white border-2 border-pblue-300 rounded-xl hover:bg-pblue-50 hover:border-pblue-400 disabled:opacity-60 transition-colors shadow-2xs"
+    >
+      <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          fill="#4285F4"
+          d="M23.49 12.27c0-.79-.07-1.55-.2-2.27H12v4.3h6.45a5.52 5.52 0 0 1-2.39 3.62v3h3.87c2.26-2.08 3.56-5.15 3.56-8.65z"
+        />
+        <path
+          fill="#34A853"
+          d="M12 24c3.24 0 5.96-1.07 7.95-2.91l-3.87-3c-1.07.72-2.45 1.15-4.08 1.15-3.14 0-5.8-2.12-6.75-4.97H1.25v3.1A12 12 0 0 0 12 24z"
+        />
+        <path
+          fill="#FBBC05"
+          d="M5.25 14.27a7.2 7.2 0 0 1 0-4.54v-3.1H1.25a12 12 0 0 0 0 10.74l4-3.1z"
+        />
+        <path
+          fill="#EA4335"
+          d="M12 4.76c1.76 0 3.35.61 4.6 1.8l3.45-3.45C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.25 6.63l4 3.1c.95-2.85 3.61-4.97 6.75-4.97z"
+        />
+      </svg>
+      <span>{label}</span>
+    </button>
+  );
 
   const cardContent = (
     <div className="bg-white border border-pblue-200/80 rounded-2xl shadow-lg w-full max-w-md overflow-hidden">
@@ -249,7 +359,7 @@ export function AuthModal({
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
             {needsEmailVerification
-              ? 'เพื่อความปลอดภัยของข้อมูลผู้ป่วย กรุณายืนยันอีเมลก่อนเชื่อมต่อ Cloud'
+              ? 'เพื่อความปลอดภัยของข้อมูลผู้ป่วย กรุณายืนยันอีเมล หรือเข้าสู่ระบบด้วยบัญชี Google'
               : 'เข้าสู่ระบบเพื่อซิงค์ข้อมูลใบเยี่ยม Pre-op / Post-op ร่วมกับทีมแบบ Real-time'}
           </p>
         </div>
@@ -267,13 +377,40 @@ export function AuthModal({
 
       {/* Body */}
       <div className="p-6 space-y-4">
+        {/* In-App Browser Warning (e.g. LINE / Facebook WebView) */}
+        {inAppInfo.isInApp && (
+          <div
+            role="alert"
+            className="rounded-xl bg-pyellow-50 border border-pyellow-300 p-3.5 text-xs text-pyellow-800 space-y-2"
+          >
+            <div className="flex items-start gap-2 font-semibold">
+              <ExternalLink className="w-4 h-4 text-pyellow-600 shrink-0 mt-0.5" />
+              <span>
+                ตรวจพบว่าเปิดผ่านแอป {inAppInfo.appName} ซึ่งอาจบล็อกการเชื่อมต่อ Firebase / Google
+              </span>
+            </div>
+            <p className="text-[11px] leading-relaxed text-pyellow-800/90">
+              กรุณากดปุ่ม <strong>⋮</strong> หรือ <strong>แชร์</strong> มุมขวาบน/ล่าง แล้วเลือก{' '}
+              <strong>เปิดในเบราว์เซอร์เริ่มต้น (Chrome / Safari)</strong> เพื่อเข้าสู่ระบบและซิงค์ข้อมูลได้สมบูรณ์
+            </p>
+            <button
+              type="button"
+              onClick={() => void handleCopyCurrentUrl()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold bg-white text-pyellow-800 border border-pyellow-300 rounded-lg hover:bg-pyellow-100 transition-colors"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              {copiedUrl ? 'คัดลอกลิงก์แล้ว! นำไปวางใน Chrome / Safari' : 'คัดลอกลิงก์ไปเปิดใน Chrome / Safari'}
+            </button>
+          </div>
+        )}
+
         {errorMsg && (
           <div
             role="alert"
             className="flex items-start gap-2 px-3.5 py-2.5 rounded-lg bg-prose-50 border border-prose-200 text-xs text-prose-800"
           >
             <AlertCircle className="w-4 h-4 text-prose-600 shrink-0 mt-0.5" />
-            <span>{errorMsg}</span>
+            <span className="leading-relaxed">{errorMsg}</span>
           </div>
         )}
 
@@ -283,7 +420,7 @@ export function AuthModal({
             className="flex items-start gap-2 px-3.5 py-2.5 rounded-lg bg-pgreen-50 border border-pgreen-200 text-xs text-pgreen-800"
           >
             <CheckCircle2 className="w-4 h-4 text-pgreen-600 shrink-0 mt-0.5" />
-            <span>{infoMsg}</span>
+            <span className="leading-relaxed">{infoMsg}</span>
           </div>
         )}
 
@@ -308,6 +445,16 @@ export function AuthModal({
               <RefreshCw className={`w-4 h-4 ${isCheckingVerify ? 'animate-spin' : ''}`} />
               {isCheckingVerify ? 'กำลังตรวจสอบ...' : 'ฉันยืนยันอีเมลแล้ว — เข้าใช้งานทันที'}
             </button>
+
+            <div className="relative flex items-center py-0.5">
+              <div className="flex-grow border-t border-pborder" />
+              <span className="shrink-0 mx-3 text-[11px] text-slate-400 font-medium">
+                หรือเชื่อมต่อทันทีโดยไม่ต้องรอยืนยันอีเมล
+              </span>
+              <div className="flex-grow border-t border-pborder" />
+            </div>
+
+            {googleButton('เข้าสู่ระบบด้วยบัญชี Google ทันที')}
 
             <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
               <button
@@ -334,6 +481,23 @@ export function AuthModal({
           </div>
         ) : (
           <>
+            {/* Primary 1-click Google Sign-In (Pre-configured & auto-verified for all team members) */}
+            <div className="space-y-1.5">
+              {googleButton('เข้าสู่ระบบด้วยบัญชี Google (แนะนำ — เชื่อมต่อทันที)')}
+              <p className="text-[11px] text-center text-slate-500">
+                ใช้บัญชี Google / Gmail ใดก็ได้ของทีมวิสัญญี ซิงค์ข้อมูล Cloud ร่วมกันได้ทันที
+              </p>
+            </div>
+
+            {/* Divider */}
+            <div className="relative flex items-center py-0.5">
+              <div className="flex-grow border-t border-pborder" />
+              <span className="shrink-0 mx-3 text-[11px] text-slate-400 font-medium">
+                หรือใช้อีเมลและรหัสผ่าน
+              </span>
+              <div className="flex-grow border-t border-pborder" />
+            </div>
+
             {/* Mode Tabs (Login / Register) */}
             {mode !== 'reset' && (
               <div className="grid grid-cols-2 gap-1 p-1 bg-pblue-50/70 border border-pblue-100 rounded-lg text-xs font-semibold">
@@ -365,7 +529,7 @@ export function AuthModal({
             )}
 
             {mode === 'login' && (
-              <form onSubmit={(e) => void handleEmailLogin(e)} className="space-y-3.5">
+              <form onSubmit={(e) => void handleEmailLogin(e)} className="space-y-3">
                 <label className="block space-y-1">
                   <span className="text-xs font-medium text-slate-700">อีเมล (Email)</span>
                   <div className="relative">
@@ -378,7 +542,7 @@ export function AuthModal({
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="name@hospital.com"
                       maxLength={120}
-                      className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-700/20 focus:border-blue-700"
+                      className="w-full pl-9 pr-3 py-2 text-sm border border-pborder rounded-lg bg-white text-[#243040] focus:outline-none focus:ring-2 focus:ring-pblue-300/40 focus:border-pblue-400"
                     />
                   </div>
                 </label>
@@ -389,7 +553,7 @@ export function AuthModal({
                     <button
                       type="button"
                       onClick={() => switchMode('reset')}
-                      className="text-[11px] text-blue-800 hover:text-blue-950 font-medium hover:underline"
+                      className="text-[11px] text-pblue-800 hover:text-prose-800 font-medium hover:underline"
                     >
                       ลืมรหัสผ่าน?
                     </button>
@@ -404,7 +568,7 @@ export function AuthModal({
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="กรอกรหัสผ่าน"
                       maxLength={128}
-                      className="w-full pl-9 pr-10 py-2 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-700/20 focus:border-blue-700"
+                      className="w-full pl-9 pr-10 py-2 text-sm border border-pborder rounded-lg bg-white text-[#243040] focus:outline-none focus:ring-2 focus:ring-pblue-300/40 focus:border-pblue-400"
                     />
                     <button
                       type="button"
@@ -423,7 +587,7 @@ export function AuthModal({
                   className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-pblue-600 rounded-lg hover:bg-pblue-700 disabled:opacity-60 transition-colors"
                 >
                   <LogIn className="w-4 h-4" />
-                  {isSubmitting ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}
+                  {isSubmitting ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบด้วยอีเมล'}
                 </button>
               </form>
             )}
@@ -441,7 +605,7 @@ export function AuthModal({
                     onChange={(e) => setDisplayName(e.target.value)}
                     placeholder="เช่น พว.สมหญิง ใจดี"
                     maxLength={80}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-700/20 focus:border-blue-700"
+                    className="w-full px-3 py-2 text-sm border border-pborder rounded-lg bg-white text-[#243040] focus:outline-none focus:ring-2 focus:ring-pblue-300/40 focus:border-pblue-400"
                   />
                 </label>
 
@@ -457,7 +621,7 @@ export function AuthModal({
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="name@hospital.com"
                       maxLength={120}
-                      className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-700/20 focus:border-blue-700"
+                      className="w-full pl-9 pr-3 py-2 text-sm border border-pborder rounded-lg bg-white text-[#243040] focus:outline-none focus:ring-2 focus:ring-pblue-300/40 focus:border-pblue-400"
                     />
                   </div>
                 </label>
@@ -477,7 +641,7 @@ export function AuthModal({
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="ตั้งรหัสผ่านอย่างน้อย 6 ตัวอักษร"
                       maxLength={128}
-                      className="w-full pl-9 pr-10 py-2 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-700/20 focus:border-blue-700"
+                      className="w-full pl-9 pr-10 py-2 text-sm border border-pborder rounded-lg bg-white text-[#243040] focus:outline-none focus:ring-2 focus:ring-pblue-300/40 focus:border-pblue-400"
                     />
                     <button
                       type="button"
@@ -503,7 +667,7 @@ export function AuthModal({
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="กรอกรหัสผ่านอีกครั้ง"
                       maxLength={128}
-                      className="w-full pl-9 pr-10 py-2 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-700/20 focus:border-blue-700"
+                      className="w-full pl-9 pr-10 py-2 text-sm border border-pborder rounded-lg bg-white text-[#243040] focus:outline-none focus:ring-2 focus:ring-pblue-300/40 focus:border-pblue-400"
                     />
                     <button
                       type="button"
@@ -570,54 +734,80 @@ export function AuthModal({
                 </button>
               </form>
             )}
-
-            {/* Divider & Google Sign-In */}
-            <div className="relative flex items-center py-1">
-              <div className="flex-grow border-t border-slate-200" />
-              <span className="shrink-0 mx-3 text-[11px] text-slate-400 font-medium">หรือ</span>
-              <div className="flex-grow border-t border-slate-200" />
-            </div>
-
-            <button
-              type="button"
-              disabled={isSubmitting}
-              onClick={() => void handleGoogleClick()}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-slate-800 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-60 transition-colors"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  fill="#4285F4"
-                  d="M23.49 12.27c0-.79-.07-1.55-.2-2.27H12v4.3h6.45a5.52 5.52 0 0 1-2.39 3.62v3h3.87c2.26-2.08 3.56-5.15 3.56-8.65z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 24c3.24 0 5.96-1.07 7.95-2.91l-3.87-3c-1.07.72-2.45 1.15-4.08 1.15-3.14 0-5.8-2.12-6.75-4.97H1.25v3.1A12 12 0 0 0 12 24z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.25 14.27a7.2 7.2 0 0 1 0-4.54v-3.1H1.25a12 12 0 0 0 0 10.74l4-3.1z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 4.76c1.76 0 3.35.61 4.6 1.8l3.45-3.45C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.25 6.63l4 3.1c.95-2.85 3.61-4.97 6.75-4.97z"
-                />
-              </svg>
-              เข้าสู่ระบบด้วยบัญชี Google
-            </button>
-
-            {variant === 'fullscreen' && onContinueOffline && (
-              <div className="pt-1 text-center">
-                <button
-                  type="button"
-                  onClick={onContinueOffline}
-                  className="text-[11px] text-slate-500 hover:text-slate-800 underline"
-                >
-                  ใช้งานชั่วคราวแบบออฟไลน์เฉพาะเครื่องนี้ (ไม่ซิงค์ข้อมูล Cloud)
-                </button>
-              </div>
-            )}
           </>
         )}
+
+        {/* Troubleshooting / Live Connection Check */}
+        <div className="pt-2 border-t border-pborder/80 space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+            <button
+              type="button"
+              disabled={isRunningDiag}
+              onClick={() => void handleRunDiagnostics()}
+              className="inline-flex items-center gap-1.5 text-pblue-800 hover:text-prose-800 font-medium hover:underline disabled:opacity-50"
+            >
+              <Wifi className={`w-3.5 h-3.5 ${isRunningDiag ? 'animate-pulse' : ''}`} />
+              {isRunningDiag ? 'กำลังตรวจสอบการเชื่อมต่อ...' : 'เชื่อมต่อไม่ได้? ทดสอบการเชื่อมต่อ Firebase'}
+            </button>
+            {variant === 'fullscreen' && onContinueOffline && !needsEmailVerification && (
+              <button
+                type="button"
+                onClick={onContinueOffline}
+                className="text-slate-500 hover:text-slate-800 underline"
+              >
+                ใช้งานออฟไลน์ชั่วคราว
+              </button>
+            )}
+          </div>
+
+          {diagResult && (
+            <div className="rounded-xl bg-pcanvas border border-pborder p-3 text-[11px] space-y-1 text-[#243040]">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold">ผลการตรวจสอบการเชื่อมต่อ</span>
+                <button
+                  type="button"
+                  onClick={() => setDiagResult(null)}
+                  className="text-slate-400 hover:text-slate-700"
+                >
+                  ปิด
+                </button>
+              </div>
+              <div>
+                • อินเทอร์เน็ต:{' '}
+                <span className={diagResult.networkOnline ? 'text-pgreen-800 font-medium' : 'text-prose-800 font-medium'}>
+                  {diagResult.networkOnline ? 'ออนไลน์ปกติ' : 'ออฟไลน์'}
+                </span>
+              </div>
+              <div>
+                • ฐานข้อมูล Firestore:{' '}
+                <span className={diagResult.firestoreReachable ? 'text-pgreen-800 font-medium' : 'text-prose-800 font-medium'}>
+                  {diagResult.firestoreMessage}
+                </span>
+              </div>
+              <div>
+                • เบราว์เซอร์:{' '}
+                <span className={diagResult.inAppBrowser.isInApp ? 'text-pyellow-800 font-medium' : 'text-pgreen-800 font-medium'}>
+                  {diagResult.inAppBrowser.isInApp
+                    ? `เปิดผ่านแอป ${diagResult.inAppBrowser.appName} (ควรเปลี่ยนไปเปิดใน Chrome/Safari)`
+                    : 'เบราว์เซอร์มาตรฐาน (รองรับ)'}
+                </span>
+              </div>
+              {diagResult.hostname && (
+                <div className="text-slate-500 font-mono text-[10px] break-all">
+                  • โดเมน: {diagResult.hostname}
+                </div>
+              )}
+              {diagResult.signedInEmail && (
+                <div>
+                  • บัญชีปัจจุบัน: <span className="font-mono">{diagResult.signedInEmail}</span> (
+                  {diagResult.emailVerified && diagResult.tokenEmailVerified !== false
+                    ? 'ยืนยันอีเมลแล้ว'
+                    : 'ยังไม่ยืนยันอีเมล'})
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

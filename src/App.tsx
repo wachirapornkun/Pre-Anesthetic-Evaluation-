@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
+import { onAuthStateChanged, reload, signInWithPopup, signOut, User } from 'firebase/auth';
 import {
   collection,
   deleteDoc,
@@ -415,24 +415,64 @@ export default function App() {
     }
   }, [currentForm]);
 
-  // Listen to Firebase Auth state
+  // Listen to Firebase Auth state and ensure ID token claims (email_verified) stay fresh
   useEffect(() => {
+    let active = true;
     const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
-      setUser(nextUser);
-      setIsEmailVerified(Boolean(nextUser?.emailVerified));
-      setAuthReady(true);
-      if (nextUser?.emailVerified) {
-        setAllowOfflineBypass(false);
-        setIsAuthModalOpen(false);
-      }
-      if (!nextUser || !nextUser.emailVerified) {
+      if (!active) return;
+      if (!nextUser) {
+        setUser(null);
+        setIsEmailVerified(false);
+        setAuthReady(true);
         setCloudRecords([]);
         setCloudError(null);
         setRemoteUpdateCandidate(null);
         setIsLoadingRecords(false);
+        return;
       }
+
+      const syncVerifiedState = async () => {
+        let verified = Boolean(nextUser.emailVerified);
+        if (!verified) {
+          try {
+            await reload(nextUser);
+            verified = Boolean(auth.currentUser?.emailVerified);
+          } catch {
+            // Keep existing state when offline
+          }
+        }
+        if (verified) {
+          try {
+            const tokenResult = await nextUser.getIdTokenResult();
+            if (tokenResult.claims?.email_verified !== true) {
+              await nextUser.getIdToken(true);
+            }
+          } catch {
+            // Keep existing token when offline
+          }
+        }
+        if (!active) return;
+        const latestUser = auth.currentUser ?? nextUser;
+        setUser(latestUser);
+        setIsEmailVerified(verified);
+        setAuthReady(true);
+        if (verified) {
+          setAllowOfflineBypass(false);
+          setIsAuthModalOpen(false);
+        } else {
+          setCloudRecords([]);
+          setCloudError(null);
+          setRemoteUpdateCandidate(null);
+          setIsLoadingRecords(false);
+        }
+      };
+
+      void syncVerifiedState();
     });
-    return () => unsubscribe();
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
   const applyCloudSnapshot = (
@@ -1607,27 +1647,56 @@ export default function App() {
     setIsAuthModalOpen(true);
   };
 
-  const handleAuthSuccess = (verifiedUser: User) => {
-    setUser(verifiedUser);
-    setIsEmailVerified(Boolean(verifiedUser.emailVerified));
+  const handleAuthSuccess = async (verifiedUser: User) => {
+    try {
+      await reload(verifiedUser);
+    } catch {
+      // Non-critical reload fallback
+    }
+    const latestUser = auth.currentUser ?? verifiedUser;
+    try {
+      await latestUser.getIdToken(true);
+    } catch {
+      // Non-critical token refresh fallback
+    }
+    setUser(latestUser);
+    setIsEmailVerified(Boolean(latestUser.emailVerified));
     setAllowOfflineBypass(false);
     setIsAuthModalOpen(false);
+    setCloudError(null);
     setCloudRetryNonce((n) => n + 1);
     showNotice('success', 'เข้าสู่ระบบสำเร็จ กำลังซิงค์ข้อมูลใบ Pre-op จาก Cloud...');
-    void handlePullFromCloud(verifiedUser, { silent: true });
+    void handlePullFromCloud(latestUser, { silent: true });
   };
 
   const handleGoogleSignIn = async () => {
     try {
       const cred = await signInWithPopup(auth, googleProvider);
       if (cred?.user) {
-        handleAuthSuccess(cred.user);
+        await handleAuthSuccess(cred.user);
       }
     } catch (error) {
       const msg = getFriendlyAuthErrorMessage(error);
       showNotice('error', msg);
       throw error;
     }
+  };
+
+  const handleRefreshCloudConnection = async () => {
+    const activeUser = auth.currentUser ?? user;
+    if (activeUser) {
+      try {
+        await reload(activeUser);
+        await activeUser.getIdToken(true);
+        setUser(auth.currentUser ?? activeUser);
+        setIsEmailVerified(Boolean((auth.currentUser ?? activeUser).emailVerified));
+      } catch {
+        // Proceed with reconnect retry even if reload fails offline
+      }
+    }
+    setCloudError(null);
+    setCloudRetryNonce((n) => n + 1);
+    void handlePullFromCloud(auth.currentUser ?? user);
   };
 
   const handleSignOut = async () => {
@@ -2421,11 +2490,11 @@ export default function App() {
             </div>
             <button
               type="button"
-              onClick={() => setCloudRetryNonce((n) => n + 1)}
+              onClick={() => void handleRefreshCloudConnection()}
               className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-prose-800 bg-white border border-prose-300 rounded-md hover:bg-prose-100 whitespace-nowrap"
             >
               <RefreshCw className="w-3.5 h-3.5" />
-              ลองเชื่อมต่อใหม่
+              รีเฟรชสิทธิ์ & เชื่อมต่อใหม่
             </button>
           </div>
         )}

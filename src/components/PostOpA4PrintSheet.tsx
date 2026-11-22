@@ -3,6 +3,7 @@ import {
   createEmptyPostOpComplication,
   formatThaiDateBE,
   formatWardWithBed,
+  getEffectiveNoneProblemFlags,
   POST_OP_ADMIN_ERROR_OPTIONS,
   POST_OP_INCIDENT_OPTIONS,
   POST_OP_LEFT_COMPLICATIONS,
@@ -26,6 +27,9 @@ export function PostOpA4PrintSheet({
   const fd = evaluation.formData;
   const pa = fd.postAnesthesia;
   const pc = fd.postOpComplication ?? createEmptyPostOpComplication();
+  const noneProblemFlags = getEffectiveNoneProblemFlags(pc);
+  const unifiedPostOpVisitor = (pa.visitBy || pc.postOpRecorder || '').trim();
+  const unifiedPostOpDate = (pa.visitDate || pc.postOpDate || '').trim();
 
   const mark = (active: boolean, text: string, keyProp?: string) => (
     <span key={keyProp} className="inline-flex items-center gap-0.5 mr-2 whitespace-nowrap">
@@ -138,13 +142,19 @@ export function PostOpA4PrintSheet({
                   <th className="w-[46px] border-l border-slate-900 py-1 text-center">Post op</th>
                 </tr>
               </thead>
-              <tbody>{POST_OP_RIGHT_COMPLICATIONS.map((item) => renderRow(item))}</tbody>
+              <tbody>
+                {POST_OP_RIGHT_COMPLICATIONS.map((item) => renderRow(item))}
+                <tr className="border-b border-slate-900 font-semibold">
+                  <td className="px-1.5 py-[2px] leading-[1.2]">None problem</td>
+                  <td className="w-[46px] border-l border-slate-700 text-center font-mono font-bold">
+                    {noneProblemFlags.periOp ? '✓' : ''}
+                  </td>
+                  <td className="w-[46px] border-l border-slate-700 text-center font-mono font-bold">
+                    {noneProblemFlags.postOp ? '✓' : ''}
+                  </td>
+                </tr>
+              </tbody>
             </table>
-
-            {/* None problem */}
-            <div className="px-2 py-1 border-b border-slate-900 font-semibold">
-              {box(pc.noneProblem, 'None problem')}
-            </div>
 
             {/* OUT COME */}
             <div className="border-b border-slate-900">
@@ -234,8 +244,8 @@ export function PostOpA4PrintSheet({
               <div className="whitespace-pre-wrap pt-0.5">{pc.remark || ''}</div>
             </div>
 
-            {/* Recorders */}
-            <div className="px-2 py-1 space-y-1 text-[9.5px]">
+            {/* Peri op Recorder (Post op recorder unified with visit by below) */}
+            <div className="px-2 py-1 text-[9.5px]">
               <div className="flex flex-wrap items-center justify-between gap-1">
                 <span>
                   ผู้บันทึกข้อมูล Peri op:{' '}
@@ -244,16 +254,6 @@ export function PostOpA4PrintSheet({
                 <span>
                   วันที่ <strong className="font-mono">{formatThaiDateBE(pc.periOpDate) || '________'}</strong> เวลา{' '}
                   <strong className="font-mono">{pc.periOpTime || '______'}</strong>
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-1">
-                <span>
-                  ผู้บันทึกข้อมูล Post op:{' '}
-                  <strong>{pc.postOpRecorder || '_________________'}</strong>
-                </span>
-                <span>
-                  วันที่ <strong className="font-mono">{formatThaiDateBE(pc.postOpDate) || '________'}</strong> เวลา{' '}
-                  <strong className="font-mono">{pc.postOpTime || '______'}</strong>
                 </span>
               </div>
             </div>
@@ -265,10 +265,6 @@ export function PostOpA4PrintSheet({
           <div className="flex items-center justify-between">
             <span className="font-bold border border-slate-800 px-2 py-0.5">
               Post Anesthesia Evaluation
-            </span>
-            <span>
-              Summarized by: <strong>{pa.summarizedBy || '________________'}</strong> &nbsp; date:{' '}
-              <strong className="font-mono">{formatThaiDateBE(pa.summarizedDate) || '________'}</strong>
             </span>
           </div>
           <div className="font-mono">
@@ -285,8 +281,15 @@ export function PostOpA4PrintSheet({
               {pa.complicationDetail}
             </span>
             <span>
-              visit by: <strong>{pa.visitBy || '________________'}</strong> &nbsp; date:{' '}
-              <strong className="font-mono">{formatThaiDateBE(pa.visitDate) || '________'}</strong>
+              ผู้บันทึกข้อมูล Post op / visit by:{' '}
+              <strong>{unifiedPostOpVisitor || '________________'}</strong> &nbsp; วันที่{' '}
+              <strong className="font-mono">{formatThaiDateBE(unifiedPostOpDate) || '________'}</strong>
+              {pc.postOpTime ? (
+                <>
+                  {' '}
+                  เวลา <strong className="font-mono">{pc.postOpTime}</strong>
+                </>
+              ) : null}
             </span>
           </div>
         </div>

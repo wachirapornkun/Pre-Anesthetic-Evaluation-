@@ -137,6 +137,10 @@ export function RegistryView({
   const [dateTo, setDateTo] = useState('');
   const [sortMode, setSortMode] = useState<SortGroupMode>('op_surgeon_desc');
   const [previewRecord, setPreviewRecord] = useState<PreAnestheticEvaluation | null>(null);
+  const livePreviewRecord = useMemo(() => {
+    if (!previewRecord) return null;
+    return records.find((r) => r.id === previewRecord.id) ?? previewRecord;
+  }, [previewRecord, records]);
   const [confirmDeleteRecord, setConfirmDeleteRecord] = useState<PreAnestheticEvaluation | null>(
     null,
   );
@@ -255,7 +259,10 @@ export function RegistryView({
       if (dateScope === 'past' && (!opDate || opDate >= today)) return false;
 
       const effStatus = getEffectiveEvaluationStatus(r);
-      const postOpCheck = getPostOpVisitCompleteness(r.formData?.postAnesthesia);
+      const postOpCheck = getPostOpVisitCompleteness(
+        r.formData?.postAnesthesia,
+        r.formData?.postOpComplication,
+      );
       if (statusFilter === 'not_post_op' && postOpCheck.isComplete) return false;
       if (statusFilter === 'postponed' && !isSurgeryPostponed(r)) return false;
       if (statusFilter === 'not_visited' && !isPreOpDraftNotVisited(r)) return false;
@@ -417,18 +424,18 @@ export function RegistryView({
       <div
         className={`rounded-xl border px-4 py-3 flex flex-wrap items-center justify-between gap-3 ${
           userEmail
-            ? 'bg-emerald-50/60 border-emerald-200'
-            : 'bg-blue-50 border-blue-200'
+            ? 'bg-pgreen-50/80 border-pgreen-200'
+            : 'bg-pblue-50/80 border-pblue-200'
         }`}
       >
         <div className="flex items-start gap-2.5 min-w-0">
           <Database
             className={`w-4 h-4 mt-0.5 shrink-0 ${
-              userEmail ? 'text-emerald-800' : 'text-blue-800'
+              userEmail ? 'text-pgreen-800' : 'text-pblue-800'
             }`}
           />
           <div className="min-w-0">
-            <div className="text-xs font-bold text-slate-900">
+            <div className="text-xs font-bold text-[#243040]">
               {userEmail
                 ? `แหล่งจัดเก็บข้อมูล: ฐานข้อมูล Cloud (${userEmail}) · ${cloudCount} ราย${
                     unsyncedLocalCount > 0 ? ` · ในเครื่องรอซิงค์ ${unsyncedLocalCount} ราย` : ''
@@ -447,7 +454,7 @@ export function RegistryView({
             <button
               type="button"
               onClick={onSignIn}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-800 rounded-lg hover:bg-blue-900 transition-colors whitespace-nowrap"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-pblue-600 rounded-lg hover:bg-pblue-700 transition-colors whitespace-nowrap"
             >
               <LogIn className="w-3.5 h-3.5" />
               เข้าสู่ระบบ Google (เก็บบน Cloud)
@@ -458,7 +465,7 @@ export function RegistryView({
               type="button"
               disabled={isSyncingLocal}
               onClick={onSyncLocalToCloud}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-700 rounded-lg hover:bg-emerald-800 disabled:opacity-60 transition-colors whitespace-nowrap"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-pgreen-600 rounded-lg hover:bg-pgreen-800 disabled:opacity-60 transition-colors whitespace-nowrap"
             >
               <UploadCloud className="w-3.5 h-3.5" />
               {isSyncingLocal
@@ -471,7 +478,7 @@ export function RegistryView({
               type="button"
               onClick={onPullFromCloud}
               disabled={isPullingCloud}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-950 bg-white border border-emerald-300 rounded-lg hover:bg-emerald-50 disabled:opacity-60 transition-colors whitespace-nowrap"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-pgreen-800 bg-white border border-pgreen-300 rounded-lg hover:bg-pgreen-50 disabled:opacity-60 transition-colors whitespace-nowrap"
             >
               <CloudDownload className="w-3.5 h-3.5" />
               {isPullingCloud ? 'กำลังดึงข้อมูล...' : 'ดึงข้อมูลล่าสุดจาก Cloud'}
@@ -482,9 +489,9 @@ export function RegistryView({
             onClick={() => exportAllEvaluationsJson(records)}
             disabled={records.length === 0}
             title="ดาวน์โหลดใบ Pre-op และ Post-op ทั้งหมดเก็บเป็นไฟล์สำรอง (.json)"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-800 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors whitespace-nowrap"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-pborder rounded-lg hover:bg-pblue-50 disabled:opacity-50 transition-colors whitespace-nowrap"
           >
-            <Archive className="w-3.5 h-3.5 text-blue-800" />
+            <Archive className="w-3.5 h-3.5 text-pblue-600" />
             สำรองข้อมูลทั้งหมด (.json)
           </button>
           {onImportJsonFile && (
@@ -518,7 +525,7 @@ export function RegistryView({
 
       {/* Unsaved open Pre-op form reminder */}
       {unsavedCurrentForm && onSaveCurrentForm && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-950">
+        <div className="bg-pyellow-50 border border-pyellow-200 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-pyellow-800">
           <span>
             มีใบ Pre-op ที่กำลังเปิดกรอกอยู่ยังไม่ได้กดบันทึกเข้าทะเบียน:{' '}
             <strong>{unsavedCurrentForm.patientName || `HN ${unsavedCurrentForm.hn}`}</strong>
@@ -529,7 +536,7 @@ export function RegistryView({
           <button
             type="button"
             onClick={onSaveCurrentForm}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-amber-700 rounded-lg hover:bg-amber-800 whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-pyellow-600 rounded-lg hover:bg-pyellow-800 whitespace-nowrap shrink-0"
           >
             <Save className="w-3.5 h-3.5" />
             บันทึกเข้าทะเบียนทันที
@@ -538,9 +545,9 @@ export function RegistryView({
       )}
 
       {/* Unified Surgery Folder & Registry Overview Strip */}
-      <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div className="bg-white border border-pborder rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-bold text-slate-900">
+          <h2 className="text-sm font-bold text-[#243040]">
             ทะเบียนผ่าตัดและแฟ้มใบเยี่ยมทั้งหมด ({registryCounts.total} ราย)
           </h2>
           <p className="text-xs text-slate-500 mt-0.5 tabular-nums">
@@ -553,8 +560,8 @@ export function RegistryView({
             onClick={() => resetAllFilters()}
             className={`px-2.5 py-1 rounded-md border font-medium tabular-nums transition-colors ${
               !hasActiveSearchOrFilter
-                ? 'bg-blue-800 text-white border-blue-800'
-                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                ? 'bg-pblue-600 text-white border-pblue-600'
+                : 'bg-white text-slate-700 border-pborder hover:bg-pblue-50'
             }`}
           >
             ทั้งหมด {registryCounts.total}
@@ -568,8 +575,8 @@ export function RegistryView({
             }}
             className={`px-2.5 py-1 rounded-md border font-medium tabular-nums transition-colors ${
               dateScope === 'today'
-                ? 'bg-blue-50 text-blue-900 border-blue-300'
-                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                ? 'bg-pblue-50 text-pblue-800 border-pblue-300 font-semibold'
+                : 'bg-white text-slate-700 border-pborder hover:bg-pblue-50/50'
             }`}
           >
             วันนี้ {registryCounts.todayCount}
@@ -583,8 +590,8 @@ export function RegistryView({
             }}
             className={`px-2.5 py-1 rounded-md border font-medium tabular-nums transition-colors ${
               dateScope === 'tomorrow'
-                ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
-                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                ? 'bg-pgreen-50 text-pgreen-800 border-pgreen-300 font-semibold'
+                : 'bg-white text-slate-700 border-pborder hover:bg-pgreen-50/50'
             }`}
           >
             พรุ่งนี้ {registryCounts.tomorrowCount}
@@ -596,8 +603,8 @@ export function RegistryView({
             }
             className={`px-2.5 py-1 rounded-md border font-medium tabular-nums transition-colors ${
               statusFilter === 'evaluated'
-                ? 'bg-blue-50 text-blue-900 border-blue-300'
-                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                ? 'bg-ppink-50 text-ppink-800 border-ppink-300 font-semibold'
+                : 'bg-white text-slate-700 border-pborder hover:bg-ppink-50/50'
             }`}
           >
             ประเมิน Pre-op แล้ว {registryCounts.preOpDone}
@@ -607,8 +614,8 @@ export function RegistryView({
             onClick={() => setStatusFilter((prev) => (prev === 'draft' ? 'ALL' : 'draft'))}
             className={`px-2.5 py-1 rounded-md border font-medium tabular-nums transition-colors ${
               statusFilter === 'draft'
-                ? 'bg-amber-50 text-amber-900 border-amber-300'
-                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                ? 'bg-pyellow-50 text-pyellow-800 border-pyellow-300 font-semibold'
+                : 'bg-white text-slate-700 border-pborder hover:bg-pyellow-50/50'
             }`}
           >
             รอเยี่ยม {registryCounts.draft}
@@ -620,8 +627,8 @@ export function RegistryView({
             }
             className={`px-2.5 py-1 rounded-md border font-medium tabular-nums transition-colors ${
               statusFilter === 'postponed'
-                ? 'bg-amber-50 text-amber-950 border-amber-400'
-                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                ? 'bg-pyellow-100 text-pyellow-800 border-pyellow-300 font-semibold'
+                : 'bg-white text-slate-700 border-pborder hover:bg-pyellow-50/50'
             }`}
           >
             เลื่อนผ่าตัด {registryCounts.postponed}
@@ -633,8 +640,8 @@ export function RegistryView({
             }
             className={`px-2.5 py-1 rounded-md border font-medium tabular-nums transition-colors ${
               statusFilter === 'not_visited'
-                ? 'bg-rose-50 text-rose-900 border-rose-300'
-                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                ? 'bg-prose-50 text-prose-800 border-prose-300 font-semibold'
+                : 'bg-white text-slate-700 border-pborder hover:bg-prose-50/50'
             }`}
           >
             ไม่ได้เยี่ยม Pre-op {registryCounts.notVisited}
@@ -648,8 +655,8 @@ export function RegistryView({
             }
             className={`px-2.5 py-1 rounded-md border font-medium tabular-nums transition-colors ${
               statusFilter === 'post_op_completed'
-                ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
-                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                ? 'bg-pgreen-50 text-pgreen-800 border-pgreen-300 font-semibold'
+                : 'bg-white text-slate-700 border-pborder hover:bg-pgreen-50/50'
             }`}
           >
             Post-op แล้ว {registryCounts.postOpDone}
@@ -658,7 +665,7 @@ export function RegistryView({
       </div>
 
       {/* Search & Controls Toolbar */}
-      <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+      <div className="bg-white border border-pborder rounded-xl p-4 space-y-3">
         {/* Row 1: Unified Quick Search + Date Lookup + Primary Actions */}
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="flex flex-wrap items-end gap-2.5 flex-1 min-w-[260px]">
@@ -668,14 +675,14 @@ export function RegistryView({
                 ค้นหาใบ Pre-op เก่า (HN, AN, ชื่อ-สกุล, วันที่ พ.ศ. เช่น 25/11/69, แพทย์, หัตถการ)
               </span>
               <div className="relative">
-                <Search className="w-3.5 h-3.5 text-blue-800 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <Search className="w-3.5 h-3.5 text-pblue-600 absolute left-2.5 top-1/2 -translate-y-1/2" />
                 <input
                   ref={searchInputRef}
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="พิมพ์เลข HN (ไม่ต้องใส่ 0 นำหน้าก็ได้), ชื่อผู้ป่วย หรือวันที่ เช่น 25/11/69..."
-                  className="w-full pl-8 pr-7 py-1.5 text-xs bg-white border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-800 focus:ring-1 focus:ring-blue-800"
+                  className="w-full pl-8 pr-7 py-1.5 text-xs bg-white border border-pborder rounded-lg text-[#243040] placeholder:text-slate-400 focus:outline-none focus:border-pblue-400 focus:ring-2 focus:ring-pblue-200/50"
                 />
                 {searchQuery && (
                   <button
@@ -990,7 +997,10 @@ export function RegistryView({
                     const isActive = r.id === activeId;
                     const isEmergency = getEffectiveScheduleType(r) === 'emergency';
                     const effStatus = getEffectiveEvaluationStatus(r);
-                    const postOp = getPostOpVisitCompleteness(r.formData?.postAnesthesia);
+                    const postOp = getPostOpVisitCompleteness(
+                      r.formData?.postAnesthesia,
+                      r.formData?.postOpComplication,
+                    );
                     const bloodGroupText = formatBloodGroup(
                       r.formData?.laboratory?.bloodGroup,
                       r.formData?.laboratory?.bloodRh,
@@ -1312,7 +1322,7 @@ export function RegistryView({
       </div>
 
       {/* Inline Pre-op Sheet Preview Modal (View without leaving ทะเบียนผ่าตัด) */}
-      {previewRecord && (
+      {livePreviewRecord && (
         <div
           role="dialog"
           aria-modal="true"
@@ -1323,21 +1333,21 @@ export function RegistryView({
             <div className="sticky top-0 z-10 bg-white border-b border-slate-200 px-4 py-3 flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0">
                 <h3 className="text-sm font-bold text-slate-900 truncate">
-                  ใบประเมิน Pre-op: {previewRecord.patientName} (HN: {previewRecord.hn || '—'})
+                  ใบประเมิน Pre-op: {livePreviewRecord.patientName} (HN: {livePreviewRecord.hn || '—'})
                 </h3>
                 <p className="text-xs text-slate-500">
                   วันผ่าตัด:{' '}
-                  {previewRecord.dateOfOperation
-                    ? formatShortThaiDate(previewRecord.dateOfOperation)
+                  {livePreviewRecord.dateOfOperation
+                    ? formatShortThaiDate(livePreviewRecord.dateOfOperation)
                     : 'ยังไม่ระบุ'}{' '}
-                  · {previewRecord.operation || previewRecord.diagnosis || '—'}
+                  · {livePreviewRecord.operation || livePreviewRecord.diagnosis || '—'}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => {
-                    const target = previewRecord;
+                    const target = livePreviewRecord;
                     setPreviewRecord(null);
                     onEdit(target);
                   }}
@@ -1349,7 +1359,7 @@ export function RegistryView({
                 <button
                   type="button"
                   onClick={() => {
-                    const target = previewRecord;
+                    const target = livePreviewRecord;
                     setPreviewRecord(null);
                     onPrintRecord(target);
                   }}
@@ -1369,7 +1379,7 @@ export function RegistryView({
               </div>
             </div>
             <div className="p-4 bg-slate-100 overflow-x-auto">
-              <A4PrintSheet evaluation={previewRecord} previewMode />
+              <A4PrintSheet evaluation={livePreviewRecord} previewMode />
             </div>
           </div>
         </div>

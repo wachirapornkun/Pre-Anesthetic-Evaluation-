@@ -34,6 +34,7 @@ import {
   createEmptySurgeryPostponement,
   DEFAULT_OXYGEN_OTHER_PRESETS,
   DEFAULT_SPECIALTY_LIST,
+  DEFAULT_SUMMARIZER_LIST,
   DEFAULT_SURGEON_LIST,
   DEFAULT_WARD_LIST,
   deriveAnesthesiaType,
@@ -101,6 +102,8 @@ interface PreAnestheticFormProps {
   onUpdateSurgeonOptions: (nextSurgeons: string[]) => void;
   oxygenPresets: string[];
   onUpdateOxygenPresets: (nextPresets: string[]) => void;
+  summarizerOptions: string[];
+  onUpdateSummarizerOptions: (nextSummarizers: string[]) => void;
   onGoToPostOp?: () => void;
 }
 
@@ -117,6 +120,8 @@ export function PreAnestheticForm({
   onUpdateSurgeonOptions,
   oxygenPresets,
   onUpdateOxygenPresets,
+  summarizerOptions,
+  onUpdateSummarizerOptions,
   onGoToPostOp,
 }: PreAnestheticFormProps) {
   const onChange = (next: PreAnestheticEvaluation) => {
@@ -156,6 +161,74 @@ export function PreAnestheticForm({
     text: string;
   } | null>(null);
   const [toothMarkMode, setToothMarkMode] = useState<ToothMarkMode>('cycle');
+  const [isManagingSummarizers, setIsManagingSummarizers] = useState(false);
+  const [newSummarizerName, setNewSummarizerName] = useState('');
+  const [editingSummarizer, setEditingSummarizer] = useState<{
+    original: string;
+    text: string;
+  } | null>(null);
+
+  const updatePreOpSummarizer = (
+    patch: Partial<Pick<EvaluationFormData['postAnesthesia'], 'summarizedBy' | 'summarizedDate'>>,
+  ) => {
+    onChange({
+      ...value,
+      formData: {
+        ...value.formData,
+        postAnesthesia: {
+          ...value.formData.postAnesthesia,
+          ...patch,
+        },
+      },
+    });
+  };
+
+  const handleAddSummarizerOption = (rawName: string) => {
+    const trimmed = rawName.trim().slice(0, 120);
+    if (!trimmed || trimmed === 'อื่นๆ') return;
+    if (!summarizerOptions.includes(trimmed)) {
+      onUpdateSummarizerOptions([...summarizerOptions, trimmed]);
+    }
+    updatePreOpSummarizer({ summarizedBy: trimmed });
+    setNewSummarizerName('');
+  };
+
+  const handleSaveEditedSummarizer = () => {
+    if (!editingSummarizer) return;
+    const trimmed = editingSummarizer.text.trim().slice(0, 120);
+    if (!trimmed || trimmed === 'อื่นๆ') return;
+    const nextList = summarizerOptions.map((s) =>
+      s === editingSummarizer.original ? trimmed : s,
+    );
+    onUpdateSummarizerOptions(nextList);
+    if (value.formData.postAnesthesia.summarizedBy === editingSummarizer.original) {
+      updatePreOpSummarizer({ summarizedBy: trimmed });
+    }
+    setEditingSummarizer(null);
+  };
+
+  const handleRemoveSummarizerOption = (name: string) => {
+    onUpdateSummarizerOptions(summarizerOptions.filter((s) => s !== name));
+    if (value.formData.postAnesthesia.summarizedBy === name) {
+      updatePreOpSummarizer({ summarizedBy: '' });
+    }
+    if (editingSummarizer?.original === name) {
+      setEditingSummarizer(null);
+    }
+  };
+
+  const handleClearAllSummarizers = () => {
+    onUpdateSummarizerOptions([]);
+    if (summarizerOptions.includes(value.formData.postAnesthesia.summarizedBy ?? '')) {
+      updatePreOpSummarizer({ summarizedBy: '' });
+    }
+    setEditingSummarizer(null);
+  };
+
+  const handleResetSummarizerOptions = () => {
+    onUpdateSummarizerOptions([...DEFAULT_SUMMARIZER_LIST]);
+    setEditingSummarizer(null);
+  };
 
   const handleAddWardOption = (rawName: string) => {
     const trimmed = rawName.trim().slice(0, 80);
@@ -607,36 +680,36 @@ export function PreAnestheticForm({
   };
 
   const inputBase =
-    'bg-white border border-slate-300 rounded px-2 py-1 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-800 focus:ring-1 focus:ring-blue-800 transition-colors';
+    'bg-white border border-pborder rounded-md px-2 py-1 text-sm text-[#243040] placeholder:text-slate-400 focus:outline-none focus:border-pblue-400 focus:ring-2 focus:ring-pblue-200/60 transition-colors';
 
   const radioBtn = (active: boolean, tone: 'default' | 'danger' = 'default') =>
-    `inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium border cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
+    `inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
       active
         ? tone === 'danger'
-          ? 'bg-red-50 border-red-600 text-red-800'
-          : 'bg-blue-50 border-blue-800 text-blue-900'
-        : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+          ? 'bg-prose-50 border-prose-400 text-prose-800 font-semibold'
+          : 'bg-pblue-50 border-pblue-400 text-pblue-800 font-semibold'
+        : 'bg-white border-pborder text-slate-700 hover:bg-pblue-50/40'
     }`;
 
   return (
     <div
       onKeyDown={handleFormTabNavigation}
-      className="no-print bg-white border border-slate-300 rounded-xl overflow-hidden"
+      className="no-print bg-white border border-pborder rounded-xl overflow-hidden shadow-2xs"
     >
       {/* Hospital Header */}
-      <div className="px-5 py-3 border-b border-slate-300 bg-slate-50/70 flex items-center justify-between gap-4">
+      <div className="px-5 py-3 border-b border-pblue-200/80 bg-gradient-to-r from-pblue-50/90 via-ppink-50/55 to-pgreen-50/75 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <BphLogo className="w-10 h-10 shrink-0" />
           <div>
-            <h1 className="text-base font-bold text-slate-900 leading-tight">
+            <h1 className="text-base font-bold text-pblue-800 leading-tight">
               Bangplee Hospital
             </h1>
-            <p className="text-sm font-semibold text-slate-700 leading-tight">
+            <p className="text-sm font-semibold text-prose-800 leading-tight">
               Pre Anesthetic Evaluation form
             </p>
           </div>
         </div>
-        <div className="text-right text-xs text-slate-500 font-mono hidden sm:block">
+        <div className="text-right text-xs text-pblue-800/80 font-mono hidden sm:block">
           ANE-FM-002-03
         </div>
       </div>
@@ -1644,7 +1717,7 @@ export function PreAnestheticForm({
         <div className="lg:border-r border-slate-300 divide-y divide-slate-300">
           {/* 1. History */}
           <div className="p-4 space-y-3">
-            <h2 className="text-sm font-bold text-slate-900 border-b border-slate-200 pb-1">
+            <h2 className="text-sm font-bold text-pblue-800 bg-pblue-50/85 border border-pblue-200/80 rounded-lg px-3 py-1.5">
               1. History
             </h2>
 
@@ -2569,7 +2642,7 @@ export function PreAnestheticForm({
 
           {/* 3. Investigation */}
           <div className="p-4 space-y-2.5">
-            <h2 className="text-sm font-bold text-slate-900 border-b border-slate-200 pb-1">
+            <h2 className="text-sm font-bold text-pyellow-800 bg-pyellow-50/90 border border-pyellow-200/80 rounded-lg px-3 py-1.5">
               3. Investigation
             </h2>
 
@@ -2655,8 +2728,8 @@ export function PreAnestheticForm({
 
           {/* 5. Premedication */}
           <div className="p-4 space-y-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-1">
-              <h2 className="text-sm font-bold text-slate-900">5. Premedication</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-prose-50/85 border border-prose-200/80 rounded-lg px-3 py-1.5">
+              <h2 className="text-sm font-bold text-prose-800">5. Premedication</h2>
               <div className="flex items-center gap-3">
                 {getMissingAutoPremedEntries(pm.items, h.medication).length > 0 && (
                   <button
@@ -2760,8 +2833,8 @@ export function PreAnestheticForm({
             onKeyDown={handlePhysicalExamKeyDown}
             className="p-4 space-y-3"
           >
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-1.5">
-              <h2 className="text-sm font-bold text-slate-900">
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-pgreen-50/85 border border-pgreen-200/80 rounded-lg px-3 py-1.5">
+              <h2 className="text-sm font-bold text-pgreen-800">
                 2. Physical examination
               </h2>
               <span className="text-[11px] text-slate-500">
@@ -3760,8 +3833,8 @@ export function PreAnestheticForm({
             onKeyDown={handleLabKeyDown}
             className="p-4 space-y-3"
           >
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-1.5">
-              <h2 className="text-sm font-bold text-slate-900">
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-ppink-50/85 border border-ppink-200/80 rounded-lg px-3 py-1.5">
+              <h2 className="text-sm font-bold text-ppink-800">
                 4. Laboratory Evaluation
               </h2>
               <span className="text-[11px] text-slate-500">
@@ -4478,7 +4551,7 @@ export function PreAnestheticForm({
 
           {/* 6. Consult Med/Cardio */}
           <div className="p-4 space-y-2.5">
-            <h2 className="text-sm font-bold text-slate-900 border-b border-slate-200 pb-1">
+            <h2 className="text-sm font-bold text-pblue-800 bg-pblue-50/85 border border-pblue-200/80 rounded-lg px-3 py-1.5">
               6. Consult Med/Cardio
             </h2>
             <div className="flex flex-wrap items-center gap-1.5">
@@ -4851,22 +4924,248 @@ export function PreAnestheticForm({
             ))}
           </div>
         </div>
+
+        {/* Summarized by (ชื่อผู้สรุป) - ไว้สุดท้ายของหน้า Pre-op */}
+        <div className="pt-3 border-t border-slate-200 space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="text-slate-800 font-bold">Summarized by (ชื่อผู้สรุป)</span>
+              {(() => {
+                const currentSummarizer = fd.postAnesthesia.summarizedBy ?? '';
+                const isListedSummarizer = summarizerOptions.includes(currentSummarizer);
+                return (
+                  <>
+                    <select
+                      aria-label="เลือกผู้สรุป (Summarized by)"
+                      value={isListedSummarizer ? currentSummarizer : ''}
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          updatePreOpSummarizer({ summarizedBy: e.target.value });
+                        } else if (isListedSummarizer) {
+                          updatePreOpSummarizer({ summarizedBy: '' });
+                        }
+                      }}
+                      className={`${inputBase} w-52 text-xs`}
+                    >
+                      <option value="">-- เลือกรายชื่อผู้สรุป --</option>
+                      {summarizerOptions.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      aria-label="พิมพ์ชื่อผู้สรุปเพิ่มเติม"
+                      value={currentSummarizer}
+                      onChange={(e) => updatePreOpSummarizer({ summarizedBy: e.target.value })}
+                      placeholder="หรือพิมพ์ชื่อผู้สรุปเพิ่มเติม..."
+                      maxLength={120}
+                      className={`${inputBase} w-48 text-xs`}
+                    />
+                    {currentSummarizer.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => updatePreOpSummarizer({ summarizedBy: '' })}
+                        title="ล้างชื่อผู้สรุปในช่องนี้"
+                        aria-label="ล้างชื่อผู้สรุปในช่องนี้"
+                        className="p-1 text-slate-400 hover:text-slate-700"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {currentSummarizer.trim() && !isListedSummarizer && (
+                      <button
+                        type="button"
+                        onClick={() => handleAddSummarizerOption(currentSummarizer)}
+                        title="เพิ่มชื่อนี้เข้าตัวเลือก Summarized by"
+                        className="px-2 py-1 text-[11px] font-medium text-blue-800 bg-blue-50 border border-blue-200 rounded hover:bg-blue-100 whitespace-nowrap"
+                      >
+                        + บันทึก
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setIsManagingSummarizers((prev) => !prev)}
+                      className="inline-flex items-center gap-0.5 text-[11px] font-medium text-blue-800 hover:text-blue-950 whitespace-nowrap ml-1"
+                    >
+                      <Plus className="w-3 h-3" />
+                      {isManagingSummarizers ? 'ปิด' : 'เพิ่ม/ลดรายชื่อ'}
+                    </button>
+                  </>
+                );
+              })()}
+            </div>
+            <label className="inline-flex items-center gap-1.5 text-xs">
+              <span className="text-slate-600 font-medium">วันที่สรุป (date)</span>
+              <ThaiDateInput
+                ariaLabel="วันที่สรุป Summarized date (พ.ศ.)"
+                value={fd.postAnesthesia.summarizedDate}
+                onChange={(next) => updatePreOpSummarizer({ summarizedDate: next })}
+                placeholder="วว/ดด/ปปปป"
+                className={`${inputBase} w-36 font-mono tabular-nums text-xs`}
+              />
+            </label>
+          </div>
+
+          {isManagingSummarizers && (
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-800">
+                  จัดการรายชื่อผู้สรุป Summarized by (เพิ่ม แก้ไข หรือลบรายชื่อได้ ·{' '}
+                  {summarizerOptions.length} รายชื่อ)
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  {summarizerOptions.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleClearAllSummarizers}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-red-700 bg-white border border-red-200 rounded hover:bg-red-50"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      ล้างทั้งหมด
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleResetSummarizerOptions}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-100"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    รีเซ็ตค่าเริ่มต้น
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsManagingSummarizers(false)}
+                    className="px-2 py-1 text-[11px] font-medium text-slate-600 hover:text-slate-900"
+                  >
+                    ปิด
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={newSummarizerName}
+                  onChange={(e) => setNewSummarizerName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddSummarizerOption(newSummarizerName);
+                    }
+                  }}
+                  placeholder="พิมพ์ชื่อผู้สรุปใหม่ เช่น พว.สมหญิง ใจดี"
+                  maxLength={120}
+                  className="flex-1 min-w-[220px] bg-white border border-slate-300 rounded-md px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleAddSummarizerOption(newSummarizerName)}
+                  disabled={!newSummarizerName.trim() || newSummarizerName.trim() === 'อื่นๆ'}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-blue-800 rounded-md hover:bg-blue-900 disabled:opacity-50"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  เพิ่มรายชื่อ
+                </button>
+              </div>
+
+              {summarizerOptions.length === 0 ? (
+                <p className="text-xs text-slate-500 py-1">
+                  ยังไม่มีรายชื่อผู้สรุปในตัวเลือก (สามารถพิมพ์เพิ่มด้านบน หรือกดรีเซ็ตค่าเริ่มต้น)
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
+                  {summarizerOptions.map((s) => {
+                    const isEditing = editingSummarizer?.original === s;
+                    return isEditing ? (
+                      <span
+                        key={s}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs bg-white border border-blue-800 rounded-md"
+                      >
+                        <input
+                          type="text"
+                          value={editingSummarizer.text}
+                          onChange={(e) =>
+                            setEditingSummarizer({ original: s, text: e.target.value })
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleSaveEditedSummarizer();
+                            } else if (e.key === 'Escape') {
+                              setEditingSummarizer(null);
+                            }
+                          }}
+                          maxLength={120}
+                          autoFocus
+                          className="w-44 text-xs text-slate-900 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleSaveEditedSummarizer}
+                          aria-label="บันทึกชื่อที่แก้ไข"
+                          className="p-0.5 text-emerald-700 hover:bg-emerald-50 rounded"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingSummarizer(null)}
+                          aria-label="ยกเลิกการแก้ไข"
+                          className="p-0.5 text-slate-400 hover:text-slate-700 rounded"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </span>
+                    ) : (
+                      <span
+                        key={s}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-white border border-slate-300 rounded-md text-slate-800"
+                      >
+                        <span>{s}</span>
+                        <button
+                          type="button"
+                          onClick={() => setEditingSummarizer({ original: s, text: s })}
+                          aria-label={`แก้ไข ${s}`}
+                          title="แก้ไขชื่อ"
+                          className="p-0.5 text-slate-400 hover:text-blue-800 hover:bg-blue-50 rounded"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSummarizerOption(s)}
+                          aria-label={`ลบ ${s}`}
+                          title="ลบรายชื่อ"
+                          className="p-0.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Footer with link to Post-op Evaluation */}
       {(() => {
-        const postOpCheck = getPostOpVisitCompleteness(fd.postAnesthesia);
+        const postOpCheck = getPostOpVisitCompleteness(fd.postAnesthesia, fd.postOpComplication);
         return (
-          <div className="px-4 py-3 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3">
+          <div className="px-4 py-3 bg-gradient-to-r from-pgreen-50/60 via-white to-pblue-50/60 border-t border-pborder flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-3 text-xs">
               {postOpCheck.isComplete ? (
-                <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span className="inline-flex items-center gap-1.5 font-semibold text-pgreen-800">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-pgreen-600" />
                   เยี่ยมหลังผ่าตัดแล้ว (ลงข้อมูลครบถ้วน)
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1.5 font-semibold text-amber-800">
-                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span className="inline-flex items-center gap-1.5 font-semibold text-pyellow-800">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-pyellow-600" />
                   ยังไม่ได้เยี่ยมหลังผ่าตัด
                   {postOpCheck.hasAnyInput
                     ? ` (ลงข้อมูลไม่ครบ ${postOpCheck.filledCount}/${postOpCheck.totalRequired})`
@@ -4877,7 +5176,7 @@ export function PreAnestheticForm({
                 <button
                   type="button"
                   onClick={onGoToPostOp}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-900 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 transition-colors whitespace-nowrap"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-pgreen-800 bg-pgreen-50 border border-pgreen-200 rounded-lg hover:bg-pgreen-100 transition-colors whitespace-nowrap"
                 >
                   เปิดแบบฟอร์ม Post-op Evaluation (ANE-FM-006-01)
                   <ArrowRight className="w-3.5 h-3.5" />

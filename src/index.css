@@ -4,18 +4,87 @@
   --font-sans: "Plus Jakarta Sans", "Sarabun", system-ui, -apple-system, sans-serif;
   --font-display: "Plus Jakarta Sans", "Sarabun", system-ui, -apple-system, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Curated Eye-Friendly 5-Color Pastel System (Sky Blue, Blossom Pink, Mint Green, Butter Yellow, Old Rose) */
+  --color-pcanvas: #f8f9fc;
+  --color-psurface: #ffffff;
+  --color-pborder: #e5e9f2;
+  --color-pink-ink: #243040;
+
+  /* Pastel Blue (ฟ้าพาสเทล) */
+  --color-pblue-50: #f0f7fd;
+  --color-pblue-100: #dfeffc;
+  --color-pblue-200: #c5e2f8;
+  --color-pblue-300: #9bcbf0;
+  --color-pblue-400: #72b1e4;
+  --color-pblue-600: #4a89b8;
+  --color-pblue-700: #3a739f;
+  --color-pblue-800: #255b87;
+
+  /* Pastel Pink (ชมพูพาสเทล) */
+  --color-ppink-50: #fdf3f7;
+  --color-ppink-100: #fae4ee;
+  --color-ppink-200: #f5cce0;
+  --color-ppink-300: #f0b3ce;
+  --color-ppink-400: #e898ba;
+  --color-ppink-600: #c0688e;
+  --color-ppink-800: #933c63;
+
+  /* Pastel Green (เขียวพาสเทล) */
+  --color-pgreen-50: #effaf4;
+  --color-pgreen-100: #dcf3e6;
+  --color-pgreen-200: #c2e8d4;
+  --color-pgreen-300: #9cd9ba;
+  --color-pgreen-400: #75c69f;
+  --color-pgreen-600: #429670;
+  --color-pgreen-800: #23684c;
+
+  /* Pastel Yellow (เหลืองพาสเทล) */
+  --color-pyellow-50: #fefaf0;
+  --color-pyellow-100: #fcf2d6;
+  --color-pyellow-200: #f5e2ad;
+  --color-pyellow-300: #edd080;
+  --color-pyellow-400: #e4be5b;
+  --color-pyellow-600: #b78926;
+  --color-pyellow-800: #855e14;
+
+  /* Pastel Old Rose (โอลโรสพาสเทล) */
+  --color-prose-50: #faf1f3;
+  --color-prose-100: #f4e0e4;
+  --color-prose-200: #e7c5cc;
+  --color-prose-300: #d9a4af;
+  --color-prose-400: #c98392;
+  --color-prose-600: #aa5e6f;
+  --color-prose-700: #944b5c;
+  --color-prose-800: #7f3849;
 }
 
 @layer base {
   body {
     font-family: var(--font-sans);
-    background-color: #f8fafc;
-    color: #0f172a;
+    background-color: #f8f9fc;
+    background-image:
+      radial-gradient(circle at 8% 0%, rgba(197, 226, 248, 0.34), transparent 36%),
+      radial-gradient(circle at 92% 4%, rgba(245, 204, 224, 0.28), transparent 34%),
+      radial-gradient(circle at 50% 100%, rgba(194, 232, 212, 0.22), transparent 42%);
+    background-attachment: fixed;
+    color: #243040;
   }
 
   .tabular-nums {
     font-variant-numeric: tabular-nums;
   }
+}
+
+.pastel-top-ribbon {
+  background: linear-gradient(
+    90deg,
+    #8ec5ee 0%,
+    #95d6b7 25%,
+    #f2d88b 50%,
+    #f2b5ce 75%,
+    #d694a2 100%
+  );
 }
 
 @page {
@@ -26,6 +95,7 @@
 @media print {
   body {
     background: #ffffff !important;
+    background-image: none !important;
     color: #000000 !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;

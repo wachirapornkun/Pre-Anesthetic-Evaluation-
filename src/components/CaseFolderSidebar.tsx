@@ -146,21 +146,24 @@ export function CaseFolderSidebar({
 
   const statusMeta = (item: PreAnestheticEvaluation) => {
     const effStatus = getEffectiveEvaluationStatus(item);
-    const postOp = getPostOpVisitCompleteness(item.formData?.postAnesthesia);
+    const postOp = getPostOpVisitCompleteness(
+      item.formData?.postAnesthesia,
+      item.formData?.postOpComplication,
+    );
     switch (effStatus) {
       case 'post_op_completed':
-        return { label: 'เยี่ยม Post-Op แล้ว', cls: 'text-emerald-700' };
+        return { label: 'เยี่ยม Post-Op แล้ว', cls: 'text-pgreen-800' };
       case 'evaluated':
         return {
           label: postOp.hasAnyInput
             ? 'Pre-Op แล้ว · ยังไม่เยี่ยม Post-Op (ไม่ครบ)'
             : 'Pre-Op แล้ว · ยังไม่เยี่ยม Post-Op',
-          cls: 'text-blue-800',
+          cls: 'text-pblue-800',
         };
       case 'locked':
-        return { label: 'ปิดบันทึก', cls: 'text-slate-600' };
+        return { label: 'ปิดบันทึก', cls: 'text-slate-500' };
       default:
-        return { label: 'รอเยี่ยมที่หอผู้ป่วย', cls: 'text-amber-700' };
+        return { label: 'รอเยี่ยมที่หอผู้ป่วย', cls: 'text-pyellow-800' };
     }
   };
 
@@ -193,14 +196,14 @@ export function CaseFolderSidebar({
   return (
     <aside
       aria-label="ทะเบียนผ่าตัดและใบเยี่ยมทั้งหมด"
-      className="no-print bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden"
+      className="no-print bg-white border border-pborder rounded-xl flex flex-col overflow-hidden"
     >
       {/* Header */}
-      <div className="px-3.5 py-3 border-b border-slate-200 bg-slate-50/70 space-y-2.5">
+      <div className="px-3.5 py-3 border-b border-pborder bg-gradient-to-br from-pblue-50/90 via-white to-ppink-50/50 space-y-2.5">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
-            <FolderOpen className="w-4 h-4 text-blue-800 shrink-0" />
-            <h2 className="text-xs font-bold text-slate-900 truncate">
+            <FolderOpen className="w-4 h-4 text-pblue-600 shrink-0" />
+            <h2 className="text-xs font-bold text-[#243040] truncate">
               ทะเบียนผ่าตัด ({records.length})
             </h2>
           </div>
@@ -208,7 +211,7 @@ export function CaseFolderSidebar({
             <button
               type="button"
               onClick={onCreateNew}
-              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-white bg-blue-800 rounded-md hover:bg-blue-900 transition-colors whitespace-nowrap"
+              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-white bg-pblue-600 rounded-md hover:bg-pblue-700 transition-colors whitespace-nowrap"
             >
               <FilePlus2 className="w-3 h-3" />
               สร้างใบใหม่
@@ -219,7 +222,7 @@ export function CaseFolderSidebar({
                 onClick={onClose}
                 aria-label="ซ่อนทะเบียนข้าง"
                 title="ซ่อนทะเบียนข้าง"
-                className="p-1 text-slate-400 hover:text-slate-700 rounded"
+                className="p-1 text-slate-400 hover:text-prose-800 rounded"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -235,7 +238,7 @@ export function CaseFolderSidebar({
             <button
               type="button"
               onClick={onOpenFullRegistry}
-              className="text-[11px] font-semibold text-blue-800 hover:underline whitespace-nowrap shrink-0"
+              className="text-[11px] font-semibold text-prose-800 hover:underline whitespace-nowrap shrink-0"
             >
               ดูทะเบียนเต็ม
             </button>
@@ -321,22 +324,22 @@ export function CaseFolderSidebar({
         </div>
 
         {/* Status Segmented Filter */}
-        <div className="flex items-center gap-1 p-0.5 bg-slate-200/70 rounded-md">
+        <div className="flex items-center gap-1 p-0.5 bg-pblue-100/60 rounded-md">
           {(
             [
-              { key: 'ALL', label: 'ทั้งหมด' },
-              { key: 'draft', label: 'รอเยี่ยม' },
-              { key: 'evaluated', label: 'เยี่ยมแล้ว' },
+              { key: 'ALL', label: 'ทั้งหมด', activeCls: 'bg-white text-pblue-800 shadow-2xs' },
+              { key: 'draft', label: 'รอเยี่ยม', activeCls: 'bg-pyellow-50 text-pyellow-800 shadow-2xs' },
+              { key: 'evaluated', label: 'เยี่ยมแล้ว', activeCls: 'bg-pgreen-50 text-pgreen-800 shadow-2xs' },
             ] as const
           ).map((tab) => (
             <button
               key={tab.key}
               type="button"
               onClick={() => setStatusFilter(tab.key)}
-              className={`flex-1 py-1 text-[11px] font-medium rounded transition-colors whitespace-nowrap ${
+              className={`flex-1 py-1 text-[11px] font-semibold rounded transition-colors whitespace-nowrap ${
                 statusFilter === tab.key
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? tab.activeCls
+                  : 'text-slate-600 hover:text-[#243040]'
               }`}
             >
               {tab.label}
@@ -346,14 +349,14 @@ export function CaseFolderSidebar({
       </div>
 
       {/* Folder Tree Body */}
-      <div className="flex-1 overflow-y-auto max-h-[calc(100vh-290px)] divide-y divide-slate-200">
+      <div className="flex-1 overflow-y-auto max-h-[calc(100vh-290px)] divide-y divide-pborder">
         {hasActiveFilters && activeRecordExists && !activeRecordVisible && totalFiltered > 0 && (
-          <div className="px-3 py-2 bg-amber-50 border-b border-amber-200 flex items-center justify-between gap-2 text-[11px] text-amber-900">
+          <div className="px-3 py-2 bg-pyellow-50 border-b border-pyellow-200 flex items-center justify-between gap-2 text-[11px] text-pyellow-800">
             <span>ใบเยี่ยมที่เปิดอยู่ถูกซ่อนโดยตัวกรอง</span>
             <button
               type="button"
               onClick={resetSidebarFilters}
-              className="font-semibold text-blue-800 hover:underline whitespace-nowrap shrink-0"
+              className="font-semibold text-pblue-800 hover:underline whitespace-nowrap shrink-0"
             >
               แสดงทั้งหมด
             </button>
@@ -398,7 +401,7 @@ export function CaseFolderSidebar({
             return (
               <div key={group.date}>
                 {/* Date Folder Header */}
-                <div className="px-3 py-2 bg-slate-50/90 flex items-center justify-between gap-1.5">
+                <div className="px-3 py-2 bg-pblue-50/55 flex items-center justify-between gap-1.5">
                   <button
                     type="button"
                     onClick={() => toggleDateCollapse(group.date)}
@@ -409,17 +412,17 @@ export function CaseFolderSidebar({
                     ) : (
                       <ChevronDown className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                     )}
-                    <Calendar className="w-3.5 h-3.5 text-blue-800 shrink-0" />
+                    <Calendar className="w-3.5 h-3.5 text-pblue-600 shrink-0" />
                     <div className="min-w-0">
-                      <div className="text-xs font-bold text-slate-900 truncate">
+                      <div className="text-xs font-bold text-[#243040] truncate">
                         {isUnspecified ? 'ยังไม่ระบุวันผ่าตัด' : formatShortThaiDate(group.date)}
                         {dateMeta.relativeTag ? (
                           <span
                             className={`ml-1.5 font-semibold ${
                               dateMeta.relativeTag === 'วันนี้'
-                                ? 'text-blue-800'
+                                ? 'text-prose-800'
                                 : dateMeta.relativeTag === 'พรุ่งนี้'
-                                ? 'text-emerald-700'
+                                ? 'text-pgreen-800'
                                 : 'text-slate-500'
                             }`}
                           >
@@ -441,7 +444,7 @@ export function CaseFolderSidebar({
                       onClick={() => onCreateNewForDate(group.date)}
                       title={`สร้างใบเยี่ยมใหม่สำหรับวันผ่าตัด ${group.date}`}
                       aria-label={`สร้างใบเยี่ยมใหม่สำหรับวันผ่าตัด ${group.date}`}
-                      className="p-1 text-blue-800 hover:bg-blue-50 rounded shrink-0"
+                      className="p-1 text-pblue-800 hover:bg-pblue-100 rounded shrink-0"
                     >
                       <Plus className="w-3.5 h-3.5" />
                     </button>
@@ -450,11 +453,11 @@ export function CaseFolderSidebar({
 
                 {/* Surgeons inside this Date */}
                 {!isCollapsed && (
-                  <div className="divide-y divide-slate-100">
+                  <div className="divide-y divide-pborder/60">
                     {group.surgeons.map((sGroup) => (
                       <div key={sGroup.surgeon} className="bg-white">
-                        <div className="px-3.5 py-1.5 bg-slate-50/40 border-b border-slate-100 flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-semibold text-slate-700 truncate">
+                        <div className="px-3.5 py-1.5 bg-ppink-50/45 border-b border-ppink-100/80 flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-semibold text-prose-800 truncate">
                             {sGroup.surgeon}
                           </span>
                           <span className="text-[10px] font-mono tabular-nums text-slate-500 shrink-0">
@@ -462,7 +465,7 @@ export function CaseFolderSidebar({
                           </span>
                         </div>
 
-                        <div className="divide-y divide-slate-100">
+                        <div className="divide-y divide-pborder/60">
                           {sGroup.items.map((item) => {
                             const isActive = item.id === activeId;
                             const st = statusMeta(item);
@@ -473,14 +476,14 @@ export function CaseFolderSidebar({
                                 onClick={() => onSelectRecord(item)}
                                 className={`w-full text-left px-3.5 py-2 transition-colors ${
                                   isActive
-                                    ? 'bg-blue-50/80 text-slate-950'
-                                    : 'hover:bg-slate-50 text-slate-800'
+                                    ? 'bg-pblue-50 text-[#243040]'
+                                    : 'hover:bg-pblue-50/40 text-slate-800'
                                 }`}
                               >
                                 <div className="flex items-baseline justify-between gap-2">
                                   <span
                                     className={`text-xs truncate ${
-                                      isActive ? 'font-bold text-blue-950' : 'font-semibold text-slate-900'
+                                      isActive ? 'font-bold text-pblue-800' : 'font-semibold text-[#243040]'
                                     }`}
                                   >
                                     {item.patientName || 'ยังไม่ระบุชื่อ'}

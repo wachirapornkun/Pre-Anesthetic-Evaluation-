@@ -589,6 +589,18 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                   .join(' · ')
               : '—'}
           </div>
+          <div className="pt-1 mt-1 border-t border-slate-400 flex items-center justify-end gap-4">
+            <span>
+              <strong>Summarized by:</strong>{' '}
+              <strong>{fd.postAnesthesia.summarizedBy || '________________________'}</strong>
+            </span>
+            <span>
+              <strong>date:</strong>{' '}
+              <strong className="font-mono">
+                {formatThaiDateBE(fd.postAnesthesia.summarizedDate) || '____________'}
+              </strong>
+            </span>
+          </div>
         </div>
       </div>
       <div className="text-right text-[9.5px] text-slate-600 mt-1">

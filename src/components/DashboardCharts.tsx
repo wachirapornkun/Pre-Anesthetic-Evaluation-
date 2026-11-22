@@ -241,11 +241,11 @@ export function ElectiveMonthlyVisitChart({
   const target80Y = yForPct(80);
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+    <div className="bg-white border border-pborder rounded-xl p-5 space-y-4">
       {/* Header Row */}
-      <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b border-slate-200">
+      <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b border-pborder">
         <div>
-          <h3 className="text-sm font-semibold text-slate-900">
+          <h3 className="text-sm font-semibold text-[#243040]">
             อัตราการเยี่ยมผู้ป่วย Elective Case รายเดือน (% เยี่ยม Pre-op และ % เยี่ยม Post-op)
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
@@ -260,7 +260,7 @@ export function ElectiveMonthlyVisitChart({
               <select
                 value={selectedYear}
                 onChange={(e) => onSelectYear(e.target.value)}
-                className="bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
+                className="bg-white border border-pborder rounded-lg px-2.5 py-1 text-xs text-[#243040] focus:outline-none focus:border-pblue-400"
               >
                 <option value="ALL">ทุกปี</option>
                 {availableYears.map((yr) => (
@@ -275,15 +275,15 @@ export function ElectiveMonthlyVisitChart({
           {/* Legend */}
           <div className="flex flex-wrap items-center gap-3.5 text-xs text-slate-600">
             <span className="inline-flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-xs bg-blue-800 inline-block" />
+              <span className="w-3 h-3 rounded-xs bg-pblue-400 inline-block" />
               <span>เยี่ยม Pre-op (%)</span>
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-xs bg-emerald-600 inline-block" />
+              <span className="w-3 h-3 rounded-xs bg-pgreen-400 inline-block" />
               <span>เยี่ยม Post-op (%)</span>
             </span>
             <span className="inline-flex items-center gap-1.5 text-slate-500">
-              <span className="w-4 border-t border-dashed border-slate-400 inline-block" />
+              <span className="w-4 border-t border-dashed border-prose-300 inline-block" />
               <span>เกณฑ์ 80%</span>
             </span>
           </div>
@@ -295,31 +295,31 @@ export function ElectiveMonthlyVisitChart({
         <div className="flex flex-wrap items-center gap-4 font-mono tabular-nums text-slate-700">
           <span>
             Elective ทั้งหมด:{' '}
-            <strong className="text-slate-950 text-sm">{totals.elective}</strong> ราย
+            <strong className="text-[#243040] text-sm">{totals.elective}</strong> ราย
           </span>
           <span className="text-slate-300" aria-hidden="true">|</span>
           <span>
             เยี่ยม Pre-op รวม:{' '}
-            <strong className="text-blue-800 text-sm">{overallPrePct.toFixed(1)}%</strong>{' '}
+            <strong className="text-pblue-800 text-sm">{overallPrePct.toFixed(1)}%</strong>{' '}
             <span className="text-slate-500">({totals.pre}/{totals.elective})</span>
           </span>
           <span className="text-slate-300" aria-hidden="true">|</span>
           <span>
             เยี่ยม Post-op รวม:{' '}
-            <strong className="text-emerald-700 text-sm">{overallPostPct.toFixed(1)}%</strong>{' '}
+            <strong className="text-pgreen-800 text-sm">{overallPostPct.toFixed(1)}%</strong>{' '}
             <span className="text-slate-500">({totals.post}/{totals.elective})</span>
           </span>
         </div>
 
         {activePoint && (
-          <div className="text-xs font-mono tabular-nums text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1">
-            <strong className="font-sans text-slate-900">{activePoint.fullLabel}:</strong>{' '}
+          <div className="text-xs font-mono tabular-nums text-slate-700 bg-pblue-50/70 border border-pblue-200 rounded-lg px-3 py-1">
+            <strong className="font-sans text-[#243040]">{activePoint.fullLabel}:</strong>{' '}
             Elective {activePoint.totalElective} ราย · Pre-op{' '}
-            <span className="text-blue-800 font-semibold">
+            <span className="text-pblue-800 font-semibold">
               {activePoint.preOpVisited}/{activePoint.totalElective} ({activePoint.preOpPct.toFixed(1)}%)
             </span>{' '}
             · Post-op{' '}
-            <span className="text-emerald-700 font-semibold">
+            <span className="text-pgreen-800 font-semibold">
               {activePoint.postOpVisited}/{activePoint.totalElective} ({activePoint.postOpPct.toFixed(1)}%)
             </span>
           </div>
@@ -424,19 +424,19 @@ export function ElectiveMonthlyVisitChart({
                       width={groupSlotWidth - 8}
                       height={plotHeight + 12}
                       rx={8}
-                      fill={isHovered ? '#f8fafc' : 'transparent'}
-                      stroke={isHovered ? '#e2e8f0' : 'transparent'}
+                      fill={isHovered ? '#f0f7fd' : 'transparent'}
+                      stroke={isHovered ? '#c5e2f8' : 'transparent'}
                       strokeWidth={1}
                     />
 
-                    {/* Pre-op Bar */}
+                    {/* Pre-op Bar (Pastel Sky Blue) */}
                     <rect
                       x={preX}
                       y={preBarHeight > 0 ? preBarTop : baseY - 2}
                       width={barWidth}
                       height={preBarHeight > 0 ? preBarHeight : 2}
-                      rx={3}
-                      fill={preBarHeight > 0 ? '#1e40af' : '#cbd5e1'}
+                      rx={4}
+                      fill={preBarHeight > 0 ? '#72b1e4' : '#e2e8f0'}
                       opacity={hoveredMonth && !isHovered ? 0.55 : 1}
                     />
                     <text
@@ -445,20 +445,20 @@ export function ElectiveMonthlyVisitChart({
                       textAnchor="middle"
                       fontSize={10}
                       fontWeight={700}
-                      fill="#1e3a8a"
+                      fill="#255b87"
                       fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
                     >
                       {formatPctCompact(point.preOpPct)}
                     </text>
 
-                    {/* Post-op Bar */}
+                    {/* Post-op Bar (Pastel Mint Green) */}
                     <rect
                       x={postX}
                       y={postBarHeight > 0 ? postBarTop : baseY - 2}
                       width={barWidth}
                       height={postBarHeight > 0 ? postBarHeight : 2}
-                      rx={3}
-                      fill={postBarHeight > 0 ? '#059669' : '#cbd5e1'}
+                      rx={4}
+                      fill={postBarHeight > 0 ? '#75c69f' : '#e2e8f0'}
                       opacity={hoveredMonth && !isHovered ? 0.55 : 1}
                     />
                     <text
@@ -467,7 +467,7 @@ export function ElectiveMonthlyVisitChart({
                       textAnchor="middle"
                       fontSize={10}
                       fontWeight={700}
-                      fill="#065f46"
+                      fill="#23684c"
                       fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
                     >
                       {formatPctCompact(point.postOpPct)}
@@ -504,46 +504,46 @@ export function ElectiveMonthlyVisitChart({
           <div className="overflow-x-auto border-t border-slate-100 pt-3">
             <table className="w-full text-xs text-left">
               <thead>
-                <tr className="text-slate-500 border-b border-slate-200">
+                <tr className="text-slate-500 border-b border-pborder">
                   <th className="py-1.5 pr-3 font-semibold">เดือน</th>
                   <th className="py-1.5 px-3 font-semibold text-right whitespace-nowrap">
                     Elective ทั้งหมด
                   </th>
-                  <th className="py-1.5 px-3 font-semibold text-right whitespace-nowrap text-blue-900">
+                  <th className="py-1.5 px-3 font-semibold text-right whitespace-nowrap text-pblue-800">
                     เยี่ยม Pre-op (ราย / %)
                   </th>
-                  <th className="py-1.5 pl-3 font-semibold text-right whitespace-nowrap text-emerald-800">
+                  <th className="py-1.5 pl-3 font-semibold text-right whitespace-nowrap text-pgreen-800">
                     เยี่ยม Post-op (ราย / %)
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 font-mono tabular-nums">
+              <tbody className="divide-y divide-pborder/60 font-mono tabular-nums">
                 {monthlyData.map((m) => (
                   <tr
                     key={m.monthKey}
                     onMouseEnter={() => setHoveredMonth(m.monthKey)}
                     onMouseLeave={() => setHoveredMonth(null)}
                     className={`transition-colors ${
-                      hoveredMonth === m.monthKey ? 'bg-slate-50' : ''
+                      hoveredMonth === m.monthKey ? 'bg-pblue-50/60' : ''
                     }`}
                   >
-                    <td className="py-1.5 pr-3 font-sans font-medium text-slate-800 whitespace-nowrap">
+                    <td className="py-1.5 pr-3 font-sans font-medium text-[#243040] whitespace-nowrap">
                       {m.fullLabel}
                     </td>
-                    <td className="py-1.5 px-3 text-right text-slate-900 font-semibold">
+                    <td className="py-1.5 px-3 text-right text-[#243040] font-semibold">
                       {m.totalElective} ราย
                     </td>
                     <td className="py-1.5 px-3 text-right whitespace-nowrap">
-                      <span className="text-slate-700">
+                      <span className="text-slate-600">
                         {m.preOpVisited}/{m.totalElective}
                       </span>{' '}
-                      <strong className="text-blue-800">({m.preOpPct.toFixed(1)}%)</strong>
+                      <strong className="text-pblue-800">({m.preOpPct.toFixed(1)}%)</strong>
                     </td>
                     <td className="py-1.5 pl-3 text-right whitespace-nowrap">
-                      <span className="text-slate-700">
+                      <span className="text-slate-600">
                         {m.postOpVisited}/{m.totalElective}
                       </span>{' '}
-                      <strong className="text-emerald-700">({m.postOpPct.toFixed(1)}%)</strong>
+                      <strong className="text-pgreen-800">({m.postOpPct.toFixed(1)}%)</strong>
                     </td>
                   </tr>
                 ))}
@@ -610,11 +610,11 @@ export function AsaElectiveEmergencyChart({
   const yTicks = Array.from(new Set([0, midTick, maxBarValue]));
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col gap-4">
+    <div className="bg-white border border-pborder rounded-xl p-5 flex flex-col gap-4">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold text-slate-900">
+          <h3 className="text-sm font-semibold text-[#243040]">
             ASA Class I–VI แยก Elective กับ Emergency
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
@@ -623,11 +623,11 @@ export function AsaElectiveEmergencyChart({
         </div>
         <div className="flex items-center gap-3 text-xs text-slate-600">
           <span className="inline-flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-xs bg-blue-700 inline-block" />
+            <span className="w-2.5 h-2.5 rounded-xs bg-pblue-400 inline-block" />
             <span>Elective</span>
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-xs bg-red-600 inline-block" />
+            <span className="w-2.5 h-2.5 rounded-xs bg-prose-400 inline-block" />
             <span>Emergency (E)</span>
           </span>
         </div>
@@ -694,19 +694,19 @@ export function AsaElectiveEmergencyChart({
                   width={slotW - 8}
                   height={plotH + 38}
                   rx={8}
-                  fill={isSelected ? '#eff6ff' : isHovered ? '#f8fafc' : 'transparent'}
-                  stroke={isSelected ? '#93c5fd' : 'transparent'}
+                  fill={isSelected ? '#f0f7fd' : isHovered ? '#faf5f7' : 'transparent'}
+                  stroke={isSelected ? '#9bcbf0' : 'transparent'}
                   strokeWidth={1}
                 />
 
-                {/* Elective bar */}
+                {/* Elective bar (Pastel Sky Blue) */}
                 <rect
                   x={eX}
                   y={eH > 0 ? eTop : baseY - 2}
                   width={barW}
                   height={eH > 0 ? eH : 2}
-                  rx={2.5}
-                  fill={eH > 0 ? '#1d4ed8' : '#e2e8f0'}
+                  rx={3.5}
+                  fill={eH > 0 ? '#72b1e4' : '#e2e8f0'}
                 />
                 {row.elective > 0 && (
                   <text
@@ -715,21 +715,21 @@ export function AsaElectiveEmergencyChart({
                     textAnchor="middle"
                     fontSize={10}
                     fontWeight={700}
-                    fill="#1e3a8a"
+                    fill="#255b87"
                     fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
                   >
                     {row.elective}
                   </text>
                 )}
 
-                {/* Emergency bar */}
+                {/* Emergency bar (Pastel Old Rose) */}
                 <rect
                   x={emX}
                   y={emH > 0 ? emTop : baseY - 2}
                   width={barW}
                   height={emH > 0 ? emH : 2}
-                  rx={2.5}
-                  fill={emH > 0 ? '#dc2626' : '#e2e8f0'}
+                  rx={3.5}
+                  fill={emH > 0 ? '#c98392' : '#e2e8f0'}
                 />
                 {row.emergency > 0 && (
                   <text
@@ -738,7 +738,7 @@ export function AsaElectiveEmergencyChart({
                     textAnchor="middle"
                     fontSize={10}
                     fontWeight={700}
-                    fill="#b91c1c"
+                    fill="#7f3849"
                     fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
                   >
                     {row.emergency}
@@ -752,7 +752,7 @@ export function AsaElectiveEmergencyChart({
                   textAnchor="middle"
                   fontSize={11.5}
                   fontWeight={isSelected ? 700 : 600}
-                  fill={isSelected ? '#1e40af' : '#1e293b'}
+                  fill={isSelected ? '#255b87' : '#243040'}
                 >
                   {row.shortLabel}
                 </text>
@@ -763,17 +763,17 @@ export function AsaElectiveEmergencyChart({
       </div>
 
       {/* Exact Breakdown Table */}
-      <div className="overflow-x-auto border-t border-slate-100 pt-2">
+      <div className="overflow-x-auto border-t border-pborder/60 pt-2">
         <table className="w-full text-xs text-left">
           <thead>
-            <tr className="text-slate-500 border-b border-slate-200">
+            <tr className="text-slate-500 border-b border-pborder">
               <th className="py-1.5 pr-2 font-semibold">ASA Class</th>
-              <th className="py-1.5 px-2 font-semibold text-right text-blue-800">Elective</th>
-              <th className="py-1.5 px-2 font-semibold text-right text-red-700">Emergency</th>
+              <th className="py-1.5 px-2 font-semibold text-right text-pblue-800">Elective</th>
+              <th className="py-1.5 px-2 font-semibold text-right text-prose-800">Emergency</th>
               <th className="py-1.5 pl-2 font-semibold text-right">รวม (%)</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 font-mono tabular-nums">
+          <tbody className="divide-y divide-pborder/60 font-mono tabular-nums">
             {classRows.map((row) => {
               const pct = totalCases > 0 ? (row.total / totalCases) * 100 : 0;
               const isSelected = activeAsaFilter === row.cls;
@@ -782,19 +782,19 @@ export function AsaElectiveEmergencyChart({
                   key={row.cls}
                   onClick={() => onSelectAsa(isSelected ? 'ALL' : row.cls)}
                   className={`cursor-pointer transition-colors ${
-                    isSelected ? 'bg-blue-50 text-blue-950' : 'hover:bg-slate-50'
+                    isSelected ? 'bg-pblue-50 text-pblue-800' : 'hover:bg-pblue-50/40'
                   }`}
                 >
-                  <td className="py-1.5 pr-2 font-sans font-medium text-slate-800">
+                  <td className="py-1.5 pr-2 font-sans font-medium text-[#243040]">
                     {row.label}
                   </td>
-                  <td className="py-1.5 px-2 text-right font-semibold text-blue-800">
+                  <td className="py-1.5 px-2 text-right font-semibold text-pblue-800">
                     {row.elective}
                   </td>
-                  <td className="py-1.5 px-2 text-right font-semibold text-red-700">
+                  <td className="py-1.5 px-2 text-right font-semibold text-prose-800">
                     {row.emergency}
                   </td>
-                  <td className="py-1.5 pl-2 text-right font-semibold text-slate-900">
+                  <td className="py-1.5 pl-2 text-right font-semibold text-[#243040]">
                     {row.total}{' '}
                     <span className="font-normal text-slate-500">({pct.toFixed(1)}%)</span>
                   </td>

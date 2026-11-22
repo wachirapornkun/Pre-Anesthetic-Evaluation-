@@ -15,10 +15,7 @@ function createFirestoreClient() {
     return initializeFirestore(
       app,
       {
-        experimentalForceLongPolling: true,
-        experimentalLongPollingOptions: {
-          timeoutSeconds: 20,
-        },
+        experimentalAutoDetectLongPolling: true,
       },
       firebaseConfig.firestoreDatabaseId,
     );
@@ -120,6 +117,36 @@ export function getFriendlyFirestoreErrorMessage(error: unknown): string {
   }
   const raw = error instanceof Error ? error.message : String(error);
   return raw ? `ข้อผิดพลาดฐานข้อมูล: ${raw}` : 'เกิดข้อผิดพลาดในการบันทึกข้อมูลขึ้นฐานข้อมูล';
+}
+
+export function getFriendlyAuthErrorMessage(error: unknown): string {
+  const code = getFirestoreErrorCode(error);
+  switch (code) {
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+      return 'อีเมลหรือรหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง';
+    case 'auth/invalid-email':
+      return 'รูปแบบอีเมลไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง';
+    case 'auth/email-already-in-use':
+      return 'อีเมลนี้มีบัญชีผู้ใช้งานอยู่แล้ว กรุณาเข้าสู่ระบบหรือกดลืมรหัสผ่าน';
+    case 'auth/weak-password':
+      return 'รหัสผ่านสั้นเกินไป กรุณาตั้งรหัสผ่านอย่างน้อย 6 ตัวอักษร';
+    case 'auth/too-many-requests':
+      return 'มีการทำรายการหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่อีกครั้ง';
+    case 'auth/operation-not-allowed':
+      return 'ยังไม่ได้เปิดใช้งานระบบเข้าสู่ระบบด้วยอีเมลและรหัสผ่านใน Firebase Console (กรุณาให้ผู้ดูแลระบบเปิด Email/Password ใน Authentication → Sign-in method)';
+    case 'auth/network-request-failed':
+      return 'ไม่สามารถเชื่อมต่ออินเทอร์เน็ตได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่';
+    case 'auth/popup-closed-by-user':
+      return 'ปิดหน้าต่างเข้าสู่ระบบ Google ก่อนดำเนินการเสร็จ';
+    case 'auth/user-disabled':
+      return 'บัญชีผู้ใช้งานนี้ถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ';
+    default: {
+      const raw = error instanceof Error ? error.message : String(error);
+      return raw ? `เข้าสู่ระบบไม่สำเร็จ: ${raw}` : 'เกิดข้อผิดพลาดในการยืนยันตัวตน กรุณาลองใหม่อีกครั้ง';
+    }
+  }
 }
 
 export function handleFirestoreError(

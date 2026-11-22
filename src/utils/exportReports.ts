@@ -487,20 +487,38 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
         &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;${checkMark(ap.raSelected, 'Regional anesthesia')} (${(['Spinal block', 'Epidural', 'Nerve block', 'Other'] as const).map((m) => radioMark(ap.raMethods.includes(m), m)).join('')} ${esc(ap.raOther)})
       </div>
       <div class="field"><strong>10. สิ่งที่ต้องเตรียม (ตาม order วิสัญญีแพทย์):</strong> ${fd.preparationOrders.filter(Boolean).map((o, i) => `${i + 1}) ${esc(o)}`).join(' · ') || '-'}</div>
+      <div class="field" style="text-align:right;"><strong>Summarized by:</strong> <span class="val">${esc(pa.summarizedBy || '-')}</span> &nbsp; Date: <span class="val">${esc(formatThaiDateBE(pa.summarizedDate) || '-')}</span></div>
     </div>
 
     <div class="row" style="border-bottom:none;">
-      <div class="field"><strong>Post-op Evaluation (ANE-FM-006-01):</strong> ${
-        fd.postOpComplication?.noneProblem
-          ? 'None problem'
-          : esc(summarizePostOpComplications(fd.postOpComplication) || '-')
-      }${fd.postOpComplication?.severityLevel ? ` · ระดับความรุนแรง: ${esc(fd.postOpComplication.severityLevel)}` : ''}${
+      <div class="field"><strong>Post-op Evaluation (ANE-FM-006-01):</strong> ${(() => {
+        const comp = fd.postOpComplication;
+        const hasExplicit =
+          typeof comp?.noneProblemPeriOp === 'boolean' ||
+          typeof comp?.noneProblemPostOp === 'boolean';
+        const nonePeri =
+          (hasExplicit ? Boolean(comp?.noneProblemPeriOp) : Boolean(comp?.noneProblem)) &&
+          (comp?.periOpComplications?.length ?? 0) === 0;
+        const nonePost =
+          (hasExplicit ? Boolean(comp?.noneProblemPostOp) : Boolean(comp?.noneProblem)) &&
+          (comp?.postOpComplications?.length ?? 0) === 0;
+        const parts: string[] = [];
+        if (nonePeri && nonePost) {
+          parts.push('None problem (Peri op & Post op)');
+        } else {
+          if (nonePeri) parts.push('None problem (Peri op)');
+          if (nonePost) parts.push('None problem (Post op)');
+        }
+        const compSummary = summarizePostOpComplications(comp);
+        if (compSummary) parts.push(compSummary);
+        return esc(parts.join(' · ') || '-');
+      })()}${fd.postOpComplication?.severityLevel ? ` · ระดับความรุนแรง: ${esc(fd.postOpComplication.severityLevel)}` : ''}${
         fd.postOpComplication?.remark?.trim() ? ` · Remark: ${esc(fd.postOpComplication.remark.trim())}` : ''
       }</div>
-      <div class="field"><strong>Post Anesthesia Evaluation</strong> &nbsp; Summarized by: <span class="val">${esc(pa.summarizedBy || '-')}</span> Date: <span class="val">${esc(formatThaiDateBE(pa.summarizedDate) || '-')}</span></div>
+      <div class="field"><strong>Post Anesthesia Evaluation</strong></div>
       <div class="field">Vital signs: BP ${esc(pa.bp || '-')} mmHg · P ${esc(pa.pulse || '-')} bpm · RR ${esc(pa.rr || '-')} bpm · T ${esc(pa.temp || '-')} °C · SpO2 ${esc(pa.spo2 || '-')} % · PS ${esc(pa.painScore || '-')} คะแนน</div>
       <div class="field"><strong>Post anesthesia complication:</strong> ${radioMark(pa.complicationStatus === 'no', 'No')} ${radioMark(pa.complicationStatus === 'yes', 'Yes')} ${esc(pa.complicationDetail)}</div>
-      <div class="field" style="text-align:right;">visit by: <span class="val">${esc(pa.visitBy || '-')}</span> Date: <span class="val">${esc(formatThaiDateBE(pa.visitDate) || '-')}</span></div>
+      <div class="field" style="text-align:right;">ผู้บันทึกข้อมูล Post op / visit by: <span class="val">${esc(pa.visitBy || fd.postOpComplication?.postOpRecorder || '-')}</span> วันที่: <span class="val">${esc(formatThaiDateBE(pa.visitDate || fd.postOpComplication?.postOpDate || '') || '-')}</span>${fd.postOpComplication?.postOpTime ? ` เวลา: <span class="val">${esc(fd.postOpComplication.postOpTime)}</span>` : ''}</div>
     </div>
   </div>
   <div class="footer-code">ANE-FM-002-03 &amp; ANE-FM-006-01</div>

@@ -32,6 +32,7 @@ import {
   X,
 } from 'lucide-react';
 import { A4PrintSheet } from './components/A4PrintSheet';
+import { AuthModal } from './components/AuthModal';
 import { CaseFolderSidebar } from './components/CaseFolderSidebar';
 import { ClinicalSummaryBar } from './components/ClinicalSummaryBar';
 import { DashboardView } from './components/DashboardView';
@@ -44,6 +45,7 @@ import {
   auth,
   db,
   getFirestoreErrorCode,
+  getFriendlyAuthErrorMessage,
   getFriendlyFirestoreErrorMessage,
   googleProvider,
   handleFirestoreError,
@@ -100,7 +102,28 @@ interface NewFormScheduleDraft {
 
 const LOCAL_RECORDS_STORAGE_KEY = 'bph_local_evaluations_v1';
 const ACTIVE_DRAFT_STORAGE_KEY = 'bph_active_draft_v1';
+const SYNCED_CLOUD_IDS_STORAGE_KEY = 'bph_synced_cloud_ids_v1';
 const SHARED_EVALUATION_STATUSES = ['draft', 'evaluated', 'post_op_completed', 'locked'] as const;
+
+function loadSyncedCloudIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(SYNCED_CLOUD_IDS_STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((id): id is string => typeof id === 'string' && id.length > 0));
+  } catch {
+    return new Set();
+  }
+}
+
+function persistSyncedCloudIds(ids: Set<string>) {
+  try {
+    localStorage.setItem(SYNCED_CLOUD_IDS_STORAGE_KEY, JSON.stringify(Array.from(ids).slice(-2000)));
+  } catch {
+    // ignore storage quota errors
+  }
+}
 
 function loadSavedLocalRecords(): PreAnestheticEvaluation[] {
   try {
@@ -149,7 +172,11 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('form');
   const [printSheetMode, setPrintSheetMode] = useState<PrintSheetMode>('both');
   const [user, setUser] = useState<User | null>(null);
+  const [isEmailVerified, setIsEmailVerified] = useState(false);
   const [authReady, setAuthReady] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [allowOfflineBypass, setAllowOfflineBypass] = useState(false);
+  const isVerifiedCloudUser = Boolean(user && isEmailVerified);
   const [cloudRecords, setCloudRecords] = useState<PreAnestheticEvaluation[]>([]);
   const [localRecords, setLocalRecords] = useState<PreAnestheticEvaluation[]>(() =>
     loadSavedLocalRecords(),
@@ -165,17 +192,29 @@ export default function App() {
   const [isSyncingLocal, setIsSyncingLocal] = useState(false);
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [cloudRetryNonce, setCloudRetryNonce] = useState(0);
+  const [remoteUpdateCandidate, setRemoteUpdateCandidate] =
+    useState<PreAnestheticEvaluation | null>(null);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const purgedSampleIdsRef = useRef<Set<string>>(new Set());
-  const knownCloudIdsRef = useRef<Set<string>>(new Set());
+  const knownCloudIdsRef = useRef<Set<string>>(loadSyncedCloudIds());
   const inFlightWritesRef = useRef<Map<string, Promise<void>>>(new Map());
   const deletedIdsRef = useRef<Set<string>>(new Set());
   const autoSyncedUidRef = useRef<string | null>(null);
   const lastLocalFpRef = useRef<Map<string, string>>(new Map());
   const lastCloudFpRef = useRef<Map<string, string>>(new Map());
   const lastUserEditAtRef = useRef<number>(0);
+  const dirtyFormIdRef = useRef<string | null>(null);
+  const firstDirtyAtRef = useRef<number>(0);
+  const pendingCloudSaveRef = useRef<{ record: PreAnestheticEvaluation; fp: string } | null>(null);
+  const cloudRetryAttemptsRef = useRef<number>(0);
+  const lastHiddenAtRef = useRef<number>(0);
+  const lastForegroundPullAtRef = useRef<number>(0);
   const currentFormRef = useRef<PreAnestheticEvaluation>(currentForm);
   currentFormRef.current = currentForm;
+  const userRef = useRef<User | null>(user);
+  userRef.current = user;
+  const cloudRecordsRef = useRef<PreAnestheticEvaluation[]>(cloudRecords);
+  cloudRecordsRef.current = cloudRecords;
   const [isNewFormModalOpen, setIsNewFormModalOpen] = useState(false);
   const [newFormDraft, setNewFormDraft] = useState<NewFormScheduleDraft>(() => ({
     hn: '',
@@ -380,23 +419,122 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
       setUser(nextUser);
+      setIsEmailVerified(Boolean(nextUser?.emailVerified));
       setAuthReady(true);
-      if (!nextUser) {
-        knownCloudIdsRef.current.clear();
+      if (nextUser?.emailVerified) {
+        setAllowOfflineBypass(false);
+        setIsAuthModalOpen(false);
+      }
+      if (!nextUser || !nextUser.emailVerified) {
         setCloudRecords([]);
         setCloudError(null);
+        setRemoteUpdateCandidate(null);
         setIsLoadingRecords(false);
       }
     });
     return () => unsubscribe();
   }, []);
 
-  // Attach shared real-time Firestore listener ONLY when authReady and user is authenticated
+  const applyCloudSnapshot = (
+    items: PreAnestheticEvaluation[],
+    options: { fromServer: boolean; hasPendingWrites: boolean },
+  ) => {
+    items.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
+    const nextCloudIds = new Set(items.map((item) => item.id));
+    const prevKnownCloudIds = new Set(knownCloudIdsRef.current);
+    const prevCloudFpSnapshot = new Map(lastCloudFpRef.current);
+
+    nextCloudIds.forEach((id) => knownCloudIdsRef.current.add(id));
+    deletedIdsRef.current.forEach((id) => knownCloudIdsRef.current.delete(id));
+
+    // When authoritative server snapshot arrives, detect records deleted remotely by colleagues
+    const remotelyDeletedIds = new Set<string>();
+    if (options.fromServer) {
+      prevKnownCloudIds.forEach((id) => {
+        if (!nextCloudIds.has(id) && !inFlightWritesRef.current.has(id)) {
+          remotelyDeletedIds.add(id);
+          knownCloudIdsRef.current.delete(id);
+          lastCloudFpRef.current.delete(id);
+        }
+      });
+      persistSyncedCloudIds(knownCloudIdsRef.current);
+    }
+
+    items.forEach((item) => {
+      const fp = buildRecordFingerprint(item);
+      lastCloudFpRef.current.set(item.id, fp);
+      if (dirtyFormIdRef.current !== item.id) {
+        lastLocalFpRef.current.set(item.id, fp);
+      }
+    });
+
+    setCloudRecords(items);
+    setCloudError(null);
+    setIsLoadingRecords(false);
+
+    // Mirror Cloud records into localStorage cache while pruning records deleted remotely on Cloud
+    // and preserving genuinely unsynced local-only records or active in-flight writes
+    setLocalRecords((prev) => {
+      const keptLocal = prev.filter((r) => {
+        if (nextCloudIds.has(r.id) || deletedIdsRef.current.has(r.id)) return false;
+        if (options.fromServer) {
+          if (inFlightWritesRef.current.has(r.id)) return true;
+          if (remotelyDeletedIds.has(r.id)) return false;
+          if (r.ownerId && r.ownerId !== 'local') return false;
+        }
+        return true;
+      });
+      return [...items, ...keptLocal].sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
+    });
+
+    // Real-time sync for the currently open record when another user/device updates or deletes it
+    const activeOpen = currentFormRef.current;
+    const remoteMatch = items.find((it) => it.id === activeOpen.id);
+    const isDirtyCurrent = dirtyFormIdRef.current === activeOpen.id;
+    const isWritingCurrent = inFlightWritesRef.current.has(activeOpen.id);
+
+    if (remoteMatch && !options.hasPendingWrites && !isWritingCurrent) {
+      const remoteFp = buildRecordFingerprint(remoteMatch);
+      const localFp = buildRecordFingerprint(activeOpen);
+      const prevCloudFp = prevCloudFpSnapshot.get(activeOpen.id);
+      const hasUnsavedLocalDiff = isDirtyCurrent && localFp !== remoteFp && localFp !== prevCloudFp;
+
+      if (remoteFp === localFp) {
+        dirtyFormIdRef.current = null;
+        firstDirtyAtRef.current = 0;
+        pendingCloudSaveRef.current = null;
+        setRemoteUpdateCandidate((prev) => (prev?.id === activeOpen.id ? null : prev));
+      } else if (!hasUnsavedLocalDiff) {
+        dirtyFormIdRef.current = null;
+        firstDirtyAtRef.current = 0;
+        pendingCloudSaveRef.current = null;
+        lastLocalFpRef.current.set(remoteMatch.id, remoteFp);
+        setRemoteUpdateCandidate((prev) => (prev?.id === activeOpen.id ? null : prev));
+        setCurrentForm(remoteMatch);
+      } else if (remoteFp !== prevCloudFp) {
+        // Colleague updated the same record while this clinician also has unsaved local edits
+        setRemoteUpdateCandidate(remoteMatch);
+      }
+    } else if (
+      options.fromServer &&
+      !remoteMatch &&
+      remotelyDeletedIds.has(activeOpen.id) &&
+      !isDirtyCurrent &&
+      !isWritingCurrent
+    ) {
+      setRemoteUpdateCandidate(null);
+      setCurrentForm(createEmptyEvaluation(userRef.current?.uid || 'local'));
+      showNotice('success', 'รายการที่เปิดอยู่ถูกลบออกจากระบบโดยผู้ใช้อื่นแล้ว');
+    }
+  };
+
+  // Attach shared real-time Firestore listener ONLY when authReady and user is authenticated & verified
   useEffect(() => {
-    if (!authReady || !user) return;
+    if (!authReady || !user || !isEmailVerified) return;
 
     setIsLoadingRecords(true);
     setCloudError(null);
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     const path = 'evaluations';
     const q = query(
       collection(db, path),
@@ -405,7 +543,9 @@ export default function App() {
 
     const unsubscribe = onSnapshot(
       q,
+      { includeMetadataChanges: true },
       (snapshot) => {
+        cloudRetryAttemptsRef.current = 0;
         const items: PreAnestheticEvaluation[] = [];
         const sampleIdsToDelete: string[] = [];
         snapshot.forEach((docSnap) => {
@@ -426,39 +566,11 @@ export default function App() {
             // Protect all other records if any single legacy document has unexpected fields
           }
         });
-        items.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
-        const nextCloudIds = new Set(items.map((item) => item.id));
-        nextCloudIds.forEach((id) => knownCloudIdsRef.current.add(id));
-        deletedIdsRef.current.forEach((id) => knownCloudIdsRef.current.delete(id));
-        items.forEach((item) => {
-          const fp = buildRecordFingerprint(item);
-          lastCloudFpRef.current.set(item.id, fp);
-          lastLocalFpRef.current.set(item.id, fp);
-        });
-        setCloudRecords(items);
-        setCloudError(null);
-        setIsLoadingRecords(false);
-        // Mirror Cloud records into localStorage cache while keeping all non-deleted local records intact
-        // so saved Pre-op evaluations NEVER vanish on reload, cache lag, or offline sessions
-        setLocalRecords((prev) => {
-          const keptLocal = prev.filter(
-            (r) => !nextCloudIds.has(r.id) && !deletedIdsRef.current.has(r.id),
-          );
-          return [...items, ...keptLocal].sort((a, b) =>
-            compareByDateAndSurgeon(a, b, 'desc'),
-          );
-        });
 
-        // If another device updated the currently open record while user isn't actively typing, refresh it in real time
-        const activeOpen = currentFormRef.current;
-        const remoteMatch = items.find((it) => it.id === activeOpen.id);
-        if (
-          remoteMatch &&
-          Date.now() - lastUserEditAtRef.current > 3000 &&
-          buildRecordFingerprint(remoteMatch) !== buildRecordFingerprint(activeOpen)
-        ) {
-          setCurrentForm(remoteMatch);
-        }
+        applyCloudSnapshot(items, {
+          fromServer: !snapshot.metadata.fromCache,
+          hasPendingWrites: snapshot.metadata.hasPendingWrites,
+        });
 
         if (sampleIdsToDelete.length > 0) {
           sampleIdsToDelete.forEach((id) => purgedSampleIdsRef.current.add(id));
@@ -489,15 +601,29 @@ export default function App() {
         const friendly = getFriendlyFirestoreErrorMessage(error);
         setCloudError(friendly);
         showNotice('error', `โหลดข้อมูลจาก Cloud ไม่สำเร็จ: ${friendly}`);
+
+        // Auto-recover transient stream drops with exponential backoff (up to 5 attempts)
+        const code = getFirestoreErrorCode(error);
+        if (code !== 'permission-denied' && cloudRetryAttemptsRef.current < 5) {
+          cloudRetryAttemptsRef.current += 1;
+          const delayMs = Math.min(2000 * cloudRetryAttemptsRef.current, 10000);
+          retryTimer = setTimeout(() => {
+            setCloudRetryNonce((n) => n + 1);
+          }, delayMs);
+        }
       },
     );
 
-    return () => unsubscribe();
-  }, [authReady, user, cloudRetryNonce]);
+    return () => {
+      if (retryTimer) clearTimeout(retryTimer);
+      unsubscribe();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authReady, user, isEmailVerified, cloudRetryNonce]);
 
-  // Attach Firestore listener for customizable medication catalog when authenticated
+  // Attach Firestore listener for customizable medication catalog when authenticated & verified
   useEffect(() => {
-    if (!authReady || !user) {
+    if (!authReady || !user || !isEmailVerified) {
       setHasCloudCatalog(false);
       return;
     }
@@ -547,12 +673,12 @@ export default function App() {
         }
       },
       (error) => {
-        handleFirestoreError(error, OperationType.GET, catalogPath);
+        logFirestoreError(error, OperationType.GET, catalogPath);
       },
     );
 
     return () => unsubscribe();
-  }, [authReady, user]);
+  }, [authReady, user, isEmailVerified]);
 
   const handleUpdateMedicationGroups = async (nextGroups: MedicationGroup[]) => {
     const clean = sanitizeMedicationGroups(nextGroups);
@@ -563,7 +689,10 @@ export default function App() {
       // ignore storage error
     }
 
-    if (!user) return;
+    if (!user || !isEmailVerified) {
+      showNotice('success', 'อัปเดตรายการยากลุ่มโรคเรียบร้อย');
+      return;
+    }
     const catalogPath = `medicationCatalogs/${user.uid}`;
     const catalogRef = doc(db, 'medicationCatalogs', user.uid);
     try {
@@ -594,7 +723,7 @@ export default function App() {
 
   // Attach Firestore listener for customizable ward catalog when authenticated
   useEffect(() => {
-    if (!authReady || !user) {
+    if (!authReady || !user || !isEmailVerified) {
       setHasCloudWardCatalog(false);
       return;
     }
@@ -619,12 +748,12 @@ export default function App() {
         }
       },
       (error) => {
-        handleFirestoreError(error, OperationType.GET, wardCatalogPath);
+        logFirestoreError(error, OperationType.GET, wardCatalogPath);
       },
     );
 
     return () => unsubscribe();
-  }, [authReady, user]);
+  }, [authReady, user, isEmailVerified]);
 
   const handleUpdateWardOptions = async (nextWards: string[]) => {
     const clean = sanitizeWardList(nextWards);
@@ -635,7 +764,7 @@ export default function App() {
       // ignore storage error
     }
 
-    if (!user) {
+    if (!user || !isEmailVerified) {
       showNotice('success', 'อัปเดตรายการหอผู้ป่วยเรียบร้อย');
       return;
     }
@@ -670,7 +799,7 @@ export default function App() {
 
   // Attach Firestore listener for customizable surgeon catalog when authenticated
   useEffect(() => {
-    if (!authReady || !user) {
+    if (!authReady || !user || !isEmailVerified) {
       setHasCloudSurgeonCatalog(false);
       return;
     }
@@ -695,12 +824,12 @@ export default function App() {
         }
       },
       (error) => {
-        handleFirestoreError(error, OperationType.GET, surgeonCatalogPath);
+        logFirestoreError(error, OperationType.GET, surgeonCatalogPath);
       },
     );
 
     return () => unsubscribe();
-  }, [authReady, user]);
+  }, [authReady, user, isEmailVerified]);
 
   const handleUpdateSurgeonOptions = async (nextSurgeons: string[]) => {
     const clean = sanitizeSurgeonList(nextSurgeons);
@@ -711,7 +840,7 @@ export default function App() {
       // ignore storage error
     }
 
-    if (!user) {
+    if (!user || !isEmailVerified) {
       showNotice('success', 'อัปเดตรายชื่อแพทย์ผ่าตัดเรียบร้อย');
       return;
     }
@@ -746,7 +875,7 @@ export default function App() {
 
   // Attach Firestore listener for customizable oxygen presets catalog when authenticated
   useEffect(() => {
-    if (!authReady || !user) {
+    if (!authReady || !user || !isEmailVerified) {
       setHasCloudOxygenCatalog(false);
       return;
     }
@@ -771,12 +900,12 @@ export default function App() {
         }
       },
       (error) => {
-        handleFirestoreError(error, OperationType.GET, oxygenCatalogPath);
+        logFirestoreError(error, OperationType.GET, oxygenCatalogPath);
       },
     );
 
     return () => unsubscribe();
-  }, [authReady, user]);
+  }, [authReady, user, isEmailVerified]);
 
   const handleUpdateOxygenPresets = async (nextPresets: string[]) => {
     const clean = sanitizeOxygenPresets(nextPresets);
@@ -787,7 +916,7 @@ export default function App() {
       // ignore storage error
     }
 
-    if (!user) {
+    if (!user || !isEmailVerified) {
       showNotice('success', 'อัปเดตตัวเลือกการให้ออกซิเจนเรียบร้อย');
       return;
     }
@@ -822,7 +951,7 @@ export default function App() {
 
   // Attach Firestore listener for customizable summarizer catalog when authenticated
   useEffect(() => {
-    if (!authReady || !user) {
+    if (!authReady || !user || !isEmailVerified) {
       setHasCloudSummarizerCatalog(false);
       return;
     }
@@ -847,12 +976,12 @@ export default function App() {
         }
       },
       (error) => {
-        handleFirestoreError(error, OperationType.GET, summarizerCatalogPath);
+        logFirestoreError(error, OperationType.GET, summarizerCatalogPath);
       },
     );
 
     return () => unsubscribe();
-  }, [authReady, user]);
+  }, [authReady, user, isEmailVerified]);
 
   const handleUpdateSummarizerOptions = async (nextSummarizers: string[]) => {
     const clean = sanitizeSummarizerList(nextSummarizers);
@@ -863,7 +992,7 @@ export default function App() {
       // ignore storage error
     }
 
-    if (!user) {
+    if (!user || !isEmailVerified) {
       showNotice('success', 'อัปเดตรายชื่อผู้สรุป (Summarized by) เรียบร้อย');
       return;
     }
@@ -898,7 +1027,7 @@ export default function App() {
 
   // Attach Firestore listener for customizable visitor catalog when authenticated
   useEffect(() => {
-    if (!authReady || !user) {
+    if (!authReady || !user || !isEmailVerified) {
       setHasCloudVisitorCatalog(false);
       return;
     }
@@ -923,12 +1052,12 @@ export default function App() {
         }
       },
       (error) => {
-        handleFirestoreError(error, OperationType.GET, visitorCatalogPath);
+        logFirestoreError(error, OperationType.GET, visitorCatalogPath);
       },
     );
 
     return () => unsubscribe();
-  }, [authReady, user]);
+  }, [authReady, user, isEmailVerified]);
 
   const handleUpdateVisitorOptions = async (nextVisitors: string[]) => {
     const clean = sanitizeSummarizerList(nextVisitors);
@@ -939,7 +1068,7 @@ export default function App() {
       // ignore storage error
     }
 
-    if (!user) {
+    if (!user || !isEmailVerified) {
       showNotice('success', 'อัปเดตรายชื่อผู้เยี่ยม (visit by) เรียบร้อย');
       return;
     }
@@ -974,7 +1103,7 @@ export default function App() {
 
   // Attach Firestore listener for customizable specialty catalog when authenticated
   useEffect(() => {
-    if (!authReady || !user) {
+    if (!authReady || !user || !isEmailVerified) {
       setHasCloudSpecialtyCatalog(false);
       return;
     }
@@ -999,12 +1128,12 @@ export default function App() {
         }
       },
       (error) => {
-        handleFirestoreError(error, OperationType.GET, specialtyCatalogPath);
+        logFirestoreError(error, OperationType.GET, specialtyCatalogPath);
       },
     );
 
     return () => unsubscribe();
-  }, [authReady, user]);
+  }, [authReady, user, isEmailVerified]);
 
   const handleUpdateSpecialtyOptions = async (nextSpecialties: string[]) => {
     const clean = sanitizeSpecialtyList(nextSpecialties);
@@ -1015,7 +1144,7 @@ export default function App() {
       // ignore storage error
     }
 
-    if (!user) {
+    if (!user || !isEmailVerified) {
       showNotice('success', 'อัปเดตรายการสาขาเรียบร้อย');
       return;
     }
@@ -1052,7 +1181,7 @@ export default function App() {
     rec: PreAnestheticEvaluation,
     activeUid: string,
   ): string => {
-    const cloudMatch = cloudRecords.find((r) => r.id === rec.id);
+    const cloudMatch = cloudRecordsRef.current.find((r) => r.id === rec.id);
     if (cloudMatch?.ownerId && cloudMatch.ownerId !== 'local') {
       return cloudMatch.ownerId;
     }
@@ -1065,16 +1194,16 @@ export default function App() {
 
   // Always keep all saved Pre-op evaluations permanently visible in ทะเบียน (shared Cloud + local mirror)
   const records = useMemo(() => {
-    if (!user) return localRecords;
+    if (!isVerifiedCloudUser) return localRecords;
     const cloudIdSet = new Set(cloudRecords.map((r) => r.id));
     const localOnly = localRecords.filter((r) => !cloudIdSet.has(r.id));
     if (localOnly.length === 0) return cloudRecords;
     return [...cloudRecords, ...localOnly].sort((a, b) =>
       compareByDateAndSurgeon(a, b, 'desc'),
     );
-  }, [user, cloudRecords, localRecords]);
+  }, [isVerifiedCloudUser, cloudRecords, localRecords]);
 
-  // Real-time projection: reflects every Pre-op / Post-op edit immediately across Sidebar, Registry & Dashboard (0ms latency)
+  // Real-time projection: reflects unsaved Pre-op / Post-op edits immediately without shadowing live Cloud updates
   const liveRecords = useMemo(() => {
     const hasLiveIdentity = Boolean(
       currentForm.patientName.trim() || currentForm.hn.trim(),
@@ -1082,12 +1211,17 @@ export default function App() {
     if (!hasLiveIdentity || deletedIdsRef.current.has(currentForm.id)) {
       return records;
     }
+    const existsIdx = records.findIndex((r) => r.id === currentForm.id);
+    // If this record already exists in live Cloud/records and has NO unsaved local edits,
+    // display the live Cloud record directly so colleagues' updates are never shadowed
+    if (existsIdx !== -1 && dirtyFormIdRef.current !== currentForm.id) {
+      return records;
+    }
     const liveEntry: PreAnestheticEvaluation = {
       ...currentForm,
       patientName:
         currentForm.patientName.trim() || `ผู้ป่วย HN ${currentForm.hn.trim()}`,
     };
-    const existsIdx = records.findIndex((r) => r.id === currentForm.id);
     const merged =
       existsIdx !== -1
         ? records.map((r) => (r.id === currentForm.id ? { ...r, ...liveEntry } : r))
@@ -1096,7 +1230,7 @@ export default function App() {
   }, [records, currentForm]);
 
   const unsyncedLocalRecords = useMemo(() => {
-    if (!user || isLoadingRecords) return [];
+    if (!isVerifiedCloudUser || isLoadingRecords) return [];
     const cloudIdSet = new Set(cloudRecords.map((r) => r.id));
     return localRecords.filter(
       (r) =>
@@ -1104,11 +1238,16 @@ export default function App() {
         r.status !== 'locked' &&
         Boolean(r.patientName.trim() || r.hn.trim()),
     );
-  }, [user, isLoadingRecords, cloudRecords, localRecords]);
+  }, [isVerifiedCloudUser, isLoadingRecords, cloudRecords, localRecords]);
   const savedIdSet = useMemo(() => new Set(records.map((r) => r.id)), [records]);
 
   const handleFormChange = (next: PreAnestheticEvaluation) => {
-    lastUserEditAtRef.current = Date.now();
+    const now = Date.now();
+    lastUserEditAtRef.current = now;
+    if (dirtyFormIdRef.current !== next.id || firstDirtyAtRef.current === 0) {
+      firstDirtyAtRef.current = now;
+    }
+    dirtyFormIdRef.current = next.id;
     setCurrentForm(next);
   };
 
@@ -1195,6 +1334,7 @@ export default function App() {
         }
 
         knownCloudIdsRef.current.add(docId);
+        persistSyncedCloudIds(knownCloudIdsRef.current);
       });
 
     inFlightWritesRef.current.set(docId, run);
@@ -1207,13 +1347,84 @@ export default function App() {
     return run;
   };
 
-  const handlePullFromCloud = async (targetUser?: User | null) => {
-    const activeUser = targetUser ?? user;
-    if (!activeUser) {
-      showNotice('error', 'กรุณาเข้าสู่ระบบ Google ก่อนดึงข้อมูลจาก Cloud');
+  const commitAutoSaveToCloud = (
+    targetSnapshot: PreAnestheticEvaluation,
+    fp: string,
+    activeUser: User,
+  ) => {
+    if (
+      deletedIdsRef.current.has(targetSnapshot.id) ||
+      !targetSnapshot.patientName.trim() ||
+      targetSnapshot.status === 'locked' ||
+      activeUser.emailVerified === false
+    ) {
       return;
     }
-    setIsPullingCloud(true);
+    if (lastCloudFpRef.current.get(targetSnapshot.id) === fp) {
+      return;
+    }
+    if (pendingCloudSaveRef.current?.record.id === targetSnapshot.id) {
+      pendingCloudSaveRef.current = null;
+    }
+    firstDirtyAtRef.current = 0;
+
+    const preservedOwner = resolvePreservedOwnerId(targetSnapshot, activeUser.uid);
+    const sanitizedCloud = sanitizeEvaluationForFirestore(targetSnapshot, preservedOwner);
+    upsertEvaluationToCloud(sanitizedCloud, activeUser.uid)
+      .then(() => {
+        lastCloudFpRef.current.set(sanitizedCloud.id, fp);
+        lastLocalFpRef.current.set(sanitizedCloud.id, fp);
+        if (
+          dirtyFormIdRef.current === sanitizedCloud.id &&
+          buildRecordFingerprint(currentFormRef.current) === fp
+        ) {
+          dirtyFormIdRef.current = null;
+        }
+        setCloudRecords((prev) => {
+          const exists = prev.some((r) => r.id === sanitizedCloud.id);
+          const next = exists
+            ? prev.map((r) => (r.id === sanitizedCloud.id ? sanitizedCloud : r))
+            : [...prev, sanitizedCloud];
+          return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
+        });
+        setLocalRecords((prev) => {
+          const exists = prev.some((r) => r.id === sanitizedCloud.id);
+          const next = exists
+            ? prev.map((r) => (r.id === sanitizedCloud.id ? sanitizedCloud : r))
+            : [...prev, sanitizedCloud];
+          return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
+        });
+        setCloudError(null);
+      })
+      .catch((error) => {
+        logFirestoreError(error, OperationType.WRITE, `evaluations/${sanitizedCloud.id}`);
+        const friendly = getFriendlyFirestoreErrorMessage(error);
+        setCloudError(friendly);
+      });
+  };
+
+  const flushPendingCloudSave = () => {
+    const activeUser = userRef.current;
+    const pending = pendingCloudSaveRef.current;
+    if (!activeUser || !pending) return;
+    pendingCloudSaveRef.current = null;
+    commitAutoSaveToCloud(pending.record, pending.fp, activeUser);
+  };
+
+  const handlePullFromCloud = async (
+    targetUser?: User | null,
+    options?: { silent?: boolean },
+  ) => {
+    const activeUser = targetUser ?? userRef.current;
+    if (!activeUser || !activeUser.emailVerified) {
+      if (!options?.silent) {
+        showNotice('error', 'กรุณาเข้าสู่ระบบและยืนยันอีเมลก่อนดึงข้อมูลจาก Cloud');
+      }
+      return;
+    }
+    if (!options?.silent) {
+      setIsPullingCloud(true);
+    }
     const path = 'evaluations';
     const q = query(
       collection(db, path),
@@ -1221,10 +1432,12 @@ export default function App() {
     );
     try {
       let snapshot;
+      let fromServer = true;
       try {
         snapshot = await getDocsFromServer(q);
       } catch {
         snapshot = await getDocs(q);
+        fromServer = !snapshot.metadata.fromCache;
       }
       const items: PreAnestheticEvaluation[] = [];
       snapshot.forEach((docSnap) => {
@@ -1242,43 +1455,80 @@ export default function App() {
           // Skip malformed document without failing entire pull
         }
       });
-      items.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
-      const nextCloudIds = new Set(items.map((item) => item.id));
-      nextCloudIds.forEach((id) => knownCloudIdsRef.current.add(id));
-      deletedIdsRef.current.forEach((id) => knownCloudIdsRef.current.delete(id));
-      setCloudRecords(items);
-      setCloudError(null);
-      setLocalRecords((prev) => {
-        const keptLocal = prev.filter(
-          (r) => !nextCloudIds.has(r.id) && !deletedIdsRef.current.has(r.id),
+      applyCloudSnapshot(items, { fromServer, hasPendingWrites: false });
+      if (!options?.silent) {
+        showNotice(
+          'success',
+          items.length > 0
+            ? `อัปเดตข้อมูลใบ Pre-op ล่าสุดจาก Cloud เรียบร้อย (${items.length} รายการ)`
+            : 'เชื่อมต่อ Cloud สำเร็จ (ยังไม่พบใบ Pre-op ที่บันทึกไว้บน Cloud)',
         );
-        return [...items, ...keptLocal].sort((a, b) =>
-          compareByDateAndSurgeon(a, b, 'desc'),
-        );
-      });
-      showNotice(
-        'success',
-        items.length > 0
-          ? `ดึงข้อมูลใบ Pre-op ทั้งหมดจาก Cloud เรียบร้อย (${items.length} รายการ) แสดงในทะเบียนและพร้อมแก้ไขร่วมกันแล้ว`
-          : 'เชื่อมต่อ Cloud สำเร็จ (ยังไม่พบใบ Pre-op ที่บันทึกไว้บน Cloud)',
-      );
+      }
     } catch (error) {
       logFirestoreError(error, OperationType.LIST, path);
       const friendly = getFriendlyFirestoreErrorMessage(error);
       setCloudError(friendly);
-      showNotice('error', `ดึงข้อมูลจาก Cloud ไม่สำเร็จ: ${friendly}`);
+      if (!options?.silent) {
+        showNotice('error', `ดึงข้อมูลจาก Cloud ไม่สำเร็จ: ${friendly}`);
+      }
     } finally {
-      setIsPullingCloud(false);
+      if (!options?.silent) {
+        setIsPullingCloud(false);
+      }
     }
   };
 
-  // Ensure fresh Cloud fetch when user opens ทะเบียน while authenticated
+  // Flush any pending auto-save immediately when switching tabs and ensure fresh Cloud fetch if empty
   useEffect(() => {
-    if (activeTab === 'registry' && authReady && user && !isLoadingRecords && !isPullingCloud && cloudRecords.length === 0) {
-      void handlePullFromCloud(user);
+    flushPendingCloudSave();
+    if (activeTab === 'registry' && authReady && isVerifiedCloudUser && !isLoadingRecords && !isPullingCloud && cloudRecords.length === 0) {
+      void handlePullFromCloud(user, { silent: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, authReady, user]);
+  }, [activeTab, authReady, user, isEmailVerified]);
+
+  // Recover real-time sync immediately when tab returns to foreground, window regains network, or page hides
+  useEffect(() => {
+    if (!authReady || !user || !isEmailVerified) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        lastHiddenAtRef.current = Date.now();
+        flushPendingCloudSave();
+        return;
+      }
+      if (document.visibilityState === 'visible') {
+        const awayMs = lastHiddenAtRef.current ? Date.now() - lastHiddenAtRef.current : 0;
+        const sinceLastPull = Date.now() - lastForegroundPullAtRef.current;
+        if (awayMs >= 15000 && sinceLastPull >= 5000) {
+          lastForegroundPullAtRef.current = Date.now();
+          void handlePullFromCloud(user, { silent: true });
+        }
+      }
+    };
+
+    const handleOnline = () => {
+      flushPendingCloudSave();
+      autoSyncedUidRef.current = null;
+      lastForegroundPullAtRef.current = Date.now();
+      setCloudRetryNonce((n) => n + 1);
+      void handlePullFromCloud(user, { silent: true });
+    };
+
+    const handlePageHide = () => {
+      flushPendingCloudSave();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('pagehide', handlePageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('pagehide', handlePageHide);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authReady, user, isEmailVerified]);
 
   const handleImportJsonFile = async (file: File) => {
     try {
@@ -1353,22 +1603,40 @@ export default function App() {
     }
   };
 
-  const handleSignIn = async () => {
+  const handleOpenAuthModal = () => {
+    setIsAuthModalOpen(true);
+  };
+
+  const handleAuthSuccess = (verifiedUser: User) => {
+    setUser(verifiedUser);
+    setIsEmailVerified(Boolean(verifiedUser.emailVerified));
+    setAllowOfflineBypass(false);
+    setIsAuthModalOpen(false);
+    setCloudRetryNonce((n) => n + 1);
+    showNotice('success', 'เข้าสู่ระบบสำเร็จ กำลังซิงค์ข้อมูลใบ Pre-op จาก Cloud...');
+    void handlePullFromCloud(verifiedUser, { silent: true });
+  };
+
+  const handleGoogleSignIn = async () => {
     try {
       const cred = await signInWithPopup(auth, googleProvider);
-      showNotice('success', 'เข้าสู่ระบบด้วย Google สำเร็จ กำลังดึงข้อมูลใบ Pre-op จาก Cloud...');
       if (cred?.user) {
-        void handlePullFromCloud(cred.user);
+        handleAuthSuccess(cred.user);
       }
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'ไม่สามารถเข้าสู่ระบบได้';
-      showNotice('error', `เข้าสู่ระบบไม่สำเร็จ: ${msg}`);
+      const msg = getFriendlyAuthErrorMessage(error);
+      showNotice('error', msg);
+      throw error;
     }
   };
 
   const handleSignOut = async () => {
     try {
+      flushPendingCloudSave();
       await signOut(auth);
+      setIsEmailVerified(false);
+      setAllowOfflineBypass(false);
+      setIsAuthModalOpen(false);
       showNotice('success', 'ออกจากระบบแล้ว');
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาด';
@@ -1377,7 +1645,7 @@ export default function App() {
   };
 
   const handleSyncLocalToCloud = async () => {
-    if (!user || unsyncedLocalRecords.length === 0) return;
+    if (!user || !isEmailVerified || unsyncedLocalRecords.length === 0) return;
     setIsSyncingLocal(true);
     const syncedRecords: PreAnestheticEvaluation[] = [];
     const failedIds = new Set<string>();
@@ -1441,7 +1709,7 @@ export default function App() {
 
   // Automatically upload local-only records to Cloud once after sign-in finishes loading
   useEffect(() => {
-    if (!authReady || !user || isLoadingRecords || isSyncingLocal) return;
+    if (!authReady || !user || !isEmailVerified || isLoadingRecords || isSyncingLocal) return;
     if (unsyncedLocalRecords.length === 0) {
       autoSyncedUidRef.current = user.uid;
       return;
@@ -1450,18 +1718,18 @@ export default function App() {
     autoSyncedUidRef.current = user.uid;
     void handleSyncLocalToCloud();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authReady, user, isLoadingRecords, unsyncedLocalRecords.length]);
+  }, [authReady, user, isEmailVerified, isLoadingRecords, unsyncedLocalRecords.length]);
 
-  // Real-time auto-save: persists Pre-op / Post-op edits automatically to Local (300ms) and Cloud Firestore (1100ms)
+  // Real-time auto-save: persists Pre-op / Post-op edits automatically to Local (250ms) and Cloud Firestore (450ms debounce, 2s max-wait)
   useEffect(() => {
-    if (lastUserEditAtRef.current === 0) return;
+    if (dirtyFormIdRef.current !== currentForm.id) return;
     if (!currentForm.patientName.trim()) return;
     if (deletedIdsRef.current.has(currentForm.id)) return;
 
     const targetSnapshot = currentForm;
     const fp = buildRecordFingerprint(targetSnapshot);
     const needsLocal = lastLocalFpRef.current.get(targetSnapshot.id) !== fp;
-    const needsCloud = Boolean(user) && lastCloudFpRef.current.get(targetSnapshot.id) !== fp;
+    const needsCloud = isVerifiedCloudUser && lastCloudFpRef.current.get(targetSnapshot.id) !== fp;
 
     if (!needsLocal && !needsCloud) return;
 
@@ -1483,39 +1751,18 @@ export default function App() {
             : [...prev, sanitizedLocal];
           return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
         });
-      }, 300);
+      }, 250);
     }
 
-    if (needsCloud && user && targetSnapshot.status !== 'locked' && user.emailVerified !== false) {
-      const activeUid = user.uid;
-      const preservedOwner = resolvePreservedOwnerId(targetSnapshot, activeUid);
+    if (needsCloud && user && isEmailVerified && targetSnapshot.status !== 'locked') {
+      pendingCloudSaveRef.current = { record: targetSnapshot, fp };
+      const elapsedSinceFirstDirty = firstDirtyAtRef.current
+        ? Date.now() - firstDirtyAtRef.current
+        : 0;
+      const delayMs = elapsedSinceFirstDirty >= 2000 ? 0 : 450;
       cloudTimer = setTimeout(() => {
-        if (deletedIdsRef.current.has(targetSnapshot.id)) return;
-        const sanitizedCloud = sanitizeEvaluationForFirestore(targetSnapshot, preservedOwner);
-        upsertEvaluationToCloud(sanitizedCloud, activeUid)
-          .then(() => {
-            lastCloudFpRef.current.set(sanitizedCloud.id, fp);
-            lastLocalFpRef.current.set(sanitizedCloud.id, fp);
-            setCloudRecords((prev) => {
-              const exists = prev.some((r) => r.id === sanitizedCloud.id);
-              const next = exists
-                ? prev.map((r) => (r.id === sanitizedCloud.id ? sanitizedCloud : r))
-                : [...prev, sanitizedCloud];
-              return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
-            });
-            setLocalRecords((prev) => {
-              const exists = prev.some((r) => r.id === sanitizedCloud.id);
-              const next = exists
-                ? prev.map((r) => (r.id === sanitizedCloud.id ? sanitizedCloud : r))
-                : [...prev, sanitizedCloud];
-              return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
-            });
-            setCloudError(null);
-          })
-          .catch((error) => {
-            logFirestoreError(error, OperationType.WRITE, `evaluations/${sanitizedCloud.id}`);
-          });
-      }, 1100);
+        commitAutoSaveToCloud(targetSnapshot, fp, user);
+      }, delayMs);
     }
 
     return () => {
@@ -1523,7 +1770,7 @@ export default function App() {
       if (cloudTimer) clearTimeout(cloudTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentForm, user]);
+  }, [currentForm, user, isEmailVerified]);
 
   const countCasesOnDate = (targetDate: string, targetRoom?: string): number =>
     liveRecords.filter(
@@ -1533,6 +1780,7 @@ export default function App() {
     ).length;
 
   const handleCreateNew = () => {
+    flushPendingCloudSave();
     const defaultDate = currentForm.dateOfOperation?.trim() || getTodayIsoDate();
     setNewFormDraft({
       hn: '',
@@ -1624,7 +1872,7 @@ export default function App() {
 
     setIsSaving(true);
     try {
-      if (!user) {
+      if (!user || !isEmailVerified) {
         const sanitized = sanitizeEvaluationForFirestore(recordToSave, 'local');
         lastLocalFpRef.current.set(sanitized.id, buildRecordFingerprint(sanitized));
         setLocalRecords((prev) => {
@@ -1686,6 +1934,14 @@ export default function App() {
       const savedFp = buildRecordFingerprint(sanitized);
       lastCloudFpRef.current.set(sanitized.id, savedFp);
       lastLocalFpRef.current.set(sanitized.id, savedFp);
+      if (dirtyFormIdRef.current === sanitized.id) {
+        dirtyFormIdRef.current = null;
+        firstDirtyAtRef.current = 0;
+      }
+      if (pendingCloudSaveRef.current?.record.id === sanitized.id) {
+        pendingCloudSaveRef.current = null;
+      }
+      setRemoteUpdateCandidate((prev) => (prev?.id === sanitized.id ? null : prev));
       setCloudRecords((prev) => {
         const exists = prev.some((r) => r.id === sanitized.id);
         const next = exists
@@ -1734,10 +1990,10 @@ export default function App() {
     const isInCloud =
       knownCloudIdsRef.current.has(recordId) || cloudRecords.some((r) => r.id === recordId);
 
-    if (!user || !isInCloud) {
+    if (!user || !isEmailVerified || !isInCloud) {
       setLocalRecords((prev) => prev.filter((r) => r.id !== recordId));
       if (currentForm.id === recordId) {
-        setCurrentForm(createEmptyEvaluation(user?.uid || 'local'));
+        setCurrentForm(createEmptyEvaluation(user && isEmailVerified ? user.uid : 'local'));
       }
       showNotice('success', 'ลบข้อมูลเรียบร้อย');
       return;
@@ -1747,9 +2003,18 @@ export default function App() {
     try {
       await deleteDoc(doc(db, 'evaluations', recordId));
       knownCloudIdsRef.current.delete(recordId);
+      persistSyncedCloudIds(knownCloudIdsRef.current);
+      if (dirtyFormIdRef.current === recordId) {
+        dirtyFormIdRef.current = null;
+        firstDirtyAtRef.current = 0;
+      }
+      if (pendingCloudSaveRef.current?.record.id === recordId) {
+        pendingCloudSaveRef.current = null;
+      }
       setCloudRecords((prev) => prev.filter((r) => r.id !== recordId));
       setLocalRecords((prev) => prev.filter((r) => r.id !== recordId));
       if (currentForm.id === recordId) {
+        setRemoteUpdateCandidate(null);
         setCurrentForm(createEmptyEvaluation(user.uid));
       }
       showNotice('success', 'ลบข้อมูลออกจากฐานข้อมูลเรียบร้อย');
@@ -1765,6 +2030,7 @@ export default function App() {
   };
 
   const handleDuplicate = (record: PreAnestheticEvaluation) => {
+    flushPendingCloudSave();
     const copy: PreAnestheticEvaluation = {
       ...record,
       id: generateEvaluationId(),
@@ -1772,166 +2038,206 @@ export default function App() {
       patientName: `${record.patientName} (สำเนา)`,
       status: 'draft',
     };
+    dirtyFormIdRef.current = null;
+    firstDirtyAtRef.current = 0;
+    setRemoteUpdateCandidate(null);
     setCurrentForm(copy);
     setActiveTab('form');
     showNotice('success', 'คัดลอกแบบฟอร์มเป็นรายการใหม่แล้ว กรุณากดบันทึกเมื่อแก้ไขเสร็จ');
   };
 
   const handleEditRecord = (record: PreAnestheticEvaluation) => {
-    const fp = buildRecordFingerprint(record);
-    lastLocalFpRef.current.set(record.id, fp);
-    if (knownCloudIdsRef.current.has(record.id)) {
-      lastCloudFpRef.current.set(record.id, fp);
+    flushPendingCloudSave();
+    const latestFromCloud = cloudRecordsRef.current.find((r) => r.id === record.id) ?? record;
+    const fp = buildRecordFingerprint(latestFromCloud);
+    lastLocalFpRef.current.set(latestFromCloud.id, fp);
+    if (knownCloudIdsRef.current.has(latestFromCloud.id)) {
+      lastCloudFpRef.current.set(latestFromCloud.id, fp);
     }
-    setCurrentForm(record);
+    dirtyFormIdRef.current = null;
+    firstDirtyAtRef.current = 0;
+    setRemoteUpdateCandidate(null);
+    setCurrentForm(latestFromCloud);
     setActiveTab('form');
   };
 
   const handlePrintRecord = (record: PreAnestheticEvaluation) => {
-    const fp = buildRecordFingerprint(record);
-    lastLocalFpRef.current.set(record.id, fp);
-    if (knownCloudIdsRef.current.has(record.id)) {
-      lastCloudFpRef.current.set(record.id, fp);
+    flushPendingCloudSave();
+    const latestFromCloud = cloudRecordsRef.current.find((r) => r.id === record.id) ?? record;
+    const fp = buildRecordFingerprint(latestFromCloud);
+    lastLocalFpRef.current.set(latestFromCloud.id, fp);
+    if (knownCloudIdsRef.current.has(latestFromCloud.id)) {
+      lastCloudFpRef.current.set(latestFromCloud.id, fp);
     }
-    setCurrentForm(record);
+    dirtyFormIdRef.current = null;
+    firstDirtyAtRef.current = 0;
+    setRemoteUpdateCandidate(null);
+    setCurrentForm(latestFromCloud);
     setActiveTab('print_preview');
     setTimeout(() => {
       window.print();
     }, 150);
   };
 
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
-      {/* Top Bar Contract: Exact 3 zones separated by gap-8 */}
-      <header className="no-print sticky top-0 z-30 bg-white border-b border-slate-200 px-6 py-3.5">
-        <div className="max-w-[1360px] mx-auto flex items-center justify-between gap-8">
-          {/* Zone 1: Single-line brand wordmark */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('form')}
-            className="text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0 text-left"
-          >
-            Bangplee Pre-Anesthetic
-          </button>
+  if (!authReady) {
+    return (
+      <div className="min-h-screen bg-pcanvas flex items-center justify-center px-4">
+        <div className="flex items-center gap-2.5 text-sm font-medium text-slate-600 bg-white/90 border border-pblue-200 rounded-xl px-5 py-3 shadow-xs">
+          <RefreshCw className="w-4 h-4 animate-spin text-pblue-600" />
+          กำลังตรวจสอบสถานะการเข้าสู่ระบบ...
+        </div>
+      </div>
+    );
+  }
 
-          {/* Zone 2: Concise single-line nav links */}
-          <nav
-            aria-label="หลัก"
-            className="hidden md:flex items-center gap-5 text-sm font-medium text-slate-600"
-          >
+  if (!isVerifiedCloudUser && !allowOfflineBypass) {
+    return (
+      <AuthModal
+        variant="fullscreen"
+        user={user}
+        onGoogleSignIn={handleGoogleSignIn}
+        onAuthSuccess={handleAuthSuccess}
+        onSignOut={handleSignOut}
+        onContinueOffline={() => setAllowOfflineBypass(true)}
+      />
+    );
+  }
+
+  return (
+    <div className="min-h-screen text-[#243040] flex flex-col">
+      {/* Top Bar Contract: Exact 3 zones separated by gap-8 */}
+      <header className="no-print sticky top-0 z-30 bg-white/95 backdrop-blur-sm border-b border-pborder">
+        <div className="h-[3px] w-full pastel-top-ribbon" aria-hidden="true" />
+        <div className="px-6 py-3.5">
+          <div className="max-w-[1360px] mx-auto flex items-center justify-between gap-8">
+            {/* Zone 1: Single-line brand wordmark */}
             <button
               type="button"
               onClick={() => setActiveTab('form')}
-              className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'form'
-                  ? 'border-blue-800 text-slate-950 font-semibold'
-                  : 'border-transparent hover:text-slate-900'
-              }`}
+              className="text-lg font-bold tracking-tight text-pblue-800 hover:text-prose-800 transition-colors whitespace-nowrap shrink-0 text-left"
             >
-              Pre-op
+              Bangplee Pre-Anesthetic
             </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('post_op')}
-              className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'post_op'
-                  ? 'border-blue-800 text-slate-950 font-semibold'
-                  : 'border-transparent hover:text-slate-900'
-              }`}
-            >
-              Post-op
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('registry')}
-              className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'registry'
-                  ? 'border-blue-800 text-slate-950 font-semibold'
-                  : 'border-transparent hover:text-slate-900'
-              }`}
-            >
-              ทะเบียนผ่าตัด ({liveRecords.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('dashboard')}
-              className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'dashboard'
-                  ? 'border-blue-800 text-slate-950 font-semibold'
-                  : 'border-transparent hover:text-slate-900'
-              }`}
-            >
-              Dashboard
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('print_preview')}
-              className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'print_preview'
-                  ? 'border-blue-800 text-slate-950 font-semibold'
-                  : 'border-transparent hover:text-slate-900'
-              }`}
-            >
-              พิมพ์ A4
-            </button>
-          </nav>
 
-          {/* Zone 3: 1 Primary Action — Always Save/Update directly */}
-          <div className="flex items-center shrink-0">
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={isSaving}
-              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-blue-800 rounded-lg hover:bg-blue-900 disabled:opacity-60 transition-colors whitespace-nowrap shrink-0"
+            {/* Zone 2: Concise single-line nav links with soft 5-color pastel active underline */}
+            <nav
+              aria-label="หลัก"
+              className="hidden md:flex items-center gap-5 text-sm font-medium text-slate-600"
             >
-              <Save className="w-3.5 h-3.5" />
-              {isSaving
-                ? 'กำลังบันทึก...'
-                : savedIdSet.has(currentForm.id)
-                ? 'อัปเดตข้อมูล'
-                : 'บันทึกข้อมูล'}
-            </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('form')}
+                className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+                  activeTab === 'form'
+                    ? 'border-pblue-400 text-pblue-800 font-semibold'
+                    : 'border-transparent hover:text-pblue-800'
+                }`}
+              >
+                Pre-op
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('post_op')}
+                className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+                  activeTab === 'post_op'
+                    ? 'border-pgreen-400 text-pgreen-800 font-semibold'
+                    : 'border-transparent hover:text-pgreen-800'
+                }`}
+              >
+                Post-op
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('registry')}
+                className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+                  activeTab === 'registry'
+                    ? 'border-prose-400 text-prose-800 font-semibold'
+                    : 'border-transparent hover:text-prose-800'
+                }`}
+              >
+                ทะเบียนผ่าตัด ({liveRecords.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('dashboard')}
+                className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+                  activeTab === 'dashboard'
+                    ? 'border-pyellow-400 text-pyellow-800 font-semibold'
+                    : 'border-transparent hover:text-pyellow-800'
+                }`}
+              >
+                Dashboard
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('print_preview')}
+                className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+                  activeTab === 'print_preview'
+                    ? 'border-ppink-400 text-ppink-800 font-semibold'
+                    : 'border-transparent hover:text-ppink-800'
+                }`}
+              >
+                พิมพ์ A4
+              </button>
+            </nav>
+
+            {/* Zone 3: 1 Primary Action — Always Save/Update directly */}
+            <div className="flex items-center shrink-0">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={isSaving}
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-pblue-600 rounded-lg hover:bg-pblue-700 disabled:opacity-60 transition-colors whitespace-nowrap shrink-0 shadow-xs"
+              >
+                <Save className="w-3.5 h-3.5" />
+                {isSaving
+                  ? 'กำลังบันทึก...'
+                  : savedIdSet.has(currentForm.id)
+                  ? 'อัปเดตข้อมูล'
+                  : 'บันทึกข้อมูล'}
+              </button>
+            </div>
           </div>
-        </div>
 
-        {/* Mobile Nav Row */}
-        <div className="md:hidden flex items-center gap-2 mt-2.5 overflow-x-auto pb-0.5">
-          {(
-            [
-              { key: 'form', label: 'Pre-op' },
-              { key: 'post_op', label: 'Post-op' },
-              { key: 'registry', label: `ทะเบียนผ่าตัด (${liveRecords.length})` },
-              { key: 'dashboard', label: 'Dashboard' },
-              { key: 'print_preview', label: 'พิมพ์ A4' },
-            ] as const
-          ).map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setActiveTab(t.key)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
-                activeTab === t.key
-                  ? 'bg-slate-900 text-white'
-                  : 'bg-slate-100 text-slate-700'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+          {/* Mobile Nav Row */}
+          <div className="md:hidden flex items-center gap-2 mt-2.5 overflow-x-auto pb-0.5">
+            {(
+              [
+                { key: 'form', label: 'Pre-op', activeCls: 'bg-pblue-100 text-pblue-800 border-pblue-300' },
+                { key: 'post_op', label: 'Post-op', activeCls: 'bg-pgreen-100 text-pgreen-800 border-pgreen-300' },
+                { key: 'registry', label: `ทะเบียนผ่าตัด (${liveRecords.length})`, activeCls: 'bg-prose-100 text-prose-800 border-prose-300' },
+                { key: 'dashboard', label: 'Dashboard', activeCls: 'bg-pyellow-100 text-pyellow-800 border-pyellow-300' },
+                { key: 'print_preview', label: 'พิมพ์ A4', activeCls: 'bg-ppink-100 text-ppink-800 border-ppink-300' },
+              ] as const
+            ).map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setActiveTab(t.key)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md border whitespace-nowrap shrink-0 transition-colors ${
+                  activeTab === t.key
+                    ? t.activeCls
+                    : 'bg-white border-pborder text-slate-600'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
       {/* Secondary Workspace Toolbar (Below Header) */}
-      <div className="no-print bg-slate-100/80 border-b border-slate-200 px-6 py-2.5">
+      <div className="no-print bg-gradient-to-r from-pblue-50/85 via-white/90 to-ppink-50/75 border-b border-pborder px-6 py-2.5">
         <div className="max-w-[1440px] mx-auto flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-            <span className="font-semibold text-slate-800">
+            <span className="font-semibold text-[#243040]">
               {currentForm.patientName.trim()
                 ? `${currentForm.patientName} (HN: ${currentForm.hn || '—'})`
                 : 'แบบฟอร์มใหม่ (ยังไม่บันทึก)'}
             </span>
             <span aria-hidden="true">·</span>
-            <span className="font-mono tabular-nums text-blue-900 font-medium">
+            <span className="font-mono tabular-nums text-pblue-800 font-medium">
               วันผ่าตัด: {currentForm.dateOfOperation ? formatThaiDateBE(currentForm.dateOfOperation) : 'ยังไม่ระบุ'}
             </span>
             {currentForm.surgeon?.trim() && (
@@ -1940,18 +2246,28 @@ export default function App() {
                 <span className="text-slate-700">{currentForm.surgeon.trim()}</span>
               </>
             )}
-            {user ? (
+            {isVerifiedCloudUser && user ? (
               <>
                 <span aria-hidden="true">·</span>
-                <span className="text-emerald-800 font-medium">
-                  ซิงค์ฐานข้อมูล ({user.email})
+                <span className="text-pgreen-800 font-medium">
+                  ซิงค์ Real-time ({user.displayName ? `${user.displayName} · ${user.email}` : user.email})
                 </span>
+                <button
+                  type="button"
+                  disabled={isPullingCloud}
+                  onClick={() => void handlePullFromCloud()}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-pgreen-800 bg-pgreen-50 border border-pgreen-200 rounded hover:bg-pgreen-100 disabled:opacity-60 transition-colors"
+                  title="ดึงข้อมูลล่าสุดจากฐานข้อมูล Cloud ทันที"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isPullingCloud ? 'animate-spin' : ''}`} />
+                  {isPullingCloud ? 'กำลังอัปเดต...' : 'อัปเดตล่าสุด'}
+                </button>
                 {unsyncedLocalRecords.length > 0 && (
                   <button
                     type="button"
                     disabled={isSyncingLocal}
                     onClick={handleSyncLocalToCloud}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold text-blue-800 bg-white border border-blue-300 rounded hover:bg-blue-50 disabled:opacity-60"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold text-pblue-800 bg-pblue-50 border border-pblue-200 rounded hover:bg-pblue-100 disabled:opacity-60 transition-colors"
                   >
                     <UploadCloud className="w-3 h-3" />
                     {isSyncingLocal
@@ -1961,15 +2277,15 @@ export default function App() {
                 )}
                 <button
                   type="button"
-                  onClick={handleSignIn}
-                  className="inline-flex items-center gap-1 text-blue-800 hover:text-blue-950 underline ml-1"
+                  onClick={handleOpenAuthModal}
+                  className="inline-flex items-center gap-1 text-pblue-800 hover:text-prose-800 underline ml-1"
                 >
                   สลับบัญชี
                 </button>
                 <button
                   type="button"
                   onClick={handleSignOut}
-                  className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-900 underline ml-1"
+                  className="inline-flex items-center gap-1 text-slate-500 hover:text-prose-800 underline ml-1"
                 >
                   <LogOut className="w-3 h-3" />
                   ออกจากระบบ
@@ -1981,11 +2297,11 @@ export default function App() {
                 <span className="text-slate-700">จัดเก็บในเครื่องนี้</span>
                 <button
                   type="button"
-                  onClick={handleSignIn}
-                  className="inline-flex items-center gap-1 text-blue-800 hover:text-blue-950 font-semibold underline"
+                  onClick={handleOpenAuthModal}
+                  className="inline-flex items-center gap-1 text-pblue-800 hover:text-prose-800 font-semibold underline"
                 >
                   <LogIn className="w-3 h-3" />
-                  เข้าสู่ระบบ Google (ซิงค์ข้ามเครื่อง)
+                  เข้าสู่ระบบ (ซิงค์ข้ามเครื่อง)
                 </button>
               </>
             )}
@@ -1998,11 +2314,11 @@ export default function App() {
                 onClick={() => setShowFolderSidebar((prev) => !prev)}
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-lg transition-colors whitespace-nowrap shrink-0 ${
                   showFolderSidebar
-                    ? 'bg-blue-50 border-blue-300 text-blue-900'
-                    : 'bg-white border-slate-300 text-slate-800 hover:bg-slate-50'
+                    ? 'bg-pblue-50 border-pblue-300 text-pblue-800'
+                    : 'bg-white border-pborder text-slate-700 hover:bg-pblue-50/60'
                 }`}
               >
-                <FolderOpen className="w-3.5 h-3.5 text-blue-800" />
+                <FolderOpen className="w-3.5 h-3.5 text-pblue-600" />
                 {showFolderSidebar
                   ? `ซ่อนทะเบียนผ่าตัด (${liveRecords.length})`
                   : `แสดงทะเบียนผ่าตัด (${liveRecords.length})`}
@@ -2015,27 +2331,27 @@ export default function App() {
                 setActiveTab('registry');
                 setRegistryFocusNonce((n) => n + 1);
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-prose-800 bg-prose-50 border border-prose-200 rounded-lg hover:bg-prose-100 transition-colors whitespace-nowrap shrink-0"
             >
-              <Search className="w-3.5 h-3.5 text-blue-800" />
+              <Search className="w-3.5 h-3.5 text-prose-600" />
               ค้นหาใบ Pre-op เก่า
             </button>
 
             <button
               type="button"
               onClick={handleCreateNew}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-800 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-pgreen-800 bg-pgreen-50 border border-pgreen-200 rounded-lg hover:bg-pgreen-100 transition-colors whitespace-nowrap shrink-0"
             >
-              <FilePlus2 className="w-3.5 h-3.5 text-blue-800" />
+              <FilePlus2 className="w-3.5 h-3.5 text-pgreen-600" />
               สร้างใบเยี่ยมใหม่
             </button>
 
             <button
               type="button"
               onClick={() => window.print()}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-800 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-ppink-800 bg-ppink-50 border border-ppink-200 rounded-lg hover:bg-ppink-100 transition-colors whitespace-nowrap shrink-0"
             >
-              <Printer className="w-3.5 h-3.5 text-blue-800" />
+              <Printer className="w-3.5 h-3.5 text-ppink-600" />
               พิมพ์ / PDF (1 หน้า A4)
             </button>
 
@@ -2045,9 +2361,9 @@ export default function App() {
                 exportSingleHtmlReport(currentForm);
                 showNotice('success', 'ส่งออกไฟล์รายงาน HTML (1 หน้า A4) เรียบร้อย');
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-800 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-pyellow-800 bg-pyellow-50 border border-pyellow-200 rounded-lg hover:bg-pyellow-100 transition-colors whitespace-nowrap shrink-0"
             >
-              <FileCode2 className="w-3.5 h-3.5 text-blue-800" />
+              <FileCode2 className="w-3.5 h-3.5 text-pyellow-600" />
               ส่งออกไฟล์ HTML
             </button>
 
@@ -2058,9 +2374,9 @@ export default function App() {
                 exportEvaluationsCsv(list);
                 showNotice('success', 'ส่งออกไฟล์ CSV สำหรับ Excel เรียบร้อย');
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-800 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-pborder rounded-lg hover:bg-pblue-50/70 transition-colors whitespace-nowrap shrink-0"
             >
-              <Download className="w-3.5 h-3.5 text-blue-800" />
+              <Download className="w-3.5 h-3.5 text-pblue-600" />
               ส่งออก CSV
             </button>
           </div>
@@ -2069,13 +2385,36 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 py-5 space-y-5">
-        {cloudError && user && (
+        {authReady && !isVerifiedCloudUser && (
           <div
-            role="alert"
-            className="no-print flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-900"
+            role="status"
+            className="no-print flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-pyellow-50 border border-pyellow-200 rounded-xl text-xs text-pyellow-800"
           >
             <div className="flex items-center gap-2 min-w-0">
-              <AlertCircle className="w-4 h-4 text-red-700 shrink-0" />
+              <AlertCircle className="w-4 h-4 text-pyellow-600 shrink-0" />
+              <span className="font-medium">
+                {user && !isEmailVerified
+                  ? `บัญชี ${user.email} ยังไม่ได้ยืนยันอีเมล — กรุณายืนยันอีเมลเพื่อเปิดใช้งานซิงค์ข้อมูล Cloud แบบ Real-time`
+                  : 'ขณะนี้ใช้งานแบบออฟไลน์เฉพาะเครื่องนี้ — กรุณาเข้าสู่ระบบด้วยอีเมล/รหัสผ่าน หรือบัญชี Google เพื่อดูและแก้ไขข้อมูลร่วมกับทีมแบบ Real-time'}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleOpenAuthModal}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-pblue-600 rounded-lg hover:bg-pblue-700 whitespace-nowrap"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              {user && !isEmailVerified ? 'ยืนยันอีเมลตอนนี้' : 'เข้าสู่ระบบ (ซิงค์ Real-time)'}
+            </button>
+          </div>
+        )}
+        {cloudError && isVerifiedCloudUser && (
+          <div
+            role="alert"
+            className="no-print flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-prose-50 border border-prose-200 rounded-xl text-xs text-prose-800"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertCircle className="w-4 h-4 text-prose-600 shrink-0" />
               <span className="font-medium">
                 การเชื่อมต่อฐานข้อมูล Cloud ขัดข้อง: {cloudError} (ข้อมูลที่บันทึกใหม่จะถูกสำรองในเครื่องและแสดงในทะเบียนผ่าตัดโดยอัตโนมัติ)
               </span>
@@ -2083,11 +2422,52 @@ export default function App() {
             <button
               type="button"
               onClick={() => setCloudRetryNonce((n) => n + 1)}
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-red-900 bg-white border border-red-300 rounded-md hover:bg-red-100 whitespace-nowrap"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-prose-800 bg-white border border-prose-300 rounded-md hover:bg-prose-100 whitespace-nowrap"
             >
               <RefreshCw className="w-3.5 h-3.5" />
               ลองเชื่อมต่อใหม่
             </button>
+          </div>
+        )}
+        {remoteUpdateCandidate && remoteUpdateCandidate.id === currentForm.id && (
+          <div
+            role="status"
+            className="no-print flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-pblue-50 border border-pblue-200 rounded-xl text-xs text-pblue-800"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <RefreshCw className="w-4 h-4 text-pblue-600 shrink-0" />
+              <span className="font-medium">
+                มีผู้ใช้งานอื่นเพิ่งอัปเดตข้อมูลของ{' '}
+                <strong>{remoteUpdateCandidate.patientName || currentForm.patientName}</strong> บน Cloud
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const next = remoteUpdateCandidate;
+                  const fp = buildRecordFingerprint(next);
+                  dirtyFormIdRef.current = null;
+                  firstDirtyAtRef.current = 0;
+                  pendingCloudSaveRef.current = null;
+                  lastCloudFpRef.current.set(next.id, fp);
+                  lastLocalFpRef.current.set(next.id, fp);
+                  setRemoteUpdateCandidate(null);
+                  setCurrentForm(next);
+                  showNotice('success', 'โหลดข้อมูลล่าสุดจาก Cloud เรียบร้อย');
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-white bg-pblue-600 rounded-md hover:bg-pblue-700 whitespace-nowrap"
+              >
+                โหลดข้อมูลล่าสุดจากทีม
+              </button>
+              <button
+                type="button"
+                onClick={() => setRemoteUpdateCandidate(null)}
+                className="px-2 py-1 text-xs font-medium text-pblue-800 hover:underline whitespace-nowrap"
+              >
+                เก็บข้อมูลที่กำลังพิมพ์
+              </button>
+            </div>
           </div>
         )}
         {(activeTab === 'form' || activeTab === 'post_op') && (
@@ -2122,14 +2502,14 @@ export default function App() {
 
               {/* Unified Patient Form Switcher: Pre-op vs Post-op (Same Patient Record) */}
               <div className="no-print flex flex-wrap items-center justify-between gap-2">
-                <div className="inline-flex items-center gap-1 p-1 bg-slate-200/70 rounded-lg">
+                <div className="inline-flex items-center gap-1 p-1 bg-white/90 border border-pborder rounded-lg shadow-2xs">
                   <button
                     type="button"
                     onClick={() => setActiveTab('form')}
                     className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
                       activeTab === 'form'
-                        ? 'bg-white text-slate-950 shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
+                        ? 'bg-pblue-100 text-pblue-800 shadow-2xs'
+                        : 'text-slate-600 hover:text-pblue-800'
                     }`}
                   >
                     Pre-op Evaluation (ANE-FM-002-03)
@@ -2139,8 +2519,8 @@ export default function App() {
                     onClick={() => setActiveTab('post_op')}
                     className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
                       activeTab === 'post_op'
-                        ? 'bg-white text-slate-950 shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
+                        ? 'bg-pgreen-100 text-pgreen-800 shadow-2xs'
+                        : 'text-slate-600 hover:text-pgreen-800'
                     }`}
                   >
                     Post-op Evaluation (ANE-FM-006-01)
@@ -2165,6 +2545,8 @@ export default function App() {
                   onUpdateSurgeonOptions={handleUpdateSurgeonOptions}
                   oxygenPresets={oxygenPresets}
                   onUpdateOxygenPresets={handleUpdateOxygenPresets}
+                  summarizerOptions={summarizerOptions}
+                  onUpdateSummarizerOptions={handleUpdateSummarizerOptions}
                   onGoToPostOp={() => setActiveTab('post_op')}
                 />
               ) : (
@@ -2178,7 +2560,6 @@ export default function App() {
                   }}
                   wardOptions={wardOptions}
                   summarizerOptions={summarizerOptions}
-                  onUpdateSummarizerOptions={handleUpdateSummarizerOptions}
                   visitorOptions={visitorOptions}
                   onUpdateVisitorOptions={handleUpdateVisitorOptions}
                   onGoToPreOp={() => setActiveTab('form')}
@@ -2211,11 +2592,11 @@ export default function App() {
             wardOptions={wardOptions}
             surgeonOptions={surgeonOptions}
             isLoading={isLoadingRecords && liveRecords.length === 0}
-            userEmail={user?.email ?? null}
+            userEmail={isVerifiedCloudUser ? (user?.email ?? null) : null}
             cloudCount={cloudRecords.length}
             unsyncedLocalCount={unsyncedLocalRecords.length}
             isSyncingLocal={isSyncingLocal}
-            isPullingCloud={isPullingCloud || (Boolean(user) && isLoadingRecords)}
+            isPullingCloud={isPullingCloud || (isVerifiedCloudUser && isLoadingRecords)}
             focusSearchNonce={registryFocusNonce}
             unsavedCurrentForm={
               !savedIdSet.has(currentForm.id) &&
@@ -2224,7 +2605,7 @@ export default function App() {
                 : null
             }
             onSaveCurrentForm={handleSave}
-            onSignIn={handleSignIn}
+            onSignIn={handleOpenAuthModal}
             onSyncLocalToCloud={() => void handleSyncLocalToCloud()}
             onPullFromCloud={() => void handlePullFromCloud()}
             onImportJsonFile={handleImportJsonFile}
@@ -2243,17 +2624,17 @@ export default function App() {
 
         {activeTab === 'print_preview' && (
           <div className="space-y-4">
-            <div className="no-print bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="no-print bg-white border border-ppink-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
               <div className="space-y-2">
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-900">
+                  <h2 className="text-sm font-semibold text-prose-800">
                     ตัวอย่างแบบฟอร์มกระดาษ A4 (Pre-op ANE-FM-002-03 &amp; Post-op ANE-FM-006-01)
                   </h2>
                   <p className="text-xs text-slate-500">
                     เลือกแบบฟอร์มที่ต้องการดูตัวอย่าง สั่งพิมพ์ หรือบันทึกเป็น PDF ได้ทันที
                   </p>
                 </div>
-                <div className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+                <div className="inline-flex items-center gap-1 p-1 bg-ppink-50 border border-ppink-100 rounded-lg">
                   {(
                     [
                       { key: 'pre_op', label: 'Pre-op (ANE-FM-002-03)' },
@@ -2267,8 +2648,8 @@ export default function App() {
                       onClick={() => setPrintSheetMode(opt.key)}
                       className={`px-3 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
                         printSheetMode === opt.key
-                          ? 'bg-white text-slate-950 shadow-sm'
-                          : 'text-slate-600 hover:text-slate-900'
+                          ? 'bg-white text-prose-800 font-semibold shadow-2xs'
+                          : 'text-slate-600 hover:text-prose-800'
                       }`}
                     >
                       {opt.label}
@@ -2280,23 +2661,23 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => exportEvaluationJson(currentForm)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-pborder rounded-lg hover:bg-pblue-50"
                 >
-                  <Download className="w-3.5 h-3.5" />
+                  <Download className="w-3.5 h-3.5 text-pblue-600" />
                   ส่งออก JSON
                 </button>
                 <button
                   type="button"
                   onClick={() => exportSingleHtmlReport(currentForm)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-pyellow-800 bg-pyellow-50 border border-pyellow-200 rounded-lg hover:bg-pyellow-100"
                 >
-                  <FileCode2 className="w-3.5 h-3.5" />
+                  <FileCode2 className="w-3.5 h-3.5 text-pyellow-600" />
                   ดาวน์โหลด HTML
                 </button>
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-blue-800 rounded-lg hover:bg-blue-900"
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-prose-600 rounded-lg hover:bg-prose-700"
                 >
                   <Printer className="w-3.5 h-3.5" />
                   สั่งพิมพ์ / บันทึก PDF
@@ -2331,20 +2712,22 @@ export default function App() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="new-form-date-modal-title"
-          className="no-print fixed inset-0 z-50 bg-slate-900/45 flex items-center justify-center p-4"
+          className="no-print fixed inset-0 z-50 bg-[#243040]/40 backdrop-blur-[1px] flex items-center justify-center p-4"
         >
           <form
             onSubmit={handleConfirmCreateNew}
             onKeyDown={handleFormTabNavigation}
-            className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-5 space-y-4 shadow-xl"
+            className="bg-white border border-pblue-200 rounded-xl max-w-lg w-full overflow-hidden shadow-xl"
           >
-            <div className="flex items-start justify-between gap-3 pb-2 border-b border-slate-200">
+            <div className="h-[3px] w-full pastel-top-ribbon" aria-hidden="true" />
+            <div className="p-5 space-y-4">
+            <div className="flex items-start justify-between gap-3 pb-2 border-b border-pborder">
               <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-blue-800 shrink-0" />
+                <Calendar className="w-4 h-4 text-pblue-600 shrink-0" />
                 <div>
                   <h3
                     id="new-form-date-modal-title"
-                    className="text-sm font-bold text-slate-900"
+                    className="text-sm font-bold text-[#243040]"
                   >
                     สร้างใบเยี่ยมใหม่ (เปิดฟอร์มเต็ม)
                   </h3>
@@ -2357,7 +2740,7 @@ export default function App() {
                 type="button"
                 onClick={() => setIsNewFormModalOpen(false)}
                 aria-label="ปิดหน้าต่าง"
-                className="p-1 text-slate-400 hover:text-slate-700 rounded"
+                className="p-1 text-slate-400 hover:text-prose-800 rounded"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -2461,8 +2844,8 @@ export default function App() {
                             }
                             className={`px-2 py-0.5 text-[11px] font-medium rounded border transition-colors ${
                               newFormDraft.dateOfOperation === opt.val
-                                ? 'bg-blue-800 text-white border-blue-800'
-                                : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                                ? 'bg-pblue-600 text-white border-pblue-600'
+                                : 'bg-white text-slate-600 border-pborder hover:bg-pblue-50'
                             }`}
                           >
                             {opt.label}
@@ -2483,21 +2866,21 @@ export default function App() {
                         }))
                       }
                       wrapperClassName="w-full"
-                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800 focus:ring-1 focus:ring-blue-800"
+                      className="w-full bg-white border border-pborder rounded-lg px-3 py-2 text-sm font-mono tabular-nums text-[#243040] focus:outline-none focus:border-pblue-400 focus:ring-1 focus:ring-pblue-300"
                     />
 
-                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs">
-                      <span className="font-medium text-slate-800">
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-pblue-50/70 border border-pblue-200 rounded-lg text-xs">
+                      <span className="font-medium text-[#243040]">
                         {selectedMeta.label}
                         {selectedMeta.relativeTag ? (
-                          <span className="ml-1.5 text-blue-800 font-semibold">
+                          <span className="ml-1.5 text-pblue-800 font-semibold">
                             ({selectedMeta.relativeTag})
                           </span>
                         ) : null}
                       </span>
                       <span className="text-slate-600 tabular-nums">
                         เคสที่เก็บไว้ในวันนี้:{' '}
-                        <strong className="font-mono text-slate-900">{existingCount}</strong> ราย
+                        <strong className="font-mono text-pblue-800">{existingCount}</strong> ราย
                       </span>
                     </div>
                   </div>
@@ -2633,41 +3016,54 @@ export default function App() {
               );
             })()}
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-pborder">
               <button
                 type="button"
                 onClick={() => setIsNewFormModalOpen(false)}
-                className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50"
+                className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-pborder rounded-lg hover:bg-pblue-50"
               >
                 ยกเลิก
               </button>
               <button
                 type="submit"
                 disabled={isSaving}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-blue-800 rounded-lg hover:bg-blue-900 disabled:opacity-60"
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-pblue-600 rounded-lg hover:bg-pblue-700 disabled:opacity-60"
               >
                 <FilePlus2 className="w-3.5 h-3.5" />
                 {isSaving ? 'กำลังบันทึกเข้าทะเบียน...' : 'สร้างฟอร์มและเก็บในทะเบียน'}
               </button>
             </div>
+            </div>
           </form>
         </div>
+      )}
+
+      {/* Auth Modal (Email/Password + Google Sign-In) */}
+      {isAuthModalOpen && (
+        <AuthModal
+          variant="modal"
+          user={user}
+          onGoogleSignIn={handleGoogleSignIn}
+          onAuthSuccess={handleAuthSuccess}
+          onSignOut={handleSignOut}
+          onClose={() => setIsAuthModalOpen(false)}
+        />
       )}
 
       {/* Toast Notification */}
       {notice && (
         <div
           role={notice.type === 'error' ? 'alert' : 'status'}
-          className={`no-print fixed bottom-5 right-5 z-50 max-w-md flex items-start gap-2.5 px-4 py-3 rounded-lg border text-xs font-medium shadow-lg ${
+          className={`no-print fixed bottom-5 right-5 z-50 max-w-md flex items-start gap-2.5 px-4 py-3 rounded-xl border text-xs font-medium shadow-lg ${
             notice.type === 'error'
-              ? 'bg-red-50 border-red-300 text-red-900'
-              : 'bg-slate-900 border-slate-800 text-white'
+              ? 'bg-prose-50 border-prose-300 text-prose-800'
+              : 'bg-pgreen-50 border-pgreen-300 text-pgreen-800'
           }`}
         >
           {notice.type === 'error' ? (
-            <AlertCircle className="w-4 h-4 text-red-700 shrink-0 mt-0.5" />
+            <AlertCircle className="w-4 h-4 text-prose-600 shrink-0 mt-0.5" />
           ) : (
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+            <CheckCircle2 className="w-4 h-4 text-pgreen-600 shrink-0 mt-0.5" />
           )}
           <span className="leading-relaxed">{notice.text}</span>
           <button
@@ -2676,8 +3072,8 @@ export default function App() {
             aria-label="ปิดการแจ้งเตือน"
             className={`p-0.5 rounded shrink-0 ${
               notice.type === 'error'
-                ? 'text-red-500 hover:text-red-900'
-                : 'text-slate-400 hover:text-white'
+                ? 'text-prose-600 hover:text-prose-800'
+                : 'text-pgreen-600 hover:text-pgreen-800'
             }`}
           >
             <X className="w-3.5 h-3.5" />

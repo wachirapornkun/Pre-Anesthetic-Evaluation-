@@ -459,6 +459,8 @@ export interface PostOpComplicationData {
   painScoreDetail: string;
   otherComplicationDetail?: string;
   noneProblem: boolean;
+  noneProblemPeriOp?: boolean;
+  noneProblemPostOp?: boolean;
   outcomes: PostOpOutcomeKey[];
   incidentTypes: PostOpIncidentType[];
   severityLevel: PostOpSeverityLevel;
@@ -472,6 +474,24 @@ export interface PostOpComplicationData {
   postOpTime: string;
 }
 
+export function getEffectiveNoneProblemFlags(
+  comp?: Partial<PostOpComplicationData> | null,
+): { periOp: boolean; postOp: boolean; any: boolean } {
+  if (!comp) return { periOp: false, postOp: false, any: false };
+  const periComps = Array.isArray(comp.periOpComplications) ? comp.periOpComplications : [];
+  const postComps = Array.isArray(comp.postOpComplications) ? comp.postOpComplications : [];
+  const hasExplicit =
+    typeof comp.noneProblemPeriOp === 'boolean' ||
+    typeof comp.noneProblemPostOp === 'boolean';
+  const periOp =
+    (hasExplicit ? Boolean(comp.noneProblemPeriOp) : Boolean(comp.noneProblem)) &&
+    periComps.length === 0;
+  const postOp =
+    (hasExplicit ? Boolean(comp.noneProblemPostOp) : Boolean(comp.noneProblem)) &&
+    postComps.length === 0;
+  return { periOp, postOp, any: periOp || postOp };
+}
+
 export function createEmptyPostOpComplication(): PostOpComplicationData {
   return {
     periOpComplications: [],
@@ -480,6 +500,8 @@ export function createEmptyPostOpComplication(): PostOpComplicationData {
     painScoreDetail: '',
     otherComplicationDetail: '',
     noneProblem: false,
+    noneProblemPeriOp: false,
+    noneProblemPostOp: false,
     outcomes: [],
     incidentTypes: [],
     severityLevel: '',
@@ -2007,22 +2029,48 @@ export function hydrateEvaluationRecord(
       postAnesthesia: {
         ...base.formData.postAnesthesia,
         ...rawPa,
+        visitBy:
+          (typeof rawPa.visitBy === 'string' && rawPa.visitBy.trim() ? rawPa.visitBy : '') ||
+          (typeof rawPc.postOpRecorder === 'string' ? rawPc.postOpRecorder : ''),
+        visitDate:
+          (typeof rawPa.visitDate === 'string' && rawPa.visitDate.trim() ? rawPa.visitDate : '') ||
+          (typeof rawPc.postOpDate === 'string' ? rawPc.postOpDate : ''),
       },
-      postOpComplication: {
-        ...createEmptyPostOpComplication(),
-        ...rawPc,
-        periOpComplications: Array.isArray(rawPc.periOpComplications)
+      postOpComplication: (() => {
+        const hydratedPeriComps = Array.isArray(rawPc.periOpComplications)
           ? rawPc.periOpComplications
-          : [],
-        postOpComplications: Array.isArray(rawPc.postOpComplications)
+          : [];
+        const hydratedPostComps = Array.isArray(rawPc.postOpComplications)
           ? rawPc.postOpComplications
-          : [],
-        outcomes: Array.isArray(rawPc.outcomes) ? rawPc.outcomes : [],
-        incidentTypes: Array.isArray(rawPc.incidentTypes) ? rawPc.incidentTypes : [],
-        administrationErrors: Array.isArray(rawPc.administrationErrors)
-          ? rawPc.administrationErrors
-          : [],
-      },
+          : [];
+        const noneFlags = getEffectiveNoneProblemFlags({
+          ...rawPc,
+          periOpComplications: hydratedPeriComps,
+          postOpComplications: hydratedPostComps,
+        });
+        const unifiedPostOpRecorder =
+          (typeof rawPa.visitBy === 'string' && rawPa.visitBy.trim() ? rawPa.visitBy : '') ||
+          (typeof rawPc.postOpRecorder === 'string' ? rawPc.postOpRecorder : '');
+        const unifiedPostOpDate =
+          (typeof rawPa.visitDate === 'string' && rawPa.visitDate.trim() ? rawPa.visitDate : '') ||
+          (typeof rawPc.postOpDate === 'string' ? rawPc.postOpDate : '');
+        return {
+          ...createEmptyPostOpComplication(),
+          ...rawPc,
+          periOpComplications: hydratedPeriComps,
+          postOpComplications: hydratedPostComps,
+          noneProblem: noneFlags.any,
+          noneProblemPeriOp: noneFlags.periOp,
+          noneProblemPostOp: noneFlags.postOp,
+          postOpRecorder: unifiedPostOpRecorder,
+          postOpDate: unifiedPostOpDate,
+          outcomes: Array.isArray(rawPc.outcomes) ? rawPc.outcomes : [],
+          incidentTypes: Array.isArray(rawPc.incidentTypes) ? rawPc.incidentTypes : [],
+          administrationErrors: Array.isArray(rawPc.administrationErrors)
+            ? rawPc.administrationErrors
+            : [],
+        };
+      })(),
       surgeryPostponement: (() => {
         const rawSp = rawFd.surgeryPostponement;
         if (!rawSp || typeof rawSp !== 'object') return createEmptySurgeryPostponement();
@@ -2056,8 +2104,14 @@ export function hydrateEvaluationRecord(
     },
   };
 
+  const derivedHasComplication =
+    merged.formData.postAnesthesia.complicationStatus === 'yes' ||
+    (merged.formData.postOpComplication?.periOpComplications?.length ?? 0) > 0 ||
+    (merged.formData.postOpComplication?.postOpComplications?.length ?? 0) > 0;
+
   return {
     ...merged,
+    hasComplication: derivedHasComplication,
     status: getEffectiveEvaluationStatus(merged),
   };
 }
@@ -2435,7 +2489,7 @@ export function isPostOpVisited(record: PreAnestheticEvaluation): boolean {
   const pa = record.formData?.postAnesthesia;
   const pc = record.formData?.postOpComplication;
   return Boolean(
-    getPostOpVisitCompleteness(pa).isComplete ||
+    getPostOpVisitCompleteness(pa, pc).isComplete ||
       Boolean(pa?.visitDate?.trim() && pa?.visitBy?.trim()) ||
       Boolean(pc?.postOpDate?.trim() && pc?.postOpRecorder?.trim()) ||
       record.status === 'post_op_completed',
@@ -2497,13 +2551,30 @@ export function sanitizeEvaluationForFirestore(
       ),
     ),
   ).slice(0, POST_OP_COMPLICATION_KEY_LIST.length);
+  const sanitizedNoneFlags = getEffectiveNoneProblemFlags({
+    ...rawPostOpComp,
+    periOpComplications: sanitizedPeriOpComps,
+    postOpComplications: sanitizedPostOpComps,
+  });
+  const unifiedPostOpVisitor = clampStr(
+    (fd.postAnesthesia?.visitBy?.trim() ? fd.postAnesthesia.visitBy : '') ||
+      (rawPostOpComp.postOpRecorder ?? ''),
+    120,
+  );
+  const unifiedPostOpVisitDate = clampStr(
+    (fd.postAnesthesia?.visitDate?.trim() ? fd.postAnesthesia.visitDate : '') ||
+      (rawPostOpComp.postOpDate ?? ''),
+    32,
+  );
   const sanitizedPostOpComplication: PostOpComplicationData = {
     periOpComplications: sanitizedPeriOpComps,
     postOpComplications: sanitizedPostOpComps,
     difficultIntubationGrade: clampStr(rawPostOpComp.difficultIntubationGrade ?? '', 30),
     painScoreDetail: clampStr(rawPostOpComp.painScoreDetail ?? '', 30),
     otherComplicationDetail: clampStr(rawPostOpComp.otherComplicationDetail ?? '', 200),
-    noneProblem: Boolean(rawPostOpComp.noneProblem) && sanitizedPeriOpComps.length === 0 && sanitizedPostOpComps.length === 0,
+    noneProblem: sanitizedNoneFlags.any,
+    noneProblemPeriOp: sanitizedNoneFlags.periOp,
+    noneProblemPostOp: sanitizedNoneFlags.postOp,
     outcomes: Array.from(
       new Set(
         (Array.isArray(rawPostOpComp.outcomes) ? rawPostOpComp.outcomes : []).filter(
@@ -2534,8 +2605,8 @@ export function sanitizeEvaluationForFirestore(
     periOpRecorder: clampStr(rawPostOpComp.periOpRecorder ?? '', 120),
     periOpDate: clampStr(rawPostOpComp.periOpDate ?? '', 32),
     periOpTime: clampStr(rawPostOpComp.periOpTime ?? '', 32),
-    postOpRecorder: clampStr(rawPostOpComp.postOpRecorder ?? '', 120),
-    postOpDate: clampStr(rawPostOpComp.postOpDate ?? '', 32),
+    postOpRecorder: unifiedPostOpVisitor,
+    postOpDate: unifiedPostOpVisitDate,
     postOpTime: clampStr(rawPostOpComp.postOpTime ?? '', 32),
   };
 
@@ -2829,8 +2900,8 @@ export function sanitizeEvaluationForFirestore(
         painScore: clampStr(fd.postAnesthesia.painScore, 20),
         complicationStatus: sanitizeTri(fd.postAnesthesia.complicationStatus),
         complicationDetail: clampStr(fd.postAnesthesia.complicationDetail, 500),
-        visitBy: clampStr(fd.postAnesthesia.visitBy, 120),
-        visitDate: clampStr(fd.postAnesthesia.visitDate, 32),
+        visitBy: unifiedPostOpVisitor,
+        visitDate: unifiedPostOpVisitDate,
       },
       postOpComplication: sanitizedPostOpComplication,
       surgeryPostponement: (() => {
@@ -2883,6 +2954,7 @@ export interface PostOpVisitCompleteness {
 
 export function getPostOpVisitCompleteness(
   pa?: Partial<PostAnesthesiaData> | null,
+  pc?: Partial<PostOpComplicationData> | null,
 ): PostOpVisitCompleteness {
   const safe = pa ?? {};
   const missingFields: string[] = [];
@@ -2895,26 +2967,26 @@ export function getPostOpVisitCompleteness(
   const hasPainScore = Boolean(safe.painScore?.trim());
   const compStatus = safe.complicationStatus ?? 'none';
   const hasCompStatus = compStatus === 'no' || compStatus === 'yes';
-  const needsCompDetail = compStatus === 'yes';
+  const hasTableComp = Boolean(
+    (pc?.periOpComplications?.length ?? 0) > 0 ||
+      (pc?.postOpComplications?.length ?? 0) > 0,
+  );
+  const noneFlags = getEffectiveNoneProblemFlags(pc);
+  const hasTableDecision = hasTableComp || noneFlags.any;
+  const hasComplicationRecorded = hasCompStatus || hasTableDecision;
+  const needsCompDetail = compStatus === 'yes' && !hasTableComp;
   const hasCompDetail = !needsCompDetail || Boolean(safe.complicationDetail?.trim());
-  const hasVisitBy = Boolean(safe.visitBy?.trim());
-  const hasVisitDate = Boolean(safe.visitDate?.trim());
+  const hasVisitBy = Boolean(safe.visitBy?.trim() || pc?.postOpRecorder?.trim());
+  const hasVisitDate = Boolean(safe.visitDate?.trim() || pc?.postOpDate?.trim());
 
-  if (!hasBp) missingFields.push('BP');
-  if (!hasPulse) missingFields.push('P');
-  if (!hasRr) missingFields.push('RR');
-  if (!hasTemp) missingFields.push('T');
-  if (!hasSpo2) missingFields.push('SpO2');
-  if (!hasPainScore) missingFields.push('PS');
-  if (!hasCompStatus) {
-    missingFields.push('Complication (No/Yes)');
+  if (!hasComplicationRecorded) {
+    missingFields.push('Complication (No/Yes หรือติ๊กในตารางด้านบน)');
   } else if (!hasCompDetail) {
     missingFields.push('รายละเอียดภาวะแทรกซ้อน');
   }
   if (!hasVisitBy) missingFields.push('ผู้เยี่ยม (visit by)');
-  if (!hasVisitDate) missingFields.push('วันที่เยี่ยม (date)');
 
-  const totalRequired = needsCompDetail ? 10 : 9;
+  const totalRequired = needsCompDetail ? 3 : 2;
   const filledCount = totalRequired - missingFields.length;
   const hasAnyInput =
     hasBp ||
@@ -2923,7 +2995,7 @@ export function getPostOpVisitCompleteness(
     hasTemp ||
     hasSpo2 ||
     hasPainScore ||
-    hasCompStatus ||
+    hasComplicationRecorded ||
     Boolean(safe.complicationDetail?.trim()) ||
     hasVisitBy ||
     hasVisitDate;
@@ -2939,7 +3011,12 @@ export function getPostOpVisitCompleteness(
 
 export function getEffectiveEvaluationStatus(record: PreAnestheticEvaluation): EvaluationStatus {
   if (record.status === 'locked') return 'locked';
-  if (getPostOpVisitCompleteness(record.formData?.postAnesthesia).isComplete) {
+  if (
+    getPostOpVisitCompleteness(
+      record.formData?.postAnesthesia,
+      record.formData?.postOpComplication,
+    ).isComplete
+  ) {
     return 'post_op_completed';
   }
   if (record.formData?.preOpNotVisited?.isNotVisited) {

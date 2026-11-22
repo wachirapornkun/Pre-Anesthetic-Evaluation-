@@ -174,6 +174,10 @@ function getSurgicalProcedureRiskPoints(operation: string): number {
   return 6;
 }
 
+function normalizeOperationKey(raw: string): string {
+  return raw.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 interface CaseRiskProfile {
   score: number;
   isHighRisk: boolean;
@@ -221,10 +225,18 @@ function computeCaseRiskProfile(record: PreAnestheticEvaluation): CaseRiskProfil
     (autoProblems.length > 0 && autoProblems[0].severityScore >= 80) ||
     normalizedScore >= 55;
 
+  const editedProblems = (record.formData?.problemList ?? [])
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const displayProblems =
+    editedProblems.length > 0
+      ? editedProblems.slice(0, 2)
+      : autoProblems.slice(0, 2).map((p) => p.text);
+
   return {
     score: normalizedScore,
     isHighRisk,
-    topProblems: autoProblems.slice(0, 2).map((p) => p.text),
+    topProblems: displayProblems,
   };
 }
 
@@ -246,7 +258,9 @@ export function DashboardView({
   const [showAllNotVisitedList, setShowAllNotVisitedList] = useState<boolean>(false);
   const [showAllPeriComplications, setShowAllPeriComplications] = useState<boolean>(false);
   const [showAllPostComplications, setShowAllPostComplications] = useState<boolean>(false);
-  const [operationSortBy, setOperationSortBy] = useState<'risk' | 'count'>('risk');
+  const [operationSortBy, setOperationSortBy] = useState<'count' | 'risk'>('count');
+  const [showAllOperations, setShowAllOperations] = useState<boolean>(false);
+  const [operationSearch, setOperationSearch] = useState<string>('');
   const [tableSortBy, setTableSortBy] = useState<'risk' | 'date'>('risk');
   const [showAllRows, setShowAllRows] = useState<boolean>(false);
   const [visitYearFilter, setVisitYearFilter] = useState<string>('ALL');
@@ -273,20 +287,47 @@ export function DashboardView({
   );
 
   const operations = useMemo(() => {
-    const statsMap = new Map<string, { count: number; maxRisk: number }>();
+    const statsMap = new Map<
+      string,
+      { key: string; labelCounts: Map<string, number>; count: number; maxRisk: number }
+    >();
     records.forEach((r) => {
-      const op = r.operation.trim();
-      if (!op) return;
+      const cleanedLabel = r.operation.trim().replace(/\s+/g, ' ');
+      if (!cleanedLabel) return;
+      const normKey = normalizeOperationKey(cleanedLabel);
       const riskScore = riskById.get(r.id)?.score ?? 0;
-      const prev = statsMap.get(op) || { count: 0, maxRisk: 0 };
-      statsMap.set(op, {
+      const prev = statsMap.get(normKey) || {
+        key: normKey,
+        labelCounts: new Map<string, number>(),
+        count: 0,
+        maxRisk: 0,
+      };
+      prev.labelCounts.set(cleanedLabel, (prev.labelCounts.get(cleanedLabel) || 0) + 1);
+      statsMap.set(normKey, {
+        key: normKey,
+        labelCounts: prev.labelCounts,
         count: prev.count + 1,
         maxRisk: Math.max(prev.maxRisk, riskScore),
       });
     });
-    return Array.from(statsMap.entries())
-      .sort((a, b) => b[1].maxRisk - a[1].maxRisk || b[1].count - a[1].count || a[0].localeCompare(b[0], 'th'))
-      .map(([op]) => op);
+    return Array.from(statsMap.values())
+      .map((entry) => {
+        let bestLabel = entry.key;
+        let bestCount = -1;
+        entry.labelCounts.forEach((cnt, lbl) => {
+          if (cnt > bestCount) {
+            bestCount = cnt;
+            bestLabel = lbl;
+          }
+        });
+        return { key: entry.key, label: bestLabel, count: entry.count, maxRisk: entry.maxRisk };
+      })
+      .sort(
+        (a, b) =>
+          b.count - a.count ||
+          b.maxRisk - a.maxRisk ||
+          a.label.localeCompare(b.label, 'th'),
+      );
   }, [records, riskById]);
 
   const hasUnspecifiedOperation = useMemo(
@@ -320,10 +361,10 @@ export function DashboardView({
         return false;
       }
 
-      const opVal = r.operation.trim();
+      const opKey = normalizeOperationKey(r.operation);
       if (operationFilter === UNSPECIFIED_KEY) {
-        if (opVal !== '') return false;
-      } else if (operationFilter !== 'ALL' && opVal !== operationFilter) {
+        if (opKey !== '') return false;
+      } else if (operationFilter !== 'ALL' && opKey !== operationFilter) {
         return false;
       }
 
@@ -411,7 +452,12 @@ export function DashboardView({
       ['III', 'IV'].includes(r.formData.physicalExam.mallampatiClass),
     ).length;
     const postOpDone = filtered.filter(
-      (r) => isPostOpVisited(r) || getPostOpVisitCompleteness(r.formData?.postAnesthesia).isComplete,
+      (r) =>
+        isPostOpVisited(r) ||
+        getPostOpVisitCompleteness(
+          r.formData?.postAnesthesia,
+          r.formData?.postOpComplication,
+        ).isComplete,
     ).length;
     const postOpPending = total - postOpDone;
     const complications = filtered.filter((r) => r.hasComplication).length;
@@ -534,17 +580,17 @@ export function DashboardView({
     });
 
     const anesthesiaDonutSegments: DonutSegment[] = [
-      { key: 'GA', label: 'GA (อย่างเดียว)', value: anesthesiaCategory.GA, color: '#1e40af' },
-      { key: 'RA', label: 'RA (อย่างเดียว)', value: anesthesiaCategory.RA, color: '#059669' },
-      { key: 'GA_RA', label: 'GA + RA (ร่วมกัน)', value: anesthesiaCategory.GA_RA, color: '#d97706' },
-      { key: 'MAC', label: 'MAC', value: anesthesiaCategory.MAC, color: '#7c3aed' },
+      { key: 'GA', label: 'GA (อย่างเดียว)', value: anesthesiaCategory.GA, color: '#72b1e4' },
+      { key: 'RA', label: 'RA (อย่างเดียว)', value: anesthesiaCategory.RA, color: '#75c69f' },
+      { key: 'GA_RA', label: 'GA + RA (ร่วมกัน)', value: anesthesiaCategory.GA_RA, color: '#e4be5b' },
+      { key: 'MAC', label: 'MAC', value: anesthesiaCategory.MAC, color: '#e898ba' },
     ];
     if (anesthesiaCategory.Unspecified > 0) {
       anesthesiaDonutSegments.push({
         key: 'Unspecified',
         label: 'ยังไม่ระบุแผน',
         value: anesthesiaCategory.Unspecified,
-        color: '#cbd5e1',
+        color: '#d8dfe9',
       });
     }
 
@@ -600,22 +646,22 @@ export function DashboardView({
     });
 
     const ageBrackets: AgeBracketItem[] = [
-      { key: 'le1', label: '≤ 1 ปี', subtitle: 'ทารก / Infant', count: ageInfant, color: '#0284c7' },
-      { key: '1to12', label: '1 – 12 ปี', subtitle: 'เด็ก / Pediatric', count: ageChild, color: '#0d9488' },
-      { key: '12to65', label: '12 – 65 ปี', subtitle: 'ผู้ใหญ่ / Adult', count: ageAdult, color: '#1e40af' },
-      { key: 'gt65', label: '> 65 ปี', subtitle: 'ผู้สูงอายุ / Geriatric', count: ageElderly, color: '#d97706' },
+      { key: 'le1', label: '≤ 1 ปี', subtitle: 'ทารก / Infant', count: ageInfant, color: '#72b1e4' },
+      { key: '1to12', label: '1 – 12 ปี', subtitle: 'เด็ก / Pediatric', count: ageChild, color: '#75c69f' },
+      { key: '12to65', label: '12 – 65 ปี', subtitle: 'ผู้ใหญ่ / Adult', count: ageAdult, color: '#e898ba' },
+      { key: 'gt65', label: '> 65 ปี', subtitle: 'ผู้สูงอายุ / Geriatric', count: ageElderly, color: '#e4be5b' },
     ];
 
     const genderSegments: DonutSegment[] = [
-      { key: 'male', label: 'ชาย (Male)', value: genderMale, color: '#2563eb' },
-      { key: 'female', label: 'หญิง (Female)', value: genderFemale, color: '#e11d48' },
+      { key: 'male', label: 'ชาย (Male)', value: genderMale, color: '#72b1e4' },
+      { key: 'female', label: 'หญิง (Female)', value: genderFemale, color: '#e898ba' },
     ];
     if (genderUnspecified > 0) {
       genderSegments.push({
         key: 'unspecified',
         label: 'ไม่ระบุเพศ',
         value: genderUnspecified,
-        color: '#cbd5e1',
+        color: '#d8dfe9',
       });
     }
 
@@ -678,6 +724,8 @@ export function DashboardView({
         highAsaCount: number;
         emergencyCount: number;
         airwayCount: number;
+        complicationCount: number;
+        labelCounts: Map<string, number>;
       }
     >();
 
@@ -685,7 +733,8 @@ export function DashboardView({
       const wKey = r.ward.trim() || UNSPECIFIED_KEY;
       wardCounts.set(wKey, (wardCounts.get(wKey) || 0) + 1);
 
-      const opKey = r.operation.trim() || UNSPECIFIED_KEY;
+      const cleanedOp = r.operation.trim().replace(/\s+/g, ' ');
+      const opKey = cleanedOp ? normalizeOperationKey(cleanedOp) : UNSPECIFIED_KEY;
       const risk = riskById.get(r.id) ?? computeCaseRiskProfile(r);
       const prev = operationAgg.get(opKey) || {
         count: 0,
@@ -695,7 +744,12 @@ export function DashboardView({
         highAsaCount: 0,
         emergencyCount: 0,
         airwayCount: 0,
+        complicationCount: 0,
+        labelCounts: new Map<string, number>(),
       };
+      if (cleanedOp) {
+        prev.labelCounts.set(cleanedOp, (prev.labelCounts.get(cleanedOp) || 0) + 1);
+      }
       operationAgg.set(opKey, {
         count: prev.count + 1,
         totalRisk: prev.totalRisk + risk.score,
@@ -705,6 +759,8 @@ export function DashboardView({
         emergencyCount:
           prev.emergencyCount + (r.asaEmergency || r.scheduleType === 'emergency' ? 1 : 0),
         airwayCount: prev.airwayCount + (r.expectedDifficultAirway ? 1 : 0),
+        complicationCount: prev.complicationCount + (r.hasComplication ? 1 : 0),
+        labelCounts: prev.labelCounts,
       });
     });
 
@@ -717,17 +773,30 @@ export function DashboardView({
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'th'));
 
     const operationList = Array.from(operationAgg.entries())
-      .map(([key, agg]) => ({
-        key,
-        label: key === UNSPECIFIED_KEY ? 'ไม่ระบุการผ่าตัด' : key,
-        count: agg.count,
-        maxRisk: agg.maxRisk,
-        avgRisk: agg.count > 0 ? Math.round(agg.totalRisk / agg.count) : 0,
-        highRiskCount: agg.highRiskCount,
-        highAsaCount: agg.highAsaCount,
-        emergencyCount: agg.emergencyCount,
-        airwayCount: agg.airwayCount,
-      }))
+      .map(([key, agg]) => {
+        let label = key === UNSPECIFIED_KEY ? 'ไม่ระบุการผ่าตัด' : key;
+        if (key !== UNSPECIFIED_KEY) {
+          let bestCount = -1;
+          agg.labelCounts.forEach((cnt, lbl) => {
+            if (cnt > bestCount) {
+              bestCount = cnt;
+              label = lbl;
+            }
+          });
+        }
+        return {
+          key,
+          label,
+          count: agg.count,
+          maxRisk: agg.maxRisk,
+          avgRisk: agg.count > 0 ? Math.round(agg.totalRisk / agg.count) : 0,
+          highRiskCount: agg.highRiskCount,
+          highAsaCount: agg.highAsaCount,
+          emergencyCount: agg.emergencyCount,
+          airwayCount: agg.airwayCount,
+          complicationCount: agg.complicationCount,
+        };
+      })
       .sort((a, b) => {
         if (operationSortBy === 'count') {
           return b.count - a.count || b.maxRisk - a.maxRisk || a.label.localeCompare(b.label, 'th');
@@ -1161,14 +1230,14 @@ export function DashboardView({
   return (
     <div className="space-y-5">
       {/* Filter & Export Bar */}
-      <div className="no-print bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="no-print bg-white border border-pborder rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <label className="inline-flex items-center gap-2 text-xs">
             <span className="font-medium text-slate-600 whitespace-nowrap">หอผู้ป่วย (Ward)</span>
             <select
               value={wardFilter}
               onChange={(e) => setWardFilter(e.target.value)}
-              className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
+              className="bg-white border border-pborder rounded-lg px-2.5 py-1.5 text-xs text-[#243040] focus:outline-none focus:border-pblue-400"
             >
               <option value="ALL">ทุกหอผู้ป่วย</option>
               {wards.map((w) => (
@@ -1187,12 +1256,12 @@ export function DashboardView({
             <select
               value={operationFilter}
               onChange={(e) => setOperationFilter(e.target.value)}
-              className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 max-w-[240px] focus:outline-none focus:border-blue-800"
+              className="bg-white border border-pborder rounded-lg px-2.5 py-1.5 text-xs text-[#243040] max-w-[240px] focus:outline-none focus:border-pblue-400"
             >
               <option value="ALL">ทุกการผ่าตัด</option>
               {operations.map((op) => (
-                <option key={op} value={op}>
-                  {op}
+                <option key={op.key} value={op.key}>
+                  {op.label} ({op.count} ราย)
                 </option>
               ))}
               {hasUnspecifiedOperation && (
@@ -1206,7 +1275,7 @@ export function DashboardView({
             <select
               value={asaFilter}
               onChange={(e) => setAsaFilter(e.target.value)}
-              className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-blue-800"
+              className="bg-white border border-pborder rounded-lg px-2.5 py-1.5 text-xs text-[#243040] focus:outline-none focus:border-pblue-400"
             >
               <option value="ALL">ทุก ASA Class</option>
               {(['I', 'II', 'III', 'IV', 'V', 'VI'] as const).map((cls) => (
@@ -1221,7 +1290,7 @@ export function DashboardView({
             <button
               type="button"
               onClick={resetFilters}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-prose-800 bg-prose-50 border border-prose-200 hover:bg-prose-100 rounded-lg transition-colors whitespace-nowrap shrink-0"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               ล้างตัวกรอง
@@ -1233,15 +1302,15 @@ export function DashboardView({
           <button
             type="button"
             onClick={() => exportEvaluationsCsv(sortedFiltered)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-800 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-pgreen-800 bg-pgreen-50 border border-pgreen-200 rounded-lg hover:bg-pgreen-100 transition-colors whitespace-nowrap shrink-0"
           >
-            <Download className="w-3.5 h-3.5 text-blue-800" />
+            <Download className="w-3.5 h-3.5 text-pgreen-600" />
             ส่งออก CSV (Excel)
           </button>
           <button
             type="button"
             onClick={() => window.print()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-800 rounded-lg hover:bg-blue-900 transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-pblue-600 rounded-lg hover:bg-pblue-700 transition-colors whitespace-nowrap shrink-0"
           >
             <Printer className="w-3.5 h-3.5" />
             พิมพ์สรุป Dashboard
@@ -1249,69 +1318,69 @@ export function DashboardView({
         </div>
       </div>
 
-      {/* KPI Row */}
+      {/* KPI Row — 6 Soft Pastel-Tinted Cards (Sky Blue, Butter Yellow, Old Rose, Mint Green, Blossom Pink, Warm Cream) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <div className="text-xs font-medium text-slate-500">จำนวนผู้ป่วยประเมินทั้งหมด</div>
-          <div className="mt-1.5 text-2xl font-bold font-mono tabular-nums text-slate-900">
+        <div className="bg-pblue-50/80 border border-pblue-200 rounded-xl p-4">
+          <div className="text-xs font-medium text-pblue-800/85">จำนวนผู้ป่วยประเมินทั้งหมด</div>
+          <div className="mt-1.5 text-2xl font-bold font-mono tabular-nums text-pblue-800">
             {stats.total}
           </div>
-          <div className="mt-1 text-xs text-slate-500 tabular-nums">
+          <div className="mt-1 text-xs text-slate-600 tabular-nums">
             Elective: {stats.electiveCount} · Emergency (E): {stats.emergencyCount} ราย
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <div className="text-xs font-medium text-slate-500">กลุ่มเสี่ยงสูง (ASA III–VI)</div>
-          <div className="mt-1.5 text-2xl font-bold font-mono tabular-nums text-amber-700">
+        <div className="bg-pyellow-50/90 border border-pyellow-200 rounded-xl p-4">
+          <div className="text-xs font-medium text-pyellow-800/90">กลุ่มเสี่ยงสูง (ASA III–VI)</div>
+          <div className="mt-1.5 text-2xl font-bold font-mono tabular-nums text-pyellow-800">
             {stats.highRiskAsa}
           </div>
-          <div className="mt-1 text-xs text-slate-500 tabular-nums">
+          <div className="mt-1 text-xs text-slate-600 tabular-nums">
             {stats.total > 0 ? Math.round((stats.highRiskAsa / stats.total) * 100) : 0}% ของผู้ป่วย
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <div className="text-xs font-medium text-slate-500">Expected Difficult Airway</div>
-          <div className="mt-1.5 text-2xl font-bold font-mono tabular-nums text-red-700">
+        <div className="bg-prose-50/90 border border-prose-200 rounded-xl p-4">
+          <div className="text-xs font-medium text-prose-800/90">Expected Difficult Airway</div>
+          <div className="mt-1.5 text-2xl font-bold font-mono tabular-nums text-prose-800">
             {stats.difficultAirway}
           </div>
-          <div className="mt-1 text-xs text-slate-500 tabular-nums">
+          <div className="mt-1 text-xs text-slate-600 tabular-nums">
             ควรเตรียม Video laryngoscope
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <div className="text-xs font-medium text-slate-500">Post-Op &amp; Complication</div>
-          <div className="mt-1.5 text-2xl font-bold font-mono tabular-nums text-slate-900">
+        <div className="bg-pgreen-50/85 border border-pgreen-200 rounded-xl p-4">
+          <div className="text-xs font-medium text-pgreen-800/90">Post-Op &amp; Complication</div>
+          <div className="mt-1.5 text-2xl font-bold font-mono tabular-nums text-pgreen-800">
             {stats.postOpDone}
             <span className="text-sm font-normal text-slate-500"> / {stats.total}</span>
           </div>
-          <div className="mt-1 text-xs text-slate-500 tabular-nums">
+          <div className="mt-1 text-xs text-slate-600 tabular-nums">
             รอเยี่ยมหลังผ่าตัด: {stats.postOpPending} · แทรกซ้อน: {stats.complications}
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <div className="text-xs font-medium text-slate-500">การจองเลือดรวม (Units)</div>
-          <div className="mt-1.5 text-2xl font-bold font-mono tabular-nums text-blue-900">
+        <div className="bg-ppink-50/90 border border-ppink-200 rounded-xl p-4">
+          <div className="text-xs font-medium text-ppink-800/90">การจองเลือดรวม (Units)</div>
+          <div className="mt-1.5 text-2xl font-bold font-mono tabular-nums text-ppink-800">
             {stats.prcUnits + stats.ffpUnits + stats.pltUnits + stats.cryoUnits}
           </div>
-          <div className="mt-1 text-xs font-mono tabular-nums text-slate-500">
+          <div className="mt-1 text-xs font-mono tabular-nums text-slate-600">
             PRC {stats.prcUnits} · FFP {stats.ffpUnits} · Plt {stats.pltUnits} · Cryo {stats.cryoUnits}
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <div className="text-xs font-medium text-slate-500">เลื่อนผ่าตัด / ไม่ได้เยี่ยม Pre-op</div>
-          <div className="mt-1.5 text-2xl font-bold font-mono tabular-nums text-amber-800">
+        <div className="bg-gradient-to-br from-pyellow-50/85 to-prose-50/75 border border-pyellow-200 rounded-xl p-4">
+          <div className="text-xs font-medium text-prose-800/90">เลื่อนผ่าตัด / ไม่ได้เยี่ยม Pre-op</div>
+          <div className="mt-1.5 text-2xl font-bold font-mono tabular-nums text-pyellow-800">
             {stats.postponementSummary.totalPostponed}
             <span className="text-sm font-normal text-slate-500">
               {' '}
               / {stats.preOpDraftSummary.notVisitedCount}
             </span>
           </div>
-          <div className="mt-1 text-xs text-slate-500 tabular-nums">
+          <div className="mt-1 text-xs text-slate-600 tabular-nums">
             เลื่อน {stats.postponementSummary.ratePct}% · ฉบับร่าง {stats.preOpDraftSummary.totalDrafts} ราย
           </div>
         </div>
@@ -1320,8 +1389,8 @@ export function DashboardView({
       {/* Surgery Postponement & Pre-op Draft / Not-Visited Analytics Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* LEFT: Surgery Postponements Summary */}
-        <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col gap-4">
-          <div className="flex flex-wrap items-start justify-between gap-2 pb-3 border-b border-slate-100">
+        <div className="bg-white border border-pyellow-200/80 rounded-xl p-5 flex flex-col gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-2 pb-3 border-b border-pyellow-100">
             <div>
               <h3 className="text-sm font-semibold text-slate-900">
                 สรุปการเลื่อนวันผ่าตัด (Surgery Postponement)
@@ -1408,15 +1477,15 @@ export function DashboardView({
                             </div>
                           )}
                         </div>
-                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-2 bg-pyellow-50 rounded-full overflow-hidden">
                           <div
                             className={`h-full rounded-full ${
-                              isSelected ? 'bg-amber-700' : 'bg-amber-500'
+                              isSelected ? 'bg-pyellow-600' : 'bg-pyellow-400'
                             }`}
                             style={{ width: `${barPct}%` }}
                           />
                         </div>
-                        <span className="text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
+                        <span className="text-right font-mono tabular-nums font-semibold text-[#243040] whitespace-nowrap">
                           {item.count} ราย ({sharePct}%)
                         </span>
                       </button>
@@ -1576,19 +1645,19 @@ export function DashboardView({
                             </div>
                           )}
                         </div>
-                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-2 bg-ppink-50 rounded-full overflow-hidden">
                           <div
                             className={`h-full rounded-full ${
                               isSelected
-                                ? 'bg-rose-700'
+                                ? 'bg-prose-600'
                                 : item.key === UNSPECIFIED_REASON_KEY
-                                ? 'bg-slate-400'
-                                : 'bg-rose-500'
+                                ? 'bg-slate-300'
+                                : 'bg-ppink-400'
                             }`}
                             style={{ width: `${barPct}%` }}
                           />
                         </div>
-                        <span className="text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
+                        <span className="text-right font-mono tabular-nums font-semibold text-[#243040] whitespace-nowrap">
                           {item.count} ราย ({sharePct}%)
                         </span>
                       </button>
@@ -1703,12 +1772,12 @@ export function DashboardView({
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-2">
               {[
-                { label: 'GA — Intubation', count: stats.planCounts.GA_Intubation, color: 'bg-blue-800' },
-                { label: 'GA — LMA', count: stats.planCounts.GA_LMA, color: 'bg-blue-600' },
-                { label: 'GA — TIVA / Mask', count: stats.planCounts.GA_TIVA_Mask, color: 'bg-sky-600' },
-                { label: 'RA — Spinal block', count: stats.planCounts.RA_Spinal, color: 'bg-emerald-600' },
-                { label: 'RA — Epidural / Nerve', count: stats.planCounts.RA_Epidural_Nerve, color: 'bg-teal-600' },
-                { label: 'MAC (Monitored Care)', count: stats.planCounts.MAC, color: 'bg-violet-600' },
+                { label: 'GA — Intubation', count: stats.planCounts.GA_Intubation, color: 'bg-pblue-600' },
+                { label: 'GA — LMA', count: stats.planCounts.GA_LMA, color: 'bg-pblue-400' },
+                { label: 'GA — TIVA / Mask', count: stats.planCounts.GA_TIVA_Mask, color: 'bg-pblue-300' },
+                { label: 'RA — Spinal block', count: stats.planCounts.RA_Spinal, color: 'bg-pgreen-400' },
+                { label: 'RA — Epidural / Nerve', count: stats.planCounts.RA_Epidural_Nerve, color: 'bg-pgreen-300' },
+                { label: 'MAC (Monitored Care)', count: stats.planCounts.MAC, color: 'bg-ppink-400' },
               ].map((item) => {
                 const pct = Math.round((item.count / maxPlan) * 100);
                 return (
@@ -1723,7 +1792,7 @@ export function DashboardView({
                         style={{ width: `${item.count > 0 ? Math.max(4, pct) : 0}%` }}
                       />
                     </div>
-                    <span className="text-right font-mono tabular-nums font-semibold text-slate-900">
+                    <span className="text-right font-mono tabular-nums font-semibold text-[#243040]">
                       {item.count}
                     </span>
                   </div>
@@ -1803,10 +1872,10 @@ export function DashboardView({
       </div>
 
       {/* Peri-op & Post-op Complication Summary Dashboard (Side-by-Side, Sorted Highest -> Lowest) */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-5">
-        <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b border-slate-200">
+      <div className="bg-white border border-prose-200/80 rounded-xl p-5 space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b border-prose-100">
           <div>
-            <h3 className="text-sm font-semibold text-slate-900">
+            <h3 className="text-sm font-semibold text-[#243040]">
               แดชบอร์ดสรุป Complication แยกช่วง Peri-op และ Post-op (เรียงจากมากสุด → น้อยสุด)
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -1817,7 +1886,7 @@ export function DashboardView({
           <div className="flex flex-wrap items-center gap-3 text-xs font-mono tabular-nums text-slate-600">
             <span>
               เคสมีภาวะแทรกซ้อน:{' '}
-              <strong className="text-red-700">
+              <strong className="text-prose-800">
                 {stats.postOpComplicationSummary.casesWithAnyComplication}
               </strong>{' '}
               ราย (
@@ -1833,7 +1902,7 @@ export function DashboardView({
             <span className="text-slate-300" aria-hidden="true">·</span>
             <span>
               None problem:{' '}
-              <strong className="text-emerald-700">
+              <strong className="text-pgreen-800">
                 {stats.postOpComplicationSummary.noneProblemCases}
               </strong>{' '}
               ราย
@@ -1842,7 +1911,7 @@ export function DashboardView({
               <button
                 type="button"
                 onClick={() => setComplicationFilter(null)}
-                className="no-print font-sans inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-red-800 bg-red-50 hover:bg-red-100 rounded-lg transition-colors whitespace-nowrap"
+                className="no-print font-sans inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-prose-800 bg-prose-50 border border-prose-200 hover:bg-prose-100 rounded-lg transition-colors whitespace-nowrap"
               >
                 <RotateCcw className="w-3 h-3" />
                 ล้างตัวกรอง ({complicationFilter.phase === 'peri' ? 'Peri-op' : 'Post-op'})
@@ -1855,9 +1924,9 @@ export function DashboardView({
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* LEFT: Complication Peri-op */}
           <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-baseline justify-between gap-2 pb-2 border-b border-slate-100">
+            <div className="flex flex-wrap items-baseline justify-between gap-2 pb-2 border-b border-pyellow-100">
               <div>
-                <h4 className="text-xs font-bold text-amber-900">
+                <h4 className="text-xs font-bold text-pyellow-800">
                   Complication — Peri-op (เรียงมากสุด → น้อยสุด)
                 </h4>
                 <p className="text-[11px] text-slate-500 mt-0.5">
@@ -1865,7 +1934,7 @@ export function DashboardView({
                 </p>
               </div>
               <span className="text-xs font-mono tabular-nums text-slate-600 whitespace-nowrap">
-                <strong className="text-amber-800">
+                <strong className="text-pyellow-800">
                   {stats.postOpComplicationSummary.casesWithPeriComplication}
                 </strong>{' '}
                 ราย · {stats.postOpComplicationSummary.totalPeriEvents} ครั้ง
@@ -1873,7 +1942,7 @@ export function DashboardView({
             </div>
 
             {stats.postOpComplicationSummary.rankedPeriComplications.length === 0 ? (
-              <div className="py-9 px-4 text-center border border-dashed border-slate-200 rounded-lg bg-slate-50/50 space-y-1">
+              <div className="py-9 px-4 text-center border border-dashed border-pyellow-200 rounded-lg bg-pyellow-50/40 space-y-1">
                 <p className="text-xs font-medium text-slate-700">
                   ยังไม่มีรายงาน Complication ช่วง Peri-op
                 </p>
@@ -1883,7 +1952,7 @@ export function DashboardView({
               </div>
             ) : (
               <>
-                <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto pr-1">
+                <div className="divide-y divide-pborder/60 max-h-80 overflow-y-auto pr-1">
                   {visiblePeriComplications.map((item, idx) => {
                     const barPct = Math.round((item.count / maxPeriComplicationCount) * 100);
                     const baseDenom = Math.max(1, stats.postOpComplicationSummary.totalEvaluated);
@@ -1892,12 +1961,12 @@ export function DashboardView({
                       complicationFilter?.phase === 'peri' &&
                       complicationFilter.key === item.key;
                     const barColor = isSelected
-                      ? 'bg-blue-800'
+                      ? 'bg-pblue-600'
                       : idx === 0
-                      ? 'bg-amber-700'
+                      ? 'bg-pyellow-600'
                       : idx <= 2
-                      ? 'bg-amber-500'
-                      : 'bg-slate-600';
+                      ? 'bg-pyellow-400'
+                      : 'bg-pyellow-300';
 
                     return (
                       <button
@@ -1911,8 +1980,8 @@ export function DashboardView({
                         title={item.fullLabel}
                         className={`w-full py-2.5 px-2 -mx-2 rounded-lg text-left grid grid-cols-[minmax(0,1fr)_96px_84px] items-center gap-3 text-xs transition-colors ${
                           isSelected
-                            ? 'bg-blue-50 text-blue-950'
-                            : 'hover:bg-slate-50 text-slate-800'
+                            ? 'bg-pblue-50 text-pblue-800'
+                            : 'hover:bg-pyellow-50/60 text-slate-800'
                         }`}
                       >
                         <div className="min-w-0">
@@ -1920,9 +1989,9 @@ export function DashboardView({
                             <span
                               className={`font-mono tabular-nums text-[11px] font-semibold w-5 shrink-0 ${
                                 idx === 0
-                                  ? 'text-amber-800'
+                                  ? 'text-pyellow-800'
                                   : idx <= 2
-                                  ? 'text-amber-700'
+                                  ? 'text-pyellow-600'
                                   : 'text-slate-400'
                               }`}
                             >
@@ -1936,13 +2005,13 @@ export function DashboardView({
                             </div>
                           )}
                         </div>
-                        <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-2.5 bg-pyellow-50 rounded-full overflow-hidden">
                           <div
-                            className={`h-full transition-all ${barColor}`}
+                            className={`h-full transition-all rounded-full ${barColor}`}
                             style={{ width: `${barPct}%` }}
                           />
                         </div>
-                        <span className="text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
+                        <span className="text-right font-mono tabular-nums font-semibold text-[#243040] whitespace-nowrap">
                           {item.count} ราย ({casePct}%)
                         </span>
                       </button>
@@ -1955,7 +2024,7 @@ export function DashboardView({
                     <button
                       type="button"
                       onClick={() => setShowAllPeriComplications((prev) => !prev)}
-                      className="text-xs font-medium text-blue-800 hover:underline"
+                      className="text-xs font-medium text-pblue-800 hover:underline"
                     >
                       {showAllPeriComplications
                         ? 'แสดงเฉพาะ 10 อันดับแรก'
@@ -1968,10 +2037,10 @@ export function DashboardView({
           </div>
 
           {/* RIGHT: Complication Post-op */}
-          <div className="flex flex-col gap-3 lg:border-l lg:border-slate-200 lg:pl-6">
-            <div className="flex flex-wrap items-baseline justify-between gap-2 pb-2 border-b border-slate-100">
+          <div className="flex flex-col gap-3 lg:border-l lg:border-pborder lg:pl-6">
+            <div className="flex flex-wrap items-baseline justify-between gap-2 pb-2 border-b border-prose-100">
               <div>
-                <h4 className="text-xs font-bold text-red-900">
+                <h4 className="text-xs font-bold text-prose-800">
                   Complication — Post-op (เรียงมากสุด → น้อยสุด)
                 </h4>
                 <p className="text-[11px] text-slate-500 mt-0.5">
@@ -1979,7 +2048,7 @@ export function DashboardView({
                 </p>
               </div>
               <span className="text-xs font-mono tabular-nums text-slate-600 whitespace-nowrap">
-                <strong className="text-red-700">
+                <strong className="text-prose-800">
                   {stats.postOpComplicationSummary.casesWithPostComplication}
                 </strong>{' '}
                 ราย · {stats.postOpComplicationSummary.totalPostEvents} ครั้ง
@@ -1987,7 +2056,7 @@ export function DashboardView({
             </div>
 
             {stats.postOpComplicationSummary.rankedPostComplications.length === 0 ? (
-              <div className="py-9 px-4 text-center border border-dashed border-slate-200 rounded-lg bg-slate-50/50 space-y-1">
+              <div className="py-9 px-4 text-center border border-dashed border-prose-200 rounded-lg bg-prose-50/40 space-y-1">
                 <p className="text-xs font-medium text-slate-700">
                   ยังไม่มีรายงาน Complication ช่วง Post-op
                 </p>
@@ -1997,7 +2066,7 @@ export function DashboardView({
               </div>
             ) : (
               <>
-                <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto pr-1">
+                <div className="divide-y divide-pborder/60 max-h-80 overflow-y-auto pr-1">
                   {visiblePostComplications.map((item, idx) => {
                     const barPct = Math.round((item.count / maxPostComplicationCount) * 100);
                     const baseDenom = Math.max(1, stats.postOpComplicationSummary.totalEvaluated);
@@ -2006,12 +2075,12 @@ export function DashboardView({
                       complicationFilter?.phase === 'post' &&
                       complicationFilter.key === item.key;
                     const barColor = isSelected
-                      ? 'bg-blue-800'
+                      ? 'bg-pblue-600'
                       : idx === 0
-                      ? 'bg-red-600'
+                      ? 'bg-prose-600'
                       : idx <= 2
-                      ? 'bg-rose-500'
-                      : 'bg-slate-700';
+                      ? 'bg-prose-400'
+                      : 'bg-ppink-300';
 
                     return (
                       <button
@@ -2025,8 +2094,8 @@ export function DashboardView({
                         title={item.fullLabel}
                         className={`w-full py-2.5 px-2 -mx-2 rounded-lg text-left grid grid-cols-[minmax(0,1fr)_96px_84px] items-center gap-3 text-xs transition-colors ${
                           isSelected
-                            ? 'bg-blue-50 text-blue-950'
-                            : 'hover:bg-slate-50 text-slate-800'
+                            ? 'bg-pblue-50 text-pblue-800'
+                            : 'hover:bg-prose-50/60 text-slate-800'
                         }`}
                       >
                         <div className="min-w-0">
@@ -2034,9 +2103,9 @@ export function DashboardView({
                             <span
                               className={`font-mono tabular-nums text-[11px] font-semibold w-5 shrink-0 ${
                                 idx === 0
-                                  ? 'text-red-700'
+                                  ? 'text-prose-800'
                                   : idx <= 2
-                                  ? 'text-rose-700'
+                                  ? 'text-prose-600'
                                   : 'text-slate-400'
                               }`}
                             >
@@ -2050,13 +2119,13 @@ export function DashboardView({
                             </div>
                           )}
                         </div>
-                        <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-2.5 bg-prose-50 rounded-full overflow-hidden">
                           <div
-                            className={`h-full transition-all ${barColor}`}
+                            className={`h-full transition-all rounded-full ${barColor}`}
                             style={{ width: `${barPct}%` }}
                           />
                         </div>
-                        <span className="text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
+                        <span className="text-right font-mono tabular-nums font-semibold text-[#243040] whitespace-nowrap">
                           {item.count} ราย ({casePct}%)
                         </span>
                       </button>
@@ -2147,17 +2216,17 @@ export function DashboardView({
       {/* Dedicated Ward vs Operation Breakdown Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Ward Breakdown */}
-        <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col gap-4">
+        <div className="bg-white border border-pgreen-200/80 rounded-xl p-5 flex flex-col gap-4">
           <div className="flex items-baseline justify-between gap-2">
             <div>
-              <h3 className="text-sm font-semibold text-slate-900">
+              <h3 className="text-sm font-semibold text-[#243040]">
                 สรุปจำนวนผู้ป่วยแยกตามหอผู้ป่วย (Ward)
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 คลิกชื่อหอผู้ป่วยเพื่อกรองข้อมูลเฉพาะหอผู้ป่วยนั้น
               </p>
             </div>
-            <span className="text-xs text-slate-500 font-mono tabular-nums whitespace-nowrap shrink-0">
+            <span className="text-xs text-pgreen-800 font-mono tabular-nums whitespace-nowrap shrink-0">
               {stats.wardList.length} หอผู้ป่วย · {stats.total} ราย
             </span>
           </div>
@@ -2167,7 +2236,7 @@ export function DashboardView({
               ไม่พบข้อมูลหอผู้ป่วยตามเงื่อนไขที่เลือก
             </div>
           ) : (
-            <div className="divide-y divide-slate-100 max-h-72 overflow-y-auto pr-1">
+            <div className="divide-y divide-pborder/60 max-h-72 overflow-y-auto pr-1">
               {stats.wardList.map((item) => {
                 const barPct = Math.round((item.count / maxWard) * 100);
                 const sharePct =
@@ -2181,18 +2250,18 @@ export function DashboardView({
                     title={item.label}
                     className={`w-full py-2.5 px-2 -mx-2 rounded-lg text-left grid grid-cols-[minmax(0,1fr)_96px_78px] items-center gap-3 text-xs transition-colors ${
                       isSelected
-                        ? 'bg-blue-50 text-blue-900'
-                        : 'hover:bg-slate-50 text-slate-800'
+                        ? 'bg-pgreen-50 text-pgreen-800'
+                        : 'hover:bg-pgreen-50/50 text-slate-800'
                     }`}
                   >
                     <span className="font-medium truncate">{item.label}</span>
-                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-2 bg-pgreen-50 rounded-full overflow-hidden">
                       <div
-                        className={`h-full ${isSelected ? 'bg-blue-800' : 'bg-blue-700'}`}
+                        className={`h-full rounded-full ${isSelected ? 'bg-pgreen-600' : 'bg-pgreen-400'}`}
                         style={{ width: `${barPct}%` }}
                       />
                     </div>
-                    <span className="text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
+                    <span className="text-right font-mono tabular-nums font-semibold text-[#243040] whitespace-nowrap">
                       {item.count} ราย ({sharePct}%)
                     </span>
                   </button>
@@ -2202,114 +2271,171 @@ export function DashboardView({
           )}
         </div>
 
-        {/* Operation Breakdown (Sorted by Risk Highest -> Lowest by default) */}
-        <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col gap-4">
+        {/* Operation Breakdown (Sorted by Count Highest -> Lowest by default) */}
+        <div className="bg-white border border-pblue-200/80 rounded-xl p-5 flex flex-col gap-3.5">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <h3 className="text-sm font-semibold text-slate-900">
-                ลำดับความเสี่ยงหัตถการ (Operation Risk)
+              <h3 className="text-sm font-semibold text-[#243040]">
+                {operationSortBy === 'count'
+                  ? 'สรุปจำนวนการผ่าตัด / หัตถการ (Operation)'
+                  : 'ลำดับความเสี่ยงหัตถการ (Operation Risk)'}
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                {operationSortBy === 'risk'
-                  ? 'เรียงจากความเสี่ยงมากสุด → น้อยสุด (คลิกเพื่อกรองหัตถการ)'
-                  : 'เรียงตามจำนวนเคสมากสุด → น้อยสุด (คลิกเพื่อกรองหัตถการ)'}
+                {operationSortBy === 'count'
+                  ? `เรียงจากมากสุด → น้อยสุด · ${stats.operationList.length} หัตถการ · ${stats.total} ราย (คลิกเพื่อกรอง)`
+                  : `เรียงจากความเสี่ยงมากสุด → น้อยสุด · ${stats.operationList.length} หัตถการ (คลิกเพื่อกรอง)`}
               </p>
             </div>
-            <div className="no-print inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-[11px]">
-              <button
-                type="button"
-                onClick={() => setOperationSortBy('risk')}
-                className={`px-2 py-1 rounded-md font-medium transition-colors whitespace-nowrap ${
-                  operationSortBy === 'risk'
-                    ? 'bg-white text-blue-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                เรียงตาม Risk
-              </button>
+            <div className="no-print inline-flex items-center rounded-lg border border-pblue-200 bg-pblue-50/60 p-0.5 text-[11px]">
               <button
                 type="button"
                 onClick={() => setOperationSortBy('count')}
                 className={`px-2 py-1 rounded-md font-medium transition-colors whitespace-nowrap ${
                   operationSortBy === 'count'
-                    ? 'bg-white text-blue-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-white text-pblue-800 shadow-2xs font-semibold'
+                    : 'text-slate-600 hover:text-pblue-800'
                 }`}
               >
-                เรียงตามจำนวนเคส
+                มากสุด → น้อยสุด
+              </button>
+              <button
+                type="button"
+                onClick={() => setOperationSortBy('risk')}
+                className={`px-2 py-1 rounded-md font-medium transition-colors whitespace-nowrap ${
+                  operationSortBy === 'risk'
+                    ? 'bg-white text-prose-800 shadow-2xs font-semibold'
+                    : 'text-slate-600 hover:text-prose-800'
+                }`}
+              >
+                เรียงตาม Risk
               </button>
             </div>
           </div>
 
-          {stats.operationList.length === 0 ? (
-            <div className="py-8 text-center text-xs text-slate-500">
-              ไม่พบข้อมูลการผ่าตัดตามเงื่อนไขที่เลือก
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-100 max-h-72 overflow-y-auto pr-1">
-              {stats.operationList.map((item, idx) => {
-                const barPct =
-                  operationSortBy === 'risk'
-                    ? Math.round((item.maxRisk / maxOperationRisk) * 100)
-                    : Math.round((item.count / maxOperationCount) * 100);
-                const isSelected = operationFilter === item.key;
-                const riskBarColor =
-                  item.maxRisk >= 75
-                    ? 'bg-red-600'
-                    : item.maxRisk >= 50
-                    ? 'bg-amber-500'
-                    : 'bg-blue-700';
-
-                const riskMetaParts: string[] = [];
-                if (item.highAsaCount > 0) riskMetaParts.push(`ASA III–VI: ${item.highAsaCount}`);
-                if (item.emergencyCount > 0) riskMetaParts.push(`E: ${item.emergencyCount}`);
-                if (item.airwayCount > 0) riskMetaParts.push(`Airway: ${item.airwayCount}`);
-
-                return (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => setOperationFilter(isSelected ? 'ALL' : item.key)}
-                    title={item.label}
-                    className={`w-full py-2.5 px-2 -mx-2 rounded-lg text-left grid grid-cols-[minmax(0,1fr)_84px_62px] items-center gap-3 text-xs transition-colors ${
-                      isSelected
-                        ? 'bg-blue-50 text-blue-900'
-                        : 'hover:bg-slate-50 text-slate-800'
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-[11px] text-slate-400 shrink-0">
-                          {idx + 1}.
-                        </span>
-                        <span className="font-medium truncate">{item.label}</span>
-                      </div>
-                      {riskMetaParts.length > 0 && (
-                        <div className="text-[11px] text-slate-500 truncate pl-4 mt-0.5">
-                          {riskMetaParts.join(' · ')}
-                        </div>
-                      )}
-                    </div>
-                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full ${
-                          isSelected
-                            ? 'bg-blue-800'
-                            : operationSortBy === 'risk'
-                            ? riskBarColor
-                            : 'bg-slate-700'
-                        }`}
-                        style={{ width: `${barPct}%` }}
-                      />
-                    </div>
-                    <span className="text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
-                      {item.count} ราย
-                    </span>
-                  </button>
-                );
-              })}
+          {stats.operationList.length > 6 && (
+            <div className="no-print flex items-center gap-2">
+              <input
+                type="text"
+                value={operationSearch}
+                onChange={(e) => setOperationSearch(e.target.value)}
+                placeholder="ค้นหาชื่อการผ่าตัด / Operation..."
+                aria-label="ค้นหาชื่อการผ่าตัด"
+                className="w-full bg-pblue-50/35 border border-pborder rounded-lg px-2.5 py-1.5 text-xs text-[#243040] placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-pblue-400"
+              />
+              {operationSearch.trim() && (
+                <button
+                  type="button"
+                  onClick={() => setOperationSearch('')}
+                  className="text-xs text-slate-500 hover:text-prose-800 whitespace-nowrap"
+                >
+                  ล้าง
+                </button>
+              )}
             </div>
           )}
+
+          {(() => {
+            const q = operationSearch.trim().toLowerCase();
+            const matchedOps = q
+              ? stats.operationList.filter((item) => item.label.toLowerCase().includes(q))
+              : stats.operationList;
+            const visibleOps =
+              showAllOperations || Boolean(q) ? matchedOps : matchedOps.slice(0, 12);
+
+            if (matchedOps.length === 0) {
+              return (
+                <div className="py-8 text-center text-xs text-slate-500">
+                  ไม่พบข้อมูลการผ่าตัดตามเงื่อนไขที่เลือก
+                </div>
+              );
+            }
+
+            return (
+              <>
+                <div className="divide-y divide-pborder/60 max-h-80 overflow-y-auto pr-1">
+                  {visibleOps.map((item) => {
+                    const rankIndex = stats.operationList.findIndex((o) => o.key === item.key);
+                    const barPct =
+                      operationSortBy === 'risk'
+                        ? Math.round((item.maxRisk / maxOperationRisk) * 100)
+                        : Math.round((item.count / maxOperationCount) * 100);
+                    const sharePct =
+                      stats.total > 0 ? Math.round((item.count / stats.total) * 100) : 0;
+                    const isSelected = operationFilter === item.key;
+                    const riskBarColor =
+                      item.maxRisk >= 75
+                        ? 'bg-prose-400'
+                        : item.maxRisk >= 50
+                        ? 'bg-pyellow-400'
+                        : 'bg-pblue-400';
+
+                    const metaParts: string[] = [];
+                    if (item.emergencyCount > 0) metaParts.push(`E: ${item.emergencyCount}`);
+                    if (item.highAsaCount > 0) metaParts.push(`ASA III–VI: ${item.highAsaCount}`);
+                    if (item.airwayCount > 0) metaParts.push(`Airway: ${item.airwayCount}`);
+                    if (item.complicationCount > 0)
+                      metaParts.push(`Comp: ${item.complicationCount}`);
+
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => setOperationFilter(isSelected ? 'ALL' : item.key)}
+                        title={item.label}
+                        className={`w-full py-2.5 px-2 -mx-2 rounded-lg text-left grid grid-cols-[minmax(0,1fr)_80px_82px] items-center gap-3 text-xs transition-colors ${
+                          isSelected
+                            ? 'bg-pblue-50 text-pblue-800'
+                            : 'hover:bg-pblue-50/45 text-slate-800'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-[11px] text-slate-400 shrink-0 w-5">
+                              {rankIndex + 1}.
+                            </span>
+                            <span className="font-medium truncate">{item.label}</span>
+                          </div>
+                          {metaParts.length > 0 && (
+                            <div className="text-[11px] text-slate-500 truncate pl-6 mt-0.5">
+                              {metaParts.join(' · ')}
+                            </div>
+                          )}
+                        </div>
+                        <div className="h-2 bg-pblue-50 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${
+                              isSelected
+                                ? 'bg-pblue-600'
+                                : operationSortBy === 'risk'
+                                ? riskBarColor
+                                : 'bg-pblue-400'
+                            }`}
+                            style={{ width: `${barPct}%` }}
+                          />
+                        </div>
+                        <span className="text-right font-mono tabular-nums font-semibold text-[#243040] whitespace-nowrap">
+                          {item.count} ราย ({sharePct}%)
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {!q && matchedOps.length > 12 && (
+                  <div className="no-print pt-1 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setShowAllOperations((prev) => !prev)}
+                      className="text-xs font-medium text-pblue-800 hover:underline"
+                    >
+                      {showAllOperations
+                        ? 'ย่อรายการ (แสดง 12 อันดับแรก)'
+                        : `แสดงทั้งหมด (${matchedOps.length} หัตถการ)`}
+                    </button>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       </div>
 

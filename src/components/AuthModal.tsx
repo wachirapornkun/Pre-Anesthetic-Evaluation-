@@ -33,6 +33,8 @@ import {
   diagnoseFirebaseConnection,
   FirebaseDiagnosticResult,
   getFriendlyAuthErrorMessage,
+  isCloudAuthorizedUser,
+  PUBLISHED_APP_URL,
 } from '../firebase';
 
 type AuthMode = 'login' | 'register' | 'reset';
@@ -42,7 +44,9 @@ interface AuthViewProps {
   variant: 'fullscreen' | 'modal';
   /** Current signed-in Firebase user (if signed in but unverified, shows verification step) */
   user: User | null;
+  initialError?: string | null;
   onGoogleSignIn: () => Promise<void>;
+  onGoogleRedirectSignIn?: () => Promise<void>;
   onAuthSuccess: (user: User) => void | Promise<void>;
   onSignOut?: () => Promise<void>;
   onContinueOffline?: () => void;
@@ -53,7 +57,9 @@ interface AuthViewProps {
 export function AuthModal({
   variant,
   user,
+  initialError,
   onGoogleSignIn,
+  onGoogleRedirectSignIn,
   onAuthSuccess,
   onSignOut,
   onContinueOffline,
@@ -70,14 +76,20 @@ export function AuthModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCheckingVerify, setIsCheckingVerify] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(initialError ?? null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [isRunningDiag, setIsRunningDiag] = useState(false);
   const [diagResult, setDiagResult] = useState<FirebaseDiagnosticResult | null>(null);
 
   const inAppInfo = useMemo(() => detectInAppBrowser(), []);
-  const needsEmailVerification = Boolean(user && !user.emailVerified);
+  const needsEmailVerification = Boolean(user && !isCloudAuthorizedUser(user));
+
+  useEffect(() => {
+    if (initialError) {
+      setErrorMsg(initialError);
+    }
+  }, [initialError]);
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
@@ -312,6 +324,20 @@ export function AuthModal({
     }
   };
 
+  const handleGoogleRedirectClick = async () => {
+    if (!onGoogleRedirectSignIn) return;
+    setErrorMsg(null);
+    setInfoMsg('กำลังเปลี่ยนหน้าไปยังบัญชี Google เพื่อยืนยันตัวตน...');
+    setIsSubmitting(true);
+    try {
+      await onGoogleRedirectSignIn();
+    } catch (error) {
+      setInfoMsg(null);
+      setErrorMsg(getFriendlyAuthErrorMessage(error));
+      setIsSubmitting(false);
+    }
+  };
+
   const googleButton = (label: string) => (
     <button
       type="button"
@@ -487,6 +513,16 @@ export function AuthModal({
             {/* Primary 1-click Google Sign-In (Pre-configured & auto-verified for all team members) */}
             <div className="space-y-1.5">
               {googleButton('เข้าสู่ระบบด้วยบัญชี Google (แนะนำ — เชื่อมต่อทันที)')}
+              {onGoogleRedirectSignIn && (
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => void handleGoogleRedirectClick()}
+                  className="w-full py-1 text-[11px] font-medium text-pblue-800 hover:text-prose-800 underline disabled:opacity-50"
+                >
+                  หน้าต่าง Google ไม่เด้งขึ้น? กดเข้าสู่ระบบ Google แบบเต็มหน้า (แนะนำสำหรับ iPhone / มือถือ)
+                </button>
+              )}
               <p className="text-[11px] text-center text-slate-500">
                 ใช้บัญชี Google / Gmail ใดก็ได้ของทีมวิสัญญี ซิงค์ข้อมูล Cloud ร่วมกันได้ทันที
               </p>
@@ -808,16 +844,54 @@ export function AuthModal({
                 </span>
               </div>
               {diagResult.hostname && (
-                <div className="text-slate-500 font-mono text-[10px] break-all">
-                  • โดเมน: {diagResult.hostname}
+                <div className="text-slate-600 text-[10px] break-all">
+                  • โดเมน: <span className="font-mono">{diagResult.hostname}</span>{' '}
+                  {diagResult.domainAuthorized === true && (
+                    <span className="text-pgreen-800 font-semibold">(อนุญาตแล้วใน Firebase)</span>
+                  )}
+                  {diagResult.domainAuthorized === false && (
+                    <span className="text-prose-800 font-semibold">
+                      (ยังไม่ได้เพิ่มใน Authorized domains — กรุณาเปิดผ่าน {PUBLISHED_APP_URL})
+                    </span>
+                  )}
+                </div>
+              )}
+              {diagResult.isPrivateDevUrl && (
+                <div className="text-pyellow-800 font-medium">
+                  • หมายเหตุ: ลิงก์นี้เป็นลิงก์พัฒนาส่วนตัว (ais-dev) ผู้ใช้อื่นควรเข้าผ่าน{' '}
+                  <a
+                    href={PUBLISHED_APP_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline font-semibold"
+                  >
+                    {PUBLISHED_APP_URL}
+                  </a>
                 </div>
               )}
               {diagResult.signedInEmail && (
                 <div>
                   • บัญชีปัจจุบัน: <span className="font-mono">{diagResult.signedInEmail}</span> (
-                  {diagResult.emailVerified && diagResult.tokenEmailVerified !== false
-                    ? 'ยืนยันอีเมลแล้ว'
-                    : 'ยังไม่ยืนยันอีเมล'})
+                  {diagResult.signInProvider === 'google.com'
+                    ? 'บัญชี Google · พร้อมเชื่อมต่อ'
+                    : diagResult.cloudAuthorized && diagResult.tokenEmailVerified !== false
+                      ? 'ยืนยันอีเมลแล้ว'
+                      : 'ยังไม่ยืนยันอีเมล'}
+                  )
+                </div>
+              )}
+              {diagResult.evaluationsMessage && (
+                <div>
+                  • สิทธิ์อ่านฐานข้อมูลทีม:{' '}
+                  <span
+                    className={
+                      diagResult.evaluationsReadable
+                        ? 'text-pgreen-800 font-medium'
+                        : 'text-prose-800 font-medium'
+                    }
+                  >
+                    {diagResult.evaluationsMessage}
+                  </span>
                 </div>
               )}
             </div>

@@ -12,18 +12,21 @@ import {
   X,
 } from 'lucide-react';
 
-const DEFAULT_SHARED_APP_URL =
-  'https://ais-pre-dfhvafzuq4c7o6ag7tzwd4-806528130656.asia-east1.run.app';
+import { PUBLISHED_APP_URL } from '../firebase';
+
+const DEFAULT_SHARED_APP_URL = PUBLISHED_APP_URL;
 
 export function resolveDefaultShareUrl(): string {
   if (typeof window === 'undefined') return DEFAULT_SHARED_APP_URL;
   const origin = window.location.origin || '';
-  if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1')) {
+  if (
+    !origin ||
+    origin.includes('localhost') ||
+    origin.includes('127.0.0.1') ||
+    origin.startsWith('https://ais-dev-') ||
+    origin.startsWith('https://ais-pre-')
+  ) {
     return DEFAULT_SHARED_APP_URL;
-  }
-  // If opened on the private AI Studio dev preview URL, automatically map to the public Shared App URL
-  if (origin.startsWith('https://ais-dev-')) {
-    return origin.replace('https://ais-dev-', 'https://ais-pre-');
   }
   return origin;
 }

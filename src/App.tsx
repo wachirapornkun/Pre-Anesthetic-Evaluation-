@@ -1,5 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { onAuthStateChanged, reload, signInWithPopup, signOut, User } from 'firebase/auth';
+import {
+  getRedirectResult,
+  onAuthStateChanged,
+  reload,
+  signInWithPopup,
+  signInWithRedirect,
+  signOut,
+  User,
+} from 'firebase/auth';
 import {
   collection,
   deleteDoc,
@@ -51,6 +59,8 @@ import {
   getFriendlyFirestoreErrorMessage,
   googleProvider,
   handleFirestoreError,
+  isCloudAuthorizedUser,
+  isRunningInIframe,
   logFirestoreError,
   OperationType,
 } from './firebase';
@@ -418,7 +428,29 @@ export default function App() {
     }
   }, [currentForm]);
 
-  // Listen to Firebase Auth state and ensure ID token claims (email_verified) stay fresh
+  // Complete any pending mobile Google redirect sign-in on startup
+  useEffect(() => {
+    let active = true;
+    getRedirectResult(auth)
+      .then((cred) => {
+        if (!active || !cred?.user) return;
+        void handleAuthSuccess(cred.user);
+      })
+      .catch((error) => {
+        if (!active) return;
+        const code = getFirestoreErrorCode(error);
+        if (code === 'auth/no-auth-event' || code === 'unknown') return;
+        const msg = getFriendlyAuthErrorMessage(error);
+        setCloudError(msg);
+        showNotice('error', msg);
+      });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Listen to Firebase Auth state and ensure ID token claims (email_verified / google.com) stay fresh
   useEffect(() => {
     let active = true;
     const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
@@ -435,19 +467,22 @@ export default function App() {
       }
 
       const syncVerifiedState = async () => {
-        let verified = Boolean(nextUser.emailVerified);
-        if (!verified) {
+        let authorized = isCloudAuthorizedUser(nextUser);
+        if (!authorized) {
           try {
             await reload(nextUser);
-            verified = Boolean(auth.currentUser?.emailVerified);
+            authorized = isCloudAuthorizedUser(auth.currentUser ?? nextUser);
           } catch {
             // Keep existing state when offline
           }
         }
-        if (verified) {
+        if (authorized) {
           try {
             const tokenResult = await nextUser.getIdTokenResult();
-            if (tokenResult.claims?.email_verified !== true) {
+            const hasVerifiedClaim =
+              tokenResult.claims?.email_verified === true ||
+              tokenResult.signInProvider === 'google.com';
+            if (!hasVerifiedClaim) {
               await nextUser.getIdToken(true);
             }
           } catch {
@@ -457,9 +492,9 @@ export default function App() {
         if (!active) return;
         const latestUser = auth.currentUser ?? nextUser;
         setUser(latestUser);
-        setIsEmailVerified(verified);
+        setIsEmailVerified(authorized);
         setAuthReady(true);
-        if (verified) {
+        if (authorized) {
           setAllowOfflineBypass(false);
           setIsAuthModalOpen(false);
         } else {
@@ -1399,7 +1434,7 @@ export default function App() {
       deletedIdsRef.current.has(targetSnapshot.id) ||
       !targetSnapshot.patientName.trim() ||
       targetSnapshot.status === 'locked' ||
-      activeUser.emailVerified === false
+      !isCloudAuthorizedUser(activeUser)
     ) {
       return;
     }
@@ -1459,7 +1494,7 @@ export default function App() {
     options?: { silent?: boolean },
   ) => {
     const activeUser = targetUser ?? userRef.current;
-    if (!activeUser || !activeUser.emailVerified) {
+    if (!activeUser || !isCloudAuthorizedUser(activeUser)) {
       if (!options?.silent) {
         showNotice('error', 'กรุณาเข้าสู่ระบบและยืนยันอีเมลก่อนดึงข้อมูลจาก Cloud');
       }
@@ -1663,13 +1698,23 @@ export default function App() {
       // Non-critical token refresh fallback
     }
     setUser(latestUser);
-    setIsEmailVerified(Boolean(latestUser.emailVerified));
+    setIsEmailVerified(isCloudAuthorizedUser(latestUser));
     setAllowOfflineBypass(false);
     setIsAuthModalOpen(false);
     setCloudError(null);
     setCloudRetryNonce((n) => n + 1);
     showNotice('success', 'เข้าสู่ระบบสำเร็จ กำลังซิงค์ข้อมูลใบ Pre-op จาก Cloud...');
     void handlePullFromCloud(latestUser, { silent: true });
+  };
+
+  const handleGoogleRedirectSignIn = async () => {
+    try {
+      await signInWithRedirect(auth, googleProvider);
+    } catch (error) {
+      const msg = getFriendlyAuthErrorMessage(error);
+      showNotice('error', msg);
+      throw error;
+    }
   };
 
   const handleGoogleSignIn = async () => {
@@ -1679,6 +1724,17 @@ export default function App() {
         await handleAuthSuccess(cred.user);
       }
     } catch (error) {
+      const code = getFirestoreErrorCode(error);
+      // Outside the AI Studio iframe (e.g. mobile Safari/Chrome after QR scan),
+      // automatically fall back to full-page redirect if the browser blocks popups.
+      if (
+        !isRunningInIframe() &&
+        (code === 'auth/popup-blocked' ||
+          code === 'auth/operation-not-supported-in-this-environment')
+      ) {
+        await signInWithRedirect(auth, googleProvider);
+        return;
+      }
       const msg = getFriendlyAuthErrorMessage(error);
       showNotice('error', msg);
       throw error;
@@ -1691,8 +1747,9 @@ export default function App() {
       try {
         await reload(activeUser);
         await activeUser.getIdToken(true);
-        setUser(auth.currentUser ?? activeUser);
-        setIsEmailVerified(Boolean((auth.currentUser ?? activeUser).emailVerified));
+        const refreshed = auth.currentUser ?? activeUser;
+        setUser(refreshed);
+        setIsEmailVerified(isCloudAuthorizedUser(refreshed));
       } catch {
         // Proceed with reconnect retry even if reload fails offline
       }
@@ -2168,7 +2225,9 @@ export default function App() {
         <AuthModal
           variant="fullscreen"
           user={user}
+          initialError={cloudError}
           onGoogleSignIn={handleGoogleSignIn}
+          onGoogleRedirectSignIn={!isRunningInIframe() ? handleGoogleRedirectSignIn : undefined}
           onAuthSuccess={handleAuthSuccess}
           onSignOut={handleSignOut}
           onContinueOffline={() => setAllowOfflineBypass(true)}
@@ -3133,7 +3192,9 @@ export default function App() {
         <AuthModal
           variant="modal"
           user={user}
+          initialError={cloudError}
           onGoogleSignIn={handleGoogleSignIn}
+          onGoogleRedirectSignIn={!isRunningInIframe() ? handleGoogleRedirectSignIn : undefined}
           onAuthSuccess={handleAuthSuccess}
           onSignOut={handleSignOut}
           onOpenShareQr={() => setIsShareQrOpen(true)}

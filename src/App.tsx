@@ -4,6 +4,8 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDocs,
+  getDocsFromServer,
   onSnapshot,
   query,
   serverTimestamp,
@@ -51,7 +53,6 @@ import {
   addDaysToIsoDate,
   compareByDateAndSurgeon,
   createEmptyEvaluation,
-  createEmptyOxygenSupport,
   DEFAULT_MEDICATION_GROUPS,
   DEFAULT_OXYGEN_OTHER_PRESETS,
   DEFAULT_SPECIALTY_LIST,
@@ -60,8 +61,8 @@ import {
   DEFAULT_WARD_LIST,
   formatThaiScheduleDate,
   generateEvaluationId,
-  getEffectiveEvaluationStatus,
   getTodayIsoDate,
+  hydrateEvaluationRecord,
   inferPatientGender,
   isSampleEvaluationRecord,
   MedicationGroup,
@@ -100,14 +101,17 @@ function loadSavedLocalRecords(): PreAnestheticEvaluation[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(
-        (item): item is PreAnestheticEvaluation =>
-          Boolean(item && typeof item === 'object' && item.id) &&
-          !isSampleEvaluationRecord(item),
-      )
-      .map((item) => sanitizeEvaluationForFirestore(item, 'local'))
-      .sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
+    const hydratedList: PreAnestheticEvaluation[] = [];
+    for (const item of parsed) {
+      try {
+        const hydrated = hydrateEvaluationRecord(item, undefined, 'local');
+        if (!hydrated || isSampleEvaluationRecord(hydrated)) continue;
+        hydratedList.push(hydrated);
+      } catch {
+        // Skip only an unparseable item so all other saved records remain intact
+      }
+    }
+    return hydratedList.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
   } catch {
     return [];
   }
@@ -123,6 +127,7 @@ export default function App() {
     loadSavedLocalRecords(),
   );
   const [isLoadingRecords, setIsLoadingRecords] = useState(true);
+  const [isPullingCloud, setIsPullingCloud] = useState(false);
   const [showFolderSidebar, setShowFolderSidebar] = useState(true);
   const [currentForm, setCurrentForm] = useState<PreAnestheticEvaluation>(() =>
     createEmptyEvaluation('local'),
@@ -134,6 +139,7 @@ export default function App() {
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const purgedSampleIdsRef = useRef<Set<string>>(new Set());
   const knownCloudIdsRef = useRef<Set<string>>(new Set());
+  const deletedIdsRef = useRef<Set<string>>(new Set());
   const [isNewFormModalOpen, setIsNewFormModalOpen] = useState(false);
   const [newFormDraft, setNewFormDraft] = useState<NewFormScheduleDraft>(() => ({
     hn: '',
@@ -281,132 +287,39 @@ export default function App() {
         const items: PreAnestheticEvaluation[] = [];
         const sampleIdsToDelete: string[] = [];
         snapshot.forEach((docSnap) => {
-          const raw = docSnap.data() as PreAnestheticEvaluation;
-          const docId = docSnap.id || raw.id;
-          if (isSampleEvaluationRecord({ id: docId, hn: raw.hn, patientName: raw.patientName })) {
-            if (docId && !purgedSampleIdsRef.current.has(docId)) {
-              sampleIdsToDelete.push(docId);
+          try {
+            const raw = docSnap.data() as PreAnestheticEvaluation;
+            const docId = docSnap.id || raw?.id;
+            if (isSampleEvaluationRecord({ id: docId, hn: raw?.hn ?? '', patientName: raw?.patientName ?? '' })) {
+              if (docId && !purgedSampleIdsRef.current.has(docId)) {
+                sampleIdsToDelete.push(docId);
+              }
+              return;
             }
-            return;
+            const hydrated = hydrateEvaluationRecord(raw, docId, user.uid);
+            if (hydrated && !deletedIdsRef.current.has(hydrated.id)) {
+              items.push(hydrated);
+            }
+          } catch {
+            // Protect all other records if any single legacy document has unexpected fields
           }
-          const hist = raw.formData?.history;
-          const phys = raw.formData?.physicalExam;
-          const emptyOx = createEmptyOxygenSupport();
-          const rawOx = phys?.oxygenSupport;
-          const hydrated: PreAnestheticEvaluation = {
-            ...raw,
-            specialty: raw.specialty ?? '',
-            operationTime: raw.operationTime ?? '',
-            scheduleType:
-              raw.scheduleType === 'emergency' ||
-              (raw.scheduleType !== 'elective' && raw.asaEmergency)
-                ? 'emergency'
-                : 'elective',
-            orRoom: raw.orRoom ?? '',
-            caseOrder: raw.caseOrder ?? '',
-            surgeon: raw.surgeon ?? '',
-            formData: {
-              ...raw.formData,
-              history: {
-                ...hist,
-                dmDetail: hist?.dmDetail ?? '',
-                htDetail: hist?.htDetail ?? '',
-                dlp: Boolean(hist?.dlp),
-                dlpYears: hist?.dlpYears ?? '',
-                dlpDetail: hist?.dlpDetail ?? '',
-                ckd: Boolean(hist?.ckd),
-                ckdYears: hist?.ckdYears ?? '',
-                ckdDetail: hist?.ckdDetail ?? '',
-                heartDiseaseDetail: hist?.heartDiseaseDetail ?? '',
-                underlyingDetail: hist?.underlyingDetail ?? '',
-                drinkingDaysPerWeek: hist?.drinkingDaysPerWeek ?? '',
-                drinkingDurationUnit: hist?.drinkingDurationUnit === 'months' ? 'months' : 'years',
-                drinkingQuit: Boolean(hist?.drinkingQuit),
-                drinkingQuitDuration: hist?.drinkingQuitDuration ?? '',
-                drinkingQuitUnit: hist?.drinkingQuitUnit === 'months' ? 'months' : 'years',
-                smokingDurationUnit: hist?.smokingDurationUnit === 'months' ? 'months' : 'years',
-                smokingQuit: Boolean(hist?.smokingQuit),
-                smokingQuitDuration: hist?.smokingQuitDuration ?? '',
-                smokingQuitUnit: hist?.smokingQuitUnit === 'months' ? 'months' : 'years',
-                drugAddictionTypes: Array.isArray(hist?.drugAddictionTypes) ? hist.drugAddictionTypes : [],
-                drugAddictionOther: hist?.drugAddictionOther ?? '',
-                drugAddictionAmount: hist?.drugAddictionAmount ?? '',
-                drugAddictionDurationUnit:
-                  hist?.drugAddictionDurationUnit === 'months' ? 'months' : 'years',
-                drugAddictionQuit: Boolean(hist?.drugAddictionQuit),
-                drugAddictionQuitDuration: hist?.drugAddictionQuitDuration ?? '',
-                drugAddictionQuitUnit:
-                  hist?.drugAddictionQuitUnit === 'months' ? 'months' : 'years',
-              },
-              physicalExam: {
-                ...phys,
-                oxygenSupport: rawOx
-                  ? {
-                      ...emptyOx,
-                      ...rawOx,
-                      otherItems: Array.isArray(rawOx.otherItems) ? rawOx.otherItems : [],
-                    }
-                  : emptyOx,
-                missingTeeth: Array.isArray(phys?.missingTeeth) ? phys.missingTeeth : [],
-                looseTeeth: Array.isArray(phys?.looseTeeth) ? phys.looseTeeth : [],
-                mouthOpeningDetail: phys?.mouthOpeningDetail ?? '',
-                neckMovementDetail: phys?.neckMovementDetail ?? '',
-                thyromentalDistanceDetail: phys?.thyromentalDistanceDetail ?? '',
-              },
-              laboratory: {
-                ...raw.formData?.laboratory,
-                antiHiv:
-                  raw.formData?.laboratory?.antiHiv === 'negative' ||
-                  raw.formData?.laboratory?.antiHiv === 'positive'
-                    ? raw.formData.laboratory.antiHiv
-                    : '',
-                lactate: raw.formData?.laboratory?.lactate ?? '',
-                tropI: raw.formData?.laboratory?.tropI ?? '',
-                customLabs: Array.isArray(raw.formData?.laboratory?.customLabs)
-                  ? raw.formData.laboratory.customLabs.map((item) => ({
-                      name: item?.name ?? '',
-                      value: item?.value ?? '',
-                    }))
-                  : [],
-                bloodGroup:
-                  raw.formData?.laboratory?.bloodGroup === 'A' ||
-                  raw.formData?.laboratory?.bloodGroup === 'B' ||
-                  raw.formData?.laboratory?.bloodGroup === 'AB' ||
-                  raw.formData?.laboratory?.bloodGroup === 'O'
-                    ? raw.formData.laboratory.bloodGroup
-                    : '',
-                bloodRh:
-                  raw.formData?.laboratory?.bloodRh === 'positive' ||
-                  raw.formData?.laboratory?.bloodRh === 'negative'
-                    ? raw.formData.laboratory.bloodRh
-                    : '',
-                prepTs: Boolean(raw.formData?.laboratory?.prepTs),
-                prepStatuses: Array.isArray(raw.formData?.laboratory?.prepStatuses)
-                  ? raw.formData.laboratory.prepStatuses
-                  : [],
-                prepStatusDetail: raw.formData?.laboratory?.prepStatusDetail ?? '',
-              },
-            },
-          };
-          items.push({
-            ...hydrated,
-            status: getEffectiveEvaluationStatus(hydrated),
-          });
         });
-        items.sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
+        items.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
         const nextCloudIds = new Set(items.map((item) => item.id));
         knownCloudIdsRef.current = nextCloudIds;
         setCloudRecords(items);
         setCloudError(null);
         setIsLoadingRecords(false);
-        // Remove any local backup copies that are now confirmed in Cloud
-        if (nextCloudIds.size > 0) {
-          setLocalRecords((prev) =>
-            prev.some((r) => nextCloudIds.has(r.id))
-              ? prev.filter((r) => !nextCloudIds.has(r.id))
-              : prev,
+        // Mirror Cloud records into localStorage cache while keeping all non-deleted local records intact
+        // so saved Pre-op evaluations NEVER vanish on reload, cache lag, or offline sessions
+        setLocalRecords((prev) => {
+          const keptLocal = prev.filter(
+            (r) => !nextCloudIds.has(r.id) && !deletedIdsRef.current.has(r.id),
           );
-        }
+          return [...items, ...keptLocal].sort((a, b) =>
+            compareByDateAndSurgeon(a, b, 'desc'),
+          );
+        });
 
         if (sampleIdsToDelete.length > 0) {
           sampleIdsToDelete.forEach((id) => purgedSampleIdsRef.current.add(id));
@@ -984,16 +897,21 @@ export default function App() {
     }
   };
 
-  // Always keep unsynced local records visible alongside Cloud records so saved visits never disappear
+  // Always keep all saved Pre-op evaluations permanently visible in ทะเบียน (Cloud + local mirror)
   const records = useMemo(() => {
     if (!user) return localRecords;
     const cloudIdSet = new Set(cloudRecords.map((r) => r.id));
-    const unsyncedLocal = localRecords.filter((r) => !cloudIdSet.has(r.id));
-    if (unsyncedLocal.length === 0) return cloudRecords;
-    return [...cloudRecords, ...unsyncedLocal].sort((a, b) =>
-      compareByDateAndSurgeon(a, b, 'asc'),
+    const localOnly = localRecords.filter((r) => !cloudIdSet.has(r.id));
+    if (localOnly.length === 0) return cloudRecords;
+    return [...cloudRecords, ...localOnly].sort((a, b) =>
+      compareByDateAndSurgeon(a, b, 'desc'),
     );
   }, [user, cloudRecords, localRecords]);
+  const unsyncedLocalRecords = useMemo(() => {
+    if (!user || isLoadingRecords) return [];
+    const cloudIdSet = new Set(cloudRecords.map((r) => r.id));
+    return localRecords.filter((r) => !cloudIdSet.has(r.id));
+  }, [user, isLoadingRecords, cloudRecords, localRecords]);
   const savedIdSet = useMemo(() => new Set(records.map((r) => r.id)), [records]);
 
   const buildCloudUpdatePayload = (sanitized: PreAnestheticEvaluation) => ({
@@ -1065,10 +983,116 @@ export default function App() {
     knownCloudIdsRef.current.add(sanitized.id);
   };
 
+  const handlePullFromCloud = async (targetUser?: User | null) => {
+    const activeUser = targetUser ?? user;
+    if (!activeUser) {
+      showNotice('error', 'กรุณาเข้าสู่ระบบ Google ก่อนดึงข้อมูลจาก Cloud');
+      return;
+    }
+    setIsPullingCloud(true);
+    const path = 'evaluations';
+    const q = query(collection(db, path), where('ownerId', '==', activeUser.uid));
+    try {
+      let snapshot;
+      try {
+        snapshot = await getDocsFromServer(q);
+      } catch {
+        snapshot = await getDocs(q);
+      }
+      const items: PreAnestheticEvaluation[] = [];
+      snapshot.forEach((docSnap) => {
+        try {
+          const raw = docSnap.data() as PreAnestheticEvaluation;
+          const docId = docSnap.id || raw?.id;
+          if (isSampleEvaluationRecord({ id: docId, hn: raw?.hn ?? '', patientName: raw?.patientName ?? '' })) {
+            return;
+          }
+          const hydrated = hydrateEvaluationRecord(raw, docId, activeUser.uid);
+          if (hydrated && !deletedIdsRef.current.has(hydrated.id)) {
+            items.push(hydrated);
+          }
+        } catch {
+          // Skip malformed document without failing entire pull
+        }
+      });
+      items.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
+      const nextCloudIds = new Set(items.map((item) => item.id));
+      knownCloudIdsRef.current = nextCloudIds;
+      setCloudRecords(items);
+      setCloudError(null);
+      setLocalRecords((prev) => {
+        const keptLocal = prev.filter(
+          (r) => !nextCloudIds.has(r.id) && !deletedIdsRef.current.has(r.id),
+        );
+        return [...items, ...keptLocal].sort((a, b) =>
+          compareByDateAndSurgeon(a, b, 'desc'),
+        );
+      });
+      showNotice(
+        'success',
+        items.length > 0
+          ? `ดึงข้อมูลใบ Pre-op จาก Cloud เรียบร้อยทั้งหมด ${items.length} รายการ แสดงในทะเบียนแล้ว`
+          : 'เชื่อมต่อ Cloud สำเร็จ (ยังไม่พบใบ Pre-op ที่บันทึกไว้ในบัญชีนี้)',
+      );
+    } catch (error) {
+      logFirestoreError(error, OperationType.LIST, path);
+      const friendly = getFriendlyFirestoreErrorMessage(error);
+      setCloudError(friendly);
+      showNotice('error', `ดึงข้อมูลจาก Cloud ไม่สำเร็จ: ${friendly}`);
+    } finally {
+      setIsPullingCloud(false);
+    }
+  };
+
+  // Ensure fresh Cloud fetch when user opens ทะเบียน while authenticated
+  useEffect(() => {
+    if (activeTab === 'registry' && authReady && user && !isLoadingRecords && !isPullingCloud && cloudRecords.length === 0) {
+      void handlePullFromCloud(user);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, authReady, user]);
+
+  const handleImportJsonFile = async (file: File) => {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const rawList = Array.isArray(parsed) ? parsed : [parsed];
+      let importedCount = 0;
+
+      for (const item of rawList) {
+        const hydrated = hydrateEvaluationRecord(
+          item,
+          generateEvaluationId(),
+          user?.uid || 'local',
+        );
+        if (!hydrated) continue;
+        if (!hydrated.patientName.trim()) {
+          hydrated.patientName = hydrated.hn ? `ผู้ป่วย HN ${hydrated.hn}` : 'ผู้ป่วย (นำเข้า)';
+        }
+        const saved = await saveEvaluationRecord(hydrated, { silentSuccess: true });
+        if (saved) importedCount += 1;
+      }
+
+      if (importedCount > 0) {
+        showNotice(
+          'success',
+          `นำเข้าใบ Pre-op เข้าทะเบียนเรียบร้อยแล้ว (${importedCount} รายการ)`,
+        );
+      } else {
+        showNotice('error', 'ไม่พบข้อมูลใบ Pre-op ที่ถูกต้องในไฟล์ JSON นี้');
+      }
+    } catch {
+      showNotice('error', 'ไม่สามารถอ่านไฟล์ JSON ได้ กรุณาตรวจสอบรูปแบบไฟล์');
+    }
+  };
+
   const handleSignIn = async () => {
     try {
-      await signInWithPopup(auth, googleProvider);
-      showNotice('success', 'เข้าสู่ระบบด้วย Google สำเร็จ พร้อมซิงค์ฐานข้อมูล');
+      const cred = await signInWithPopup(auth, googleProvider);
+      showNotice('success', 'เข้าสู่ระบบด้วย Google สำเร็จ กำลังดึงข้อมูลใบ Pre-op จาก Cloud...');
+      if (cred?.user) {
+        void handlePullFromCloud(cred.user);
+      }
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'ไม่สามารถเข้าสู่ระบบได้';
       showNotice('error', `เข้าสู่ระบบไม่สำเร็จ: ${msg}`);
@@ -1086,14 +1110,14 @@ export default function App() {
   };
 
   const handleSyncLocalToCloud = async () => {
-    if (!user || localRecords.length === 0) return;
+    if (!user || unsyncedLocalRecords.length === 0) return;
     setIsSyncingLocal(true);
     const syncedRecords: PreAnestheticEvaluation[] = [];
-    const failedRecords: PreAnestheticEvaluation[] = [];
+    const failedIds = new Set<string>();
     let lastError: unknown = null;
 
     try {
-      for (const rec of localRecords) {
+      for (const rec of unsyncedLocalRecords) {
         const sanitized = sanitizeEvaluationForFirestore(rec, user.uid);
         try {
           await upsertEvaluationToCloud(sanitized);
@@ -1101,7 +1125,7 @@ export default function App() {
         } catch (error) {
           lastError = error;
           logFirestoreError(error, OperationType.WRITE, `evaluations/${sanitized.id}`);
-          failedRecords.push(rec);
+          failedIds.add(rec.id);
         }
       }
 
@@ -1110,24 +1134,27 @@ export default function App() {
         setCloudRecords((prev) => {
           const merged = prev.filter((r) => !syncedMap.has(r.id));
           return [...merged, ...syncedRecords].sort((a, b) =>
-            compareByDateAndSurgeon(a, b, 'asc'),
+            compareByDateAndSurgeon(a, b, 'desc'),
           );
         });
+        setLocalRecords((prev) =>
+          prev
+            .map((r) => syncedMap.get(r.id) ?? r)
+            .sort((a, b) => compareByDateAndSurgeon(a, b, 'desc')),
+        );
         setCloudError(null);
       }
 
-      setLocalRecords(failedRecords);
-
-      if (failedRecords.length === 0) {
+      if (failedIds.size === 0) {
         showNotice(
           'success',
-          `ซิงค์ข้อมูลจากเครื่องขึ้นฐานข้อมูล Cloud เรียบร้อย (${syncedRecords.length} ราย)`,
+          `ซิงค์ข้อมูลจากทะเบียนขึ้น Cloud เรียบร้อย (${syncedRecords.length} ราย) ข้อมูลยังคงแสดงในทะเบียนตลอดเวลา`,
         );
       } else {
         const friendly = getFriendlyFirestoreErrorMessage(lastError);
         showNotice(
           'error',
-          `ซิงค์ขึ้น Cloud สำเร็จ ${syncedRecords.length} ราย · คงค้างในเครื่อง ${failedRecords.length} ราย (${friendly})`,
+          `ซิงค์ขึ้น Cloud สำเร็จ ${syncedRecords.length} ราย · คงค้างในเครื่อง ${failedIds.size} ราย (${friendly})`,
         );
       }
     } finally {
@@ -1197,7 +1224,7 @@ export default function App() {
       const dateMeta = formatThaiScheduleDate(chosenDate);
       showNotice(
         'success',
-        `สร้างฟอร์มและเก็บลงแฟ้ม/ทะเบียนแล้ว (${result.record.hn ? `HN ${result.record.hn} · ` : ''}${result.record.patientName} · ${dateMeta.label})`,
+        `สร้างใบ Pre-op และเก็บไว้ในทะเบียนแล้ว (${result.record.hn ? `HN ${result.record.hn} · ` : ''}${result.record.patientName} · ${dateMeta.label})`,
       );
     }
   };
@@ -1241,7 +1268,7 @@ export default function App() {
           const next = exists
             ? prev.map((r) => (r.id === sanitized.id ? sanitized : r))
             : [...prev, sanitized];
-          return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
+          return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
         });
         if (currentForm.id === sanitized.id) {
           setCurrentForm(sanitized);
@@ -1249,7 +1276,7 @@ export default function App() {
         if (!options?.silentSuccess) {
           showNotice(
             'success',
-            `บันทึกใบเยี่ยมของ ${sanitized.patientName} เก็บไว้ในแฟ้มวันผ่าตัด ${sanitized.dateOfOperation || 'ยังไม่ระบุ'} เรียบร้อย`,
+            `บันทึกใบ Pre-op ของ ${sanitized.patientName} เก็บไว้ในทะเบียนเรียบร้อยแล้ว (แสดงในทะเบียนตลอดเวลา)`,
           );
         }
         return { record: sanitized, savedToLocalFallback: false };
@@ -1269,14 +1296,14 @@ export default function App() {
           isExisting ? OperationType.UPDATE : OperationType.CREATE,
           docPath,
         );
-        // Save safe local copy so the visit still appears immediately in folders & registry
+        // Save safe local copy so the visit still appears immediately and permanently in ทะเบียน
         const localBackup = sanitizeEvaluationForFirestore(recordToSave, 'local');
         setLocalRecords((prev) => {
           const exists = prev.some((r) => r.id === localBackup.id);
           const next = exists
             ? prev.map((r) => (r.id === localBackup.id ? localBackup : r))
             : [...prev, localBackup];
-          return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
+          return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
         });
         if (currentForm.id === localBackup.id) {
           setCurrentForm(localBackup);
@@ -1284,24 +1311,27 @@ export default function App() {
         const friendly = getFriendlyFirestoreErrorMessage(error);
         showNotice(
           'error',
-          `บันทึกขึ้น Cloud ไม่สำเร็จ (${friendly}) — สำรองเก็บในเครื่องและแสดงในแฟ้มจัดเก็บแล้ว สามารถกดซิงค์ขึ้น Cloud ภายหลังได้`,
+          `บันทึกขึ้น Cloud ไม่สำเร็จ (${friendly}) — เก็บข้อมูลไว้ในทะเบียนเครื่องนี้เรียบร้อยแล้ว (แสดงตลอดเวลา)`,
         );
         return { record: localBackup, savedToLocalFallback: true };
       }
 
-      // Immediately reflect saved record in cloudRecords so it appears in folders & registry right away
+      // Reflect saved record immediately in BOTH Cloud state and local persistent cache
+      // so saved Pre-op sheets always remain visible in ทะเบียน without moving away
       setCloudRecords((prev) => {
         const exists = prev.some((r) => r.id === sanitized.id);
         const next = exists
           ? prev.map((r) => (r.id === sanitized.id ? sanitized : r))
           : [...prev, sanitized];
-        return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
+        return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
       });
-      setLocalRecords((prev) =>
-        prev.some((r) => r.id === sanitized.id)
-          ? prev.filter((r) => r.id !== sanitized.id)
-          : prev,
-      );
+      setLocalRecords((prev) => {
+        const exists = prev.some((r) => r.id === sanitized.id);
+        const next = exists
+          ? prev.map((r) => (r.id === sanitized.id ? sanitized : r))
+          : [...prev, sanitized];
+        return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
+      });
       setCloudError(null);
 
       if (currentForm.id === sanitized.id) {
@@ -1310,7 +1340,7 @@ export default function App() {
       if (!options?.silentSuccess) {
         showNotice(
           'success',
-          `บันทึกข้อมูลของ ${sanitized.patientName}${sanitized.dateOfOperation ? ` (วันผ่าตัด ${sanitized.dateOfOperation})` : ''} เก็บในแฟ้มจัดเก็บเรียบร้อย`,
+          `บันทึกใบ Pre-op ของ ${sanitized.patientName}${sanitized.dateOfOperation ? ` (วันผ่าตัด ${sanitized.dateOfOperation})` : ''} เก็บไว้ในทะเบียนเรียบร้อยแล้ว (แสดงในทะเบียนตลอดเวลา)`,
         );
       }
       return { record: sanitized, savedToLocalFallback: false };
@@ -1332,6 +1362,7 @@ export default function App() {
   };
 
   const handleDelete = async (recordId: string) => {
+    deletedIdsRef.current.add(recordId);
     const isInCloud =
       knownCloudIdsRef.current.has(recordId) || cloudRecords.some((r) => r.id === recordId);
 
@@ -1355,6 +1386,7 @@ export default function App() {
       }
       showNotice('success', 'ลบข้อมูลออกจากฐานข้อมูลเรียบร้อย');
     } catch (error) {
+      deletedIdsRef.current.delete(recordId);
       logFirestoreError(error, OperationType.DELETE, docPath);
       showNotice('error', `ลบข้อมูลไม่สำเร็จ: ${getFriendlyFirestoreErrorMessage(error)}`);
     }
@@ -1543,7 +1575,7 @@ export default function App() {
                 <span className="text-emerald-800 font-medium">
                   ซิงค์ฐานข้อมูล ({user.email})
                 </span>
-                {localRecords.length > 0 && (
+                {unsyncedLocalRecords.length > 0 && (
                   <button
                     type="button"
                     disabled={isSyncingLocal}
@@ -1553,9 +1585,16 @@ export default function App() {
                     <UploadCloud className="w-3 h-3" />
                     {isSyncingLocal
                       ? 'กำลังซิงค์...'
-                      : `ซิงค์จากเครื่องขึ้น Cloud (${localRecords.length} ราย)`}
+                      : `ซิงค์ขึ้น Cloud (${unsyncedLocalRecords.length} ราย)`}
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={handleSignIn}
+                  className="inline-flex items-center gap-1 text-blue-800 hover:text-blue-950 underline ml-1"
+                >
+                  สลับบัญชี
+                </button>
                 <button
                   type="button"
                   onClick={handleSignOut}
@@ -1593,7 +1632,9 @@ export default function App() {
                 }`}
               >
                 <FolderOpen className="w-3.5 h-3.5 text-blue-800" />
-                {showFolderSidebar ? `ซ่อนแฟ้ม (${records.length})` : `แสดงแฟ้มใบเยี่ยม (${records.length})`}
+                {showFolderSidebar
+                  ? `ซ่อนทะเบียน Pre-op (${records.length})`
+                  : `แสดงทะเบียน Pre-op (${records.length})`}
               </button>
             )}
 
@@ -1688,6 +1729,7 @@ export default function App() {
                   }}
                   onCreateNew={handleCreateNew}
                   onCreateNewForDate={handleCreateNewForDate}
+                  onOpenFullRegistry={() => setActiveTab('registry')}
                   onClose={() => setShowFolderSidebar(false)}
                 />
               </div>
@@ -1800,7 +1842,23 @@ export default function App() {
             records={records}
             activeId={currentForm.id}
             surgeonOptions={surgeonOptions}
+            userEmail={user?.email ?? null}
+            isPullingCloud={isPullingCloud || (Boolean(user) && isLoadingRecords)}
+            unsavedCurrentForm={
+              !savedIdSet.has(currentForm.id) &&
+              Boolean(currentForm.patientName.trim() || currentForm.hn.trim())
+                ? currentForm
+                : null
+            }
+            onSaveCurrentForm={handleSave}
+            onSignIn={handleSignIn}
+            onPullFromCloud={() => void handlePullFromCloud()}
+            onImportJsonFile={handleImportJsonFile}
             onEdit={handleEditRecord}
+            onOpenPostOp={(rec) => {
+              handleEditRecord(rec);
+              setActiveTab('post_op');
+            }}
             onDuplicate={handleDuplicate}
             onDelete={handleDelete}
             onPrintRecord={handlePrintRecord}

@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar, ChevronDown, ChevronRight, FilePlus2, FolderOpen, Plus, Search, X } from 'lucide-react';
 import {
   compareByDateAndSurgeon,
+  formatShortThaiDate,
   formatThaiScheduleDate,
+  getDateSearchTokens,
   getEffectiveEvaluationStatus,
   getPostOpVisitCompleteness,
   PreAnestheticEvaluation,
@@ -16,6 +18,7 @@ interface CaseFolderSidebarProps {
   onSelectRecord: (record: PreAnestheticEvaluation) => void;
   onCreateNew: () => void;
   onCreateNewForDate: (dateOfOperation: string, orRoom?: string, surgeon?: string) => void;
+  onOpenFullRegistry?: () => void;
   onClose?: () => void;
 }
 
@@ -27,6 +30,7 @@ export function CaseFolderSidebar({
   onSelectRecord,
   onCreateNew,
   onCreateNewForDate,
+  onOpenFullRegistry,
   onClose,
 }: CaseFolderSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -92,19 +96,19 @@ export function CaseFolderSidebar({
         }
         if (!q) return true;
         return (
-          r.patientName.toLowerCase().includes(q) ||
-          r.hn.toLowerCase().includes(q) ||
-          r.hn.replace(/[\s-]/g, '').toLowerCase().includes(qNorm) ||
-          r.an.toLowerCase().includes(q) ||
+          (r.patientName || '').toLowerCase().includes(q) ||
+          (r.hn || '').toLowerCase().includes(q) ||
+          (r.hn || '').replace(/[\s-]/g, '').toLowerCase().includes(qNorm) ||
+          (r.an || '').toLowerCase().includes(q) ||
           (r.surgeon || '').toLowerCase().includes(q) ||
           (r.ward || '').toLowerCase().includes(q) ||
-          r.operation.toLowerCase().includes(q) ||
-          r.diagnosis.toLowerCase().includes(q) ||
-          (r.dateOfOperation || '').includes(q) ||
-          (r.dateOfVisit || '').includes(q)
+          (r.operation || '').toLowerCase().includes(q) ||
+          (r.diagnosis || '').toLowerCase().includes(q) ||
+          getDateSearchTokens(r.dateOfOperation || '').includes(q) ||
+          getDateSearchTokens(r.dateOfVisit || '').includes(q)
         );
       })
-      .sort((a, b) => compareByDateAndSurgeon(a, b, 'asc'));
+      .sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
 
     const dateGroups: {
       date: string;
@@ -190,7 +194,7 @@ export function CaseFolderSidebar({
 
   return (
     <aside
-      aria-label="แฟ้มเก็บใบเยี่ยมเรียงตามวันที่และแพทย์ผ่าตัด"
+      aria-label="ทะเบียนใบ Pre-op ที่บันทึกไว้ทั้งหมด"
       className="no-print bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden"
     >
       {/* Header */}
@@ -199,7 +203,7 @@ export function CaseFolderSidebar({
           <div className="flex items-center gap-1.5 min-w-0">
             <FolderOpen className="w-4 h-4 text-blue-800 shrink-0" />
             <h2 className="text-xs font-bold text-slate-900 truncate">
-              แฟ้มเก็บใบเยี่ยม ({records.length})
+              ทะเบียนใบ Pre-op ({records.length})
             </h2>
           </div>
           <div className="flex items-center gap-1 shrink-0">
@@ -215,8 +219,8 @@ export function CaseFolderSidebar({
               <button
                 type="button"
                 onClick={onClose}
-                aria-label="ซ่อนแฟ้มเก็บใบเยี่ยม"
-                title="ซ่อนแฟ้มเก็บใบเยี่ยม"
+                aria-label="ซ่อนทะเบียนข้าง"
+                title="ซ่อนทะเบียนข้าง"
                 className="p-1 text-slate-400 hover:text-slate-700 rounded"
               >
                 <X className="w-3.5 h-3.5" />
@@ -225,9 +229,20 @@ export function CaseFolderSidebar({
           </div>
         </div>
 
-        <p className="text-[11px] text-slate-500 leading-snug">
-          เรียงตามวันผ่าตัดและแพทย์ผ่าตัด คลิกชื่อผู้ป่วยเพื่อเปิดฟอร์มเต็มกรอกต่อเมื่อไปเยี่ยม
-        </p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] text-slate-500 leading-snug">
+            เก็บใบ Pre-op ที่บันทึกไว้ทั้งหมดแสดงค้างไว้ตลอดเวลา
+          </p>
+          {onOpenFullRegistry && (
+            <button
+              type="button"
+              onClick={onOpenFullRegistry}
+              className="text-[11px] font-semibold text-blue-800 hover:underline whitespace-nowrap shrink-0"
+            >
+              ดูทะเบียนเต็ม
+            </button>
+          )}
+        </div>
 
         {/* Search by HN / Name & Date */}
         <div className="space-y-1.5">
@@ -398,7 +413,7 @@ export function CaseFolderSidebar({
                     <Calendar className="w-3.5 h-3.5 text-blue-800 shrink-0" />
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-slate-900 truncate">
-                        {isUnspecified ? 'ยังไม่ระบุวันผ่าตัด' : group.date}
+                        {isUnspecified ? 'ยังไม่ระบุวันผ่าตัด' : formatShortThaiDate(group.date)}
                         {dateMeta.relativeTag ? (
                           <span
                             className={`ml-1.5 font-semibold ${

@@ -1212,6 +1212,255 @@ export function formatThaiScheduleDate(isoDate: string): { label: string; relati
   return { label, relativeTag };
 }
 
+export function formatShortThaiDate(isoDate: string): string {
+  const trimmed = (isoDate || '').trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (!match) return trimmed;
+  const rawYear = Number(match[1]);
+  const beYear = rawYear > 2400 ? rawYear : rawYear + 543;
+  const shortBe = String(beYear).slice(-2);
+  return `${match[3]}/${match[2]}/${shortBe}`;
+}
+
+export function getDateSearchTokens(isoDate: string): string {
+  const trimmed = (isoDate || '').trim();
+  if (!trimmed) return '';
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (!match) return trimmed.toLowerCase();
+  const rawYear = Number(match[1]);
+  const ceYear = rawYear > 2400 ? rawYear - 543 : rawYear;
+  const beYear = ceYear + 543;
+  const shortBe = String(beYear).slice(-2);
+  const shortCe = String(ceYear).slice(-2);
+  const dd = match[3];
+  const mm = match[2];
+  const dNum = String(Number(dd));
+  const mNum = String(Number(mm));
+  const thaiMeta = formatThaiScheduleDate(`${ceYear}-${mm}-${dd}`);
+  return [
+    trimmed,
+    `${ceYear}-${mm}-${dd}`,
+    `${beYear}-${mm}-${dd}`,
+    `${dd}/${mm}/${shortBe}`,
+    `${dNum}/${mNum}/${shortBe}`,
+    `${dd}/${mm}/${beYear}`,
+    `${dNum}/${mNum}/${beYear}`,
+    `${dd}/${mm}/${ceYear}`,
+    `${dd}/${mm}/${shortCe}`,
+    `${dd}-${mm}-${shortBe}`,
+    `${dd}-${mm}-${beYear}`,
+    thaiMeta.label,
+  ]
+    .join(' ')
+    .toLowerCase();
+}
+
+export function hydrateEvaluationRecord(
+  rawInput: unknown,
+  fallbackId?: string,
+  fallbackOwnerId = 'local',
+): PreAnestheticEvaluation | null {
+  if (!rawInput || typeof rawInput !== 'object') return null;
+  const raw = rawInput as Partial<PreAnestheticEvaluation> & {
+    formData?: Partial<EvaluationFormData>;
+  };
+  const resolvedId =
+    (typeof raw.id === 'string' && raw.id.trim()) ||
+    (typeof fallbackId === 'string' && fallbackId.trim()) ||
+    '';
+  if (!resolvedId) return null;
+
+  const base = createEmptyEvaluation(
+    (typeof raw.ownerId === 'string' && raw.ownerId.trim()) || fallbackOwnerId,
+  );
+  const rawFd: Partial<EvaluationFormData> =
+    raw.formData && typeof raw.formData === 'object' ? raw.formData : {};
+  const rawHist: Partial<HistoryData> =
+    rawFd.history && typeof rawFd.history === 'object' ? rawFd.history : {};
+  const rawPhys: Partial<PhysicalExamData> =
+    rawFd.physicalExam && typeof rawFd.physicalExam === 'object' ? rawFd.physicalExam : {};
+  const rawInv: Partial<InvestigationData> =
+    rawFd.investigation && typeof rawFd.investigation === 'object' ? rawFd.investigation : {};
+  const rawLab: Partial<LaboratoryData> =
+    rawFd.laboratory && typeof rawFd.laboratory === 'object' ? rawFd.laboratory : {};
+  const rawPm: Partial<PremedicationData> =
+    rawFd.premedication && typeof rawFd.premedication === 'object' ? rawFd.premedication : {};
+  const rawAp: Partial<AnestheticPlanData> =
+    rawFd.anestheticPlan && typeof rawFd.anestheticPlan === 'object' ? rawFd.anestheticPlan : {};
+  const rawPa: Partial<PostAnesthesiaData> =
+    rawFd.postAnesthesia && typeof rawFd.postAnesthesia === 'object' ? rawFd.postAnesthesia : {};
+  const rawPc: Partial<PostOpComplicationData> =
+    rawFd.postOpComplication && typeof rawFd.postOpComplication === 'object'
+      ? rawFd.postOpComplication
+      : {};
+  const rawOx: Partial<OxygenSupportData> | undefined =
+    rawPhys.oxygenSupport && typeof rawPhys.oxygenSupport === 'object'
+      ? rawPhys.oxygenSupport
+      : undefined;
+
+  const normalizeIsoDate = (val: unknown): string => {
+    if (typeof val !== 'string') return '';
+    const trimmed = val.trim();
+    const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+    if (isoMatch) {
+      const y = Number(isoMatch[1]);
+      const ceYear = y > 2400 ? y - 543 : y;
+      return `${String(ceYear).padStart(4, '0')}-${isoMatch[2]}-${isoMatch[3]}`;
+    }
+    const dmyMatch = /^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/.exec(trimmed);
+    if (dmyMatch) {
+      const dd = dmyMatch[1].padStart(2, '0');
+      const mm = dmyMatch[2].padStart(2, '0');
+      let y = Number(dmyMatch[3]);
+      if (dmyMatch[3].length === 2) {
+        y = 2500 + y - 543;
+      } else if (y > 2400) {
+        y = y - 543;
+      }
+      return `${String(y).padStart(4, '0')}-${mm}-${dd}`;
+    }
+    return trimmed;
+  };
+
+  const merged: PreAnestheticEvaluation = {
+    ...base,
+    ...raw,
+    id: resolvedId,
+    ownerId: (typeof raw.ownerId === 'string' && raw.ownerId.trim()) || fallbackOwnerId,
+    patientName: typeof raw.patientName === 'string' ? raw.patientName : '',
+    hn: typeof raw.hn === 'string' ? raw.hn : '',
+    an: typeof raw.an === 'string' ? raw.an : '',
+    age: typeof raw.age === 'string' ? raw.age : '',
+    ward: typeof raw.ward === 'string' ? raw.ward : '',
+    specialty: typeof raw.specialty === 'string' ? raw.specialty : '',
+    dateOfVisit: normalizeIsoDate(raw.dateOfVisit),
+    dateOfOperation: normalizeIsoDate(raw.dateOfOperation),
+    operationTime: typeof raw.operationTime === 'string' ? raw.operationTime : '',
+    scheduleType:
+      raw.scheduleType === 'emergency' ||
+      (raw.scheduleType !== 'elective' && Boolean(raw.asaEmergency))
+        ? 'emergency'
+        : 'elective',
+    orRoom: typeof raw.orRoom === 'string' ? raw.orRoom : '',
+    caseOrder: typeof raw.caseOrder === 'string' ? raw.caseOrder : '',
+    surgeon: typeof raw.surgeon === 'string' ? raw.surgeon : '',
+    diagnosis: typeof raw.diagnosis === 'string' ? raw.diagnosis : '',
+    operation: typeof raw.operation === 'string' ? raw.operation : '',
+    asaClass:
+      raw.asaClass === 'I' ||
+      raw.asaClass === 'II' ||
+      raw.asaClass === 'III' ||
+      raw.asaClass === 'IV' ||
+      raw.asaClass === 'V' ||
+      raw.asaClass === 'VI'
+        ? raw.asaClass
+        : '',
+    asaEmergency: Boolean(raw.asaEmergency),
+    expectedDifficultAirway: Boolean(raw.expectedDifficultAirway),
+    hasComplication: Boolean(raw.hasComplication),
+    formData: {
+      ...base.formData,
+      ...rawFd,
+      history: {
+        ...base.formData.history,
+        ...rawHist,
+        otherUnderlying: Array.isArray(rawHist.otherUnderlying)
+          ? rawHist.otherUnderlying
+          : base.formData.history.otherUnderlying,
+        previousOps: Array.isArray(rawHist.previousOps)
+          ? rawHist.previousOps
+          : base.formData.history.previousOps,
+        drugAddictionTypes: Array.isArray(rawHist.drugAddictionTypes)
+          ? rawHist.drugAddictionTypes
+          : [],
+      },
+      physicalExam: {
+        ...base.formData.physicalExam,
+        ...rawPhys,
+        oxygenSupport: rawOx
+          ? {
+              ...createEmptyOxygenSupport(),
+              ...rawOx,
+              otherItems: Array.isArray(rawOx.otherItems) ? rawOx.otherItems : [],
+            }
+          : createEmptyOxygenSupport(),
+        toothStatus: Array.isArray(rawPhys.toothStatus) ? rawPhys.toothStatus : [],
+        missingTeeth: Array.isArray(rawPhys.missingTeeth) ? rawPhys.missingTeeth : [],
+        looseTeeth: Array.isArray(rawPhys.looseTeeth) ? rawPhys.looseTeeth : [],
+      },
+      investigation: {
+        ...base.formData.investigation,
+        ...rawInv,
+      },
+      laboratory: {
+        ...base.formData.laboratory,
+        ...rawLab,
+        customLabs: Array.isArray(rawLab.customLabs)
+          ? rawLab.customLabs.map((item) => ({
+              name: typeof item?.name === 'string' ? item.name : '',
+              value: typeof item?.value === 'string' ? item.value : '',
+            }))
+          : [],
+        bloodGroup:
+          rawLab.bloodGroup === 'A' ||
+          rawLab.bloodGroup === 'B' ||
+          rawLab.bloodGroup === 'AB' ||
+          rawLab.bloodGroup === 'O'
+            ? rawLab.bloodGroup
+            : '',
+        bloodRh:
+          rawLab.bloodRh === 'positive' || rawLab.bloodRh === 'negative'
+            ? rawLab.bloodRh
+            : '',
+        prepTs: Boolean(rawLab.prepTs),
+        prepStatuses: Array.isArray(rawLab.prepStatuses) ? rawLab.prepStatuses : [],
+      },
+      premedication: {
+        ...base.formData.premedication,
+        ...rawPm,
+        items: Array.isArray(rawPm.items) ? rawPm.items : base.formData.premedication.items,
+      },
+      consult: typeof rawFd.consult === 'string' ? rawFd.consult : '',
+      problemList: Array.isArray(rawFd.problemList)
+        ? rawFd.problemList
+        : base.formData.problemList,
+      anestheticPlan: {
+        ...base.formData.anestheticPlan,
+        ...rawAp,
+        gaMethods: Array.isArray(rawAp.gaMethods) ? rawAp.gaMethods : [],
+        raMethods: Array.isArray(rawAp.raMethods) ? rawAp.raMethods : [],
+      },
+      preparationOrders: Array.isArray(rawFd.preparationOrders)
+        ? rawFd.preparationOrders
+        : base.formData.preparationOrders,
+      postAnesthesia: {
+        ...base.formData.postAnesthesia,
+        ...rawPa,
+      },
+      postOpComplication: {
+        ...createEmptyPostOpComplication(),
+        ...rawPc,
+        periOpComplications: Array.isArray(rawPc.periOpComplications)
+          ? rawPc.periOpComplications
+          : [],
+        postOpComplications: Array.isArray(rawPc.postOpComplications)
+          ? rawPc.postOpComplications
+          : [],
+        outcomes: Array.isArray(rawPc.outcomes) ? rawPc.outcomes : [],
+        incidentTypes: Array.isArray(rawPc.incidentTypes) ? rawPc.incidentTypes : [],
+        administrationErrors: Array.isArray(rawPc.administrationErrors)
+          ? rawPc.administrationErrors
+          : [],
+      },
+    },
+  };
+
+  return {
+    ...merged,
+    status: getEffectiveEvaluationStatus(merged),
+  };
+}
+
 export function compareElectiveSchedule(
   a: PreAnestheticEvaluation,
   b: PreAnestheticEvaluation,

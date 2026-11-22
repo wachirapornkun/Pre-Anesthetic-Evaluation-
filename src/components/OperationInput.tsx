@@ -241,7 +241,7 @@ export function OperationInput({
             setIsDropdownOpen(true);
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Escape') {
+            if (e.key === 'Escape' || e.key === 'Tab') {
               setIsDropdownOpen(false);
             }
           }}

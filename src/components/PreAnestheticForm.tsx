@@ -11,6 +11,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { handleFormTabNavigation } from '../utils/formTabNavigation';
 import {
   addDaysToIsoDate,
   applyAutoProblems,
@@ -626,7 +627,10 @@ export function PreAnestheticForm({
     }`;
 
   return (
-    <div className="no-print bg-white border border-slate-300 rounded-xl overflow-hidden">
+    <div
+      onKeyDown={handleFormTabNavigation}
+      className="no-print bg-white border border-slate-300 rounded-xl overflow-hidden"
+    >
       {/* Hospital Header */}
       <div className="px-5 py-3 border-b border-slate-300 bg-slate-50/70 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -3481,7 +3485,7 @@ export function PreAnestheticForm({
                 4. Laboratory Evaluation
               </h2>
               <span className="text-[11px] text-slate-500">
-                ใช้ลูกศร ↑ ↓ ← → หรือ Enter เลื่อนช่องกรอกได้
+                ใช้ Tab, Enter หรือลูกศร ↑ ↓ ← → เลื่อนช่องกรอกได้
               </span>
             </div>
 

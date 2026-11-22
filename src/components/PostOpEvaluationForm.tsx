@@ -38,6 +38,7 @@ import {
 } from '../types/evaluation';
 import { BphLogo } from './MedicalDiagrams';
 import { OperationInput } from './OperationInput';
+import { handleFormTabNavigation } from '../utils/formTabNavigation';
 
 interface PostOpEvaluationFormProps {
   value: PreAnestheticEvaluation;
@@ -399,7 +400,10 @@ export function PostOpEvaluationForm({
   };
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+    <div
+      onKeyDown={handleFormTabNavigation}
+      className="bg-white border border-slate-200 rounded-xl overflow-hidden"
+    >
       {/* Header matching Bangplee Hospital ANE-FM-006-01 */}
       <div className="px-5 py-4 border-b border-slate-200 bg-slate-50/70 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-4">

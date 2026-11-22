@@ -80,6 +80,7 @@ import {
   ScheduleType,
 } from './types/evaluation';
 import { exportEvaluationJson, exportEvaluationsCsv, exportSingleHtmlReport } from './utils/exportReports';
+import { handleFormTabNavigation } from './utils/formTabNavigation';
 
 type ActiveTab = 'form' | 'post_op' | 'dashboard' | 'registry' | 'print_preview';
 type PrintSheetMode = 'pre_op' | 'post_op' | 'both';
@@ -136,6 +137,11 @@ function loadActiveDraftOrEmpty(): PreAnestheticEvaluation {
   return createEmptyEvaluation('local');
 }
 
+function buildRecordFingerprint(rec: PreAnestheticEvaluation): string {
+  const sanitized = sanitizeEvaluationForFirestore(rec, 'fp');
+  return JSON.stringify(sanitized);
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('form');
   const [printSheetMode, setPrintSheetMode] = useState<PrintSheetMode>('both');
@@ -161,6 +167,11 @@ export default function App() {
   const knownCloudIdsRef = useRef<Set<string>>(new Set());
   const deletedIdsRef = useRef<Set<string>>(new Set());
   const autoSyncedUidRef = useRef<string | null>(null);
+  const lastLocalFpRef = useRef<Map<string, string>>(new Map());
+  const lastCloudFpRef = useRef<Map<string, string>>(new Map());
+  const lastUserEditAtRef = useRef<number>(0);
+  const currentFormRef = useRef<PreAnestheticEvaluation>(currentForm);
+  currentFormRef.current = currentForm;
   const [isNewFormModalOpen, setIsNewFormModalOpen] = useState(false);
   const [newFormDraft, setNewFormDraft] = useState<NewFormScheduleDraft>(() => ({
     hn: '',
@@ -324,6 +335,14 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [notice]);
 
+  // Seed initial local fingerprints once on mount so viewing saved records doesn't trigger redundant writes
+  useEffect(() => {
+    localRecords.forEach((rec) => {
+      lastLocalFpRef.current.set(rec.id, buildRecordFingerprint(rec));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Persist local evaluations to browser localStorage so saved pre-visit drafts survive refresh
   useEffect(() => {
     try {
@@ -403,6 +422,11 @@ export default function App() {
         items.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
         const nextCloudIds = new Set(items.map((item) => item.id));
         knownCloudIdsRef.current = nextCloudIds;
+        items.forEach((item) => {
+          const fp = buildRecordFingerprint(item);
+          lastCloudFpRef.current.set(item.id, fp);
+          lastLocalFpRef.current.set(item.id, fp);
+        });
         setCloudRecords(items);
         setCloudError(null);
         setIsLoadingRecords(false);
@@ -416,6 +440,17 @@ export default function App() {
             compareByDateAndSurgeon(a, b, 'desc'),
           );
         });
+
+        // If another device updated the currently open record while user isn't actively typing, refresh it in real time
+        const activeOpen = currentFormRef.current;
+        const remoteMatch = items.find((it) => it.id === activeOpen.id);
+        if (
+          remoteMatch &&
+          Date.now() - lastUserEditAtRef.current > 3000 &&
+          buildRecordFingerprint(remoteMatch) !== buildRecordFingerprint(activeOpen)
+        ) {
+          setCurrentForm(remoteMatch);
+        }
 
         if (sampleIdsToDelete.length > 0) {
           sampleIdsToDelete.forEach((id) => purgedSampleIdsRef.current.add(id));
@@ -1015,12 +1050,39 @@ export default function App() {
       compareByDateAndSurgeon(a, b, 'desc'),
     );
   }, [user, cloudRecords, localRecords]);
+
+  // Real-time projection: reflects every Pre-op / Post-op edit immediately across Sidebar, Registry & Dashboard (0ms latency)
+  const liveRecords = useMemo(() => {
+    const hasLiveIdentity = Boolean(
+      currentForm.patientName.trim() || currentForm.hn.trim(),
+    );
+    if (!hasLiveIdentity || deletedIdsRef.current.has(currentForm.id)) {
+      return records;
+    }
+    const liveEntry: PreAnestheticEvaluation = {
+      ...currentForm,
+      patientName:
+        currentForm.patientName.trim() || `ผู้ป่วย HN ${currentForm.hn.trim()}`,
+    };
+    const existsIdx = records.findIndex((r) => r.id === currentForm.id);
+    const merged =
+      existsIdx !== -1
+        ? records.map((r) => (r.id === currentForm.id ? { ...r, ...liveEntry } : r))
+        : [liveEntry, ...records];
+    return [...merged].sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
+  }, [records, currentForm]);
+
   const unsyncedLocalRecords = useMemo(() => {
     if (!user || isLoadingRecords) return [];
     const cloudIdSet = new Set(cloudRecords.map((r) => r.id));
     return localRecords.filter((r) => !cloudIdSet.has(r.id));
   }, [user, isLoadingRecords, cloudRecords, localRecords]);
   const savedIdSet = useMemo(() => new Set(records.map((r) => r.id)), [records]);
+
+  const handleFormChange = (next: PreAnestheticEvaluation) => {
+    lastUserEditAtRef.current = Date.now();
+    setCurrentForm(next);
+  };
 
   const buildCloudUpdatePayload = (sanitized: PreAnestheticEvaluation) => ({
     status: sanitized.status,
@@ -1321,8 +1383,80 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authReady, user, isLoadingRecords, unsyncedLocalRecords.length]);
 
+  // Real-time auto-save: persists Pre-op / Post-op edits automatically to Local (300ms) and Cloud Firestore (1100ms)
+  useEffect(() => {
+    if (lastUserEditAtRef.current === 0) return;
+    if (!currentForm.patientName.trim()) return;
+    if (deletedIdsRef.current.has(currentForm.id)) return;
+
+    const targetSnapshot = currentForm;
+    const fp = buildRecordFingerprint(targetSnapshot);
+    const needsLocal = lastLocalFpRef.current.get(targetSnapshot.id) !== fp;
+    const needsCloud = Boolean(user) && lastCloudFpRef.current.get(targetSnapshot.id) !== fp;
+
+    if (!needsLocal && !needsCloud) return;
+
+    let localTimer: ReturnType<typeof setTimeout> | undefined;
+    let cloudTimer: ReturnType<typeof setTimeout> | undefined;
+
+    if (needsLocal) {
+      localTimer = setTimeout(() => {
+        if (deletedIdsRef.current.has(targetSnapshot.id)) return;
+        const sanitizedLocal = sanitizeEvaluationForFirestore(
+          targetSnapshot,
+          user?.uid || 'local',
+        );
+        lastLocalFpRef.current.set(sanitizedLocal.id, fp);
+        setLocalRecords((prev) => {
+          const exists = prev.some((r) => r.id === sanitizedLocal.id);
+          const next = exists
+            ? prev.map((r) => (r.id === sanitizedLocal.id ? sanitizedLocal : r))
+            : [...prev, sanitizedLocal];
+          return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
+        });
+      }, 300);
+    }
+
+    if (needsCloud && user) {
+      const activeUid = user.uid;
+      cloudTimer = setTimeout(() => {
+        if (deletedIdsRef.current.has(targetSnapshot.id)) return;
+        const sanitizedCloud = sanitizeEvaluationForFirestore(targetSnapshot, activeUid);
+        upsertEvaluationToCloud(sanitizedCloud)
+          .then(() => {
+            lastCloudFpRef.current.set(sanitizedCloud.id, fp);
+            lastLocalFpRef.current.set(sanitizedCloud.id, fp);
+            setCloudRecords((prev) => {
+              const exists = prev.some((r) => r.id === sanitizedCloud.id);
+              const next = exists
+                ? prev.map((r) => (r.id === sanitizedCloud.id ? sanitizedCloud : r))
+                : [...prev, sanitizedCloud];
+              return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
+            });
+            setLocalRecords((prev) => {
+              const exists = prev.some((r) => r.id === sanitizedCloud.id);
+              const next = exists
+                ? prev.map((r) => (r.id === sanitizedCloud.id ? sanitizedCloud : r))
+                : [...prev, sanitizedCloud];
+              return next.sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
+            });
+            setCloudError(null);
+          })
+          .catch((error) => {
+            logFirestoreError(error, OperationType.WRITE, `evaluations/${sanitizedCloud.id}`);
+          });
+      }, 1100);
+    }
+
+    return () => {
+      if (localTimer) clearTimeout(localTimer);
+      if (cloudTimer) clearTimeout(cloudTimer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentForm, user]);
+
   const countCasesOnDate = (targetDate: string, targetRoom?: string): number =>
-    records.filter(
+    liveRecords.filter(
       (r) =>
         (r.dateOfOperation || '').trim() === targetDate.trim() &&
         (!targetRoom || (r.orRoom || '').trim() === targetRoom.trim()),
@@ -1422,6 +1556,7 @@ export default function App() {
     try {
       if (!user) {
         const sanitized = sanitizeEvaluationForFirestore(recordToSave, 'local');
+        lastLocalFpRef.current.set(sanitized.id, buildRecordFingerprint(sanitized));
         setLocalRecords((prev) => {
           const exists = prev.some((r) => r.id === sanitized.id);
           const next = exists
@@ -1477,6 +1612,9 @@ export default function App() {
 
       // Reflect saved record immediately in BOTH Cloud state and local persistent cache
       // so saved Pre-op sheets always remain visible in ทะเบียน without moving away
+      const savedFp = buildRecordFingerprint(sanitized);
+      lastCloudFpRef.current.set(sanitized.id, savedFp);
+      lastLocalFpRef.current.set(sanitized.id, savedFp);
       setCloudRecords((prev) => {
         const exists = prev.some((r) => r.id === sanitized.id);
         const next = exists
@@ -1564,11 +1702,21 @@ export default function App() {
   };
 
   const handleEditRecord = (record: PreAnestheticEvaluation) => {
+    const fp = buildRecordFingerprint(record);
+    lastLocalFpRef.current.set(record.id, fp);
+    if (knownCloudIdsRef.current.has(record.id)) {
+      lastCloudFpRef.current.set(record.id, fp);
+    }
     setCurrentForm(record);
     setActiveTab('form');
   };
 
   const handlePrintRecord = (record: PreAnestheticEvaluation) => {
+    const fp = buildRecordFingerprint(record);
+    lastLocalFpRef.current.set(record.id, fp);
+    if (knownCloudIdsRef.current.has(record.id)) {
+      lastCloudFpRef.current.set(record.id, fp);
+    }
     setCurrentForm(record);
     setActiveTab('print_preview');
     setTimeout(() => {
@@ -1626,7 +1774,7 @@ export default function App() {
                   : 'border-transparent hover:text-slate-900'
               }`}
             >
-              ทะเบียนผ่าตัด ({records.length})
+              ทะเบียนผ่าตัด ({liveRecords.length})
             </button>
             <button
               type="button"
@@ -1676,7 +1824,7 @@ export default function App() {
             [
               { key: 'form', label: 'Pre-op' },
               { key: 'post_op', label: 'Post-op' },
-              { key: 'registry', label: `ทะเบียนผ่าตัด (${records.length})` },
+              { key: 'registry', label: `ทะเบียนผ่าตัด (${liveRecords.length})` },
               { key: 'dashboard', label: 'Dashboard' },
               { key: 'print_preview', label: 'พิมพ์ A4' },
             ] as const
@@ -1780,8 +1928,8 @@ export default function App() {
               >
                 <FolderOpen className="w-3.5 h-3.5 text-blue-800" />
                 {showFolderSidebar
-                  ? `ซ่อนทะเบียนผ่าตัด (${records.length})`
-                  : `แสดงทะเบียนผ่าตัด (${records.length})`}
+                  ? `ซ่อนทะเบียนผ่าตัด (${liveRecords.length})`
+                  : `แสดงทะเบียนผ่าตัด (${liveRecords.length})`}
               </button>
             )}
 
@@ -1830,7 +1978,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => {
-                const list = records.length > 0 ? records : [currentForm];
+                const list = liveRecords.length > 0 ? liveRecords : [currentForm];
                 exportEvaluationsCsv(list);
                 showNotice('success', 'ส่งออกไฟล์ CSV สำหรับ Excel เรียบร้อย');
               }}
@@ -1877,7 +2025,7 @@ export default function App() {
             {showFolderSidebar && (
               <div className="xl:sticky xl:top-20">
                 <CaseFolderSidebar
-                  records={records}
+                  records={liveRecords}
                   activeId={currentForm.id}
                   surgeonOptions={surgeonOptions}
                   wardOptions={wardOptions}
@@ -1930,7 +2078,7 @@ export default function App() {
               {activeTab === 'form' ? (
                 <PreAnestheticForm
                   value={currentForm}
-                  onChange={setCurrentForm}
+                  onChange={handleFormChange}
                   medicationGroups={medicationGroups}
                   onUpdateMedicationGroups={handleUpdateMedicationGroups}
                   wardOptions={wardOptions}
@@ -1946,8 +2094,8 @@ export default function App() {
               ) : (
                 <PostOpEvaluationForm
                   value={currentForm}
-                  onChange={setCurrentForm}
-                  records={records}
+                  onChange={handleFormChange}
+                  records={liveRecords}
                   onSelectPatient={(rec) => {
                     handleEditRecord(rec);
                     setActiveTab('post_op');
@@ -1968,7 +2116,7 @@ export default function App() {
 
         {activeTab === 'dashboard' && (
           <DashboardView
-            records={records}
+            records={liveRecords}
             wardOptions={wardOptions}
             isLoading={isLoadingRecords}
             onCreateNew={handleCreateNew}
@@ -1982,11 +2130,11 @@ export default function App() {
 
         {activeTab === 'registry' && (
           <RegistryView
-            records={records}
+            records={liveRecords}
             activeId={currentForm.id}
             wardOptions={wardOptions}
             surgeonOptions={surgeonOptions}
-            isLoading={isLoadingRecords && records.length === 0}
+            isLoading={isLoadingRecords && liveRecords.length === 0}
             userEmail={user?.email ?? null}
             cloudCount={cloudRecords.length}
             unsyncedLocalCount={unsyncedLocalRecords.length}
@@ -2111,6 +2259,7 @@ export default function App() {
         >
           <form
             onSubmit={handleConfirmCreateNew}
+            onKeyDown={handleFormTabNavigation}
             className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-5 space-y-4 shadow-xl"
           >
             <div className="flex items-start justify-between gap-3 pb-2 border-b border-slate-200">
@@ -2153,7 +2302,7 @@ export default function App() {
               const normalizedDraftHn = newFormDraft.hn.replace(/[\s-]/g, '').toLowerCase();
               const matchedByHn =
                 normalizedDraftHn.length >= 3
-                  ? records.filter(
+                  ? liveRecords.filter(
                       (r) =>
                         r.hn &&
                         r.hn.replace(/[\s-]/g, '').toLowerCase() === normalizedDraftHn,

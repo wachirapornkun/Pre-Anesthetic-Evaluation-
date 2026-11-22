@@ -40,7 +40,9 @@ import {
   deriveAnesthesiaType,
   DRUG_ADDICTION_OPTIONS,
   DurationUnit,
+  evaluateNpoStatus,
   EvaluationFormData,
+  formatFastingHours,
   formatOxygenSupportSummary,
   formatPostponementReasons,
   formatPreOpNotVisitedReasons,
@@ -2795,23 +2797,107 @@ export function PreAnestheticForm({
             </div>
 
             <div className="space-y-2.5 pt-2">
-              <label className="block bg-amber-50/80 border-2 border-amber-500 rounded-lg p-3 space-y-1.5">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-lg font-extrabold tracking-wide text-red-700">
-                    NPO
-                  </span>
-                  <span className="text-xs font-semibold text-amber-900">
-                    เวลางดน้ำและอาหาร (NPO time)
-                  </span>
-                </div>
-                <input
-                  type="text"
-                  value={pm.npoTime}
-                  onChange={(e) => updatePremed({ npoTime: e.target.value })}
-                  placeholder="เช่น หลัง 24.00 น. / NPO 6 ชม."
-                  className="w-full bg-white border-2 border-amber-400 rounded-md px-3 py-2 text-base sm:text-lg font-bold text-slate-950 placeholder:font-normal placeholder:text-slate-400 focus:outline-none focus:border-red-600 transition-colors"
-                />
-              </label>
+              {(() => {
+                const npoStatus = evaluateNpoStatus(value);
+                return (
+                  <div
+                    className={`rounded-lg p-3 space-y-2 border-2 transition-colors ${
+                      npoStatus.isFullStomach
+                        ? 'bg-prose-50/85 border-prose-400'
+                        : 'bg-pyellow-50/80 border-pyellow-400'
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="text-lg font-extrabold tracking-wide text-prose-800">
+                        NPO
+                      </span>
+                      <span className="text-xs font-semibold text-pyellow-800">
+                        เวลางดน้ำและอาหาร (อาหาร ≥ 8 ชม. · น้ำเปล่า ≥ 2 ชม.)
+                      </span>
+                    </div>
+
+                    <input
+                      type="text"
+                      value={pm.npoTime}
+                      onChange={(e) => updatePremed({ npoTime: e.target.value })}
+                      placeholder="เช่น หลัง 24.00 น. / NPO 6 ชม."
+                      aria-label="เวลางดน้ำและอาหาร (NPO time)"
+                      className="w-full bg-white border border-pyellow-400 rounded-md px-3 py-2 text-base sm:text-lg font-bold text-slate-950 placeholder:font-normal placeholder:text-slate-400 focus:outline-none focus:border-prose-600 transition-colors"
+                    />
+
+                    {/* Last meal & last water time inputs for exact NPO duration calculation */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
+                      <label className="block space-y-0.5">
+                        <span className="text-[11px] font-semibold text-slate-700">
+                          เวลารับประทานอาหารล่าสุด
+                        </span>
+                        <input
+                          type="time"
+                          value={pm.lastMealTime ?? ''}
+                          onChange={(e) => updatePremed({ lastMealTime: e.target.value })}
+                          className="w-full bg-white border border-pborder rounded-md px-2.5 py-1.5 text-xs font-mono tabular-nums text-[#243040] focus:outline-none focus:border-pblue-400"
+                        />
+                      </label>
+
+                      <label className="block space-y-0.5">
+                        <span className="text-[11px] font-semibold text-slate-700">
+                          เวลาดื่มน้ำเปล่าล่าสุด
+                        </span>
+                        <input
+                          type="time"
+                          value={pm.lastWaterTime ?? ''}
+                          onChange={(e) => updatePremed({ lastWaterTime: e.target.value })}
+                          className="w-full bg-white border border-pborder rounded-md px-2.5 py-1.5 text-xs font-mono tabular-nums text-[#243040] focus:outline-none focus:border-pblue-400"
+                        />
+                      </label>
+                    </div>
+
+                    {/* Live fasting duration & Full stomach feedback */}
+                    {(npoStatus.foodHours !== null ||
+                      npoStatus.waterHours !== null ||
+                      npoStatus.isFullStomach) ? (
+                      <div className="flex flex-wrap items-center gap-1.5 text-[11px] pt-0.5">
+                        {npoStatus.foodHours !== null && (
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded font-semibold border ${
+                              npoStatus.isFoodFullStomach
+                                ? 'bg-prose-100 border-prose-300 text-prose-800'
+                                : 'bg-pgreen-50 border-pgreen-300 text-pgreen-800'
+                            }`}
+                          >
+                            อาหาร: {formatFastingHours(npoStatus.foodHours)} ชม.{' '}
+                            {npoStatus.isFoodFullStomach ? '(< 8 ชม.)' : '(ครบ ≥ 8 ชม.)'}
+                          </span>
+                        )}
+                        {npoStatus.waterHours !== null && (
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded font-semibold border ${
+                              npoStatus.isWaterFullStomach
+                                ? 'bg-prose-100 border-prose-300 text-prose-800'
+                                : 'bg-pgreen-50 border-pgreen-300 text-pgreen-800'
+                            }`}
+                          >
+                            น้ำเปล่า: {formatFastingHours(npoStatus.waterHours)} ชม.{' '}
+                            {npoStatus.isWaterFullStomach ? '(< 2 ชม.)' : '(ครบ ≥ 2 ชม.)'}
+                          </span>
+                        )}
+                        {npoStatus.isFullStomach && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded font-bold bg-prose-600 text-white">
+                            Full stomach · เพิ่มใน Problem List อัตโนมัติแล้ว
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      (Boolean(pm.lastMealTime?.trim()) || Boolean(pm.lastWaterTime?.trim())) &&
+                      npoStatus.operationMinutes === null && (
+                        <div className="text-[11px] text-pyellow-800">
+                          กรุณาระบุ <strong>เวลาผ่าตัด</strong> ด้านบน เพื่อให้ระบบคำนวณชั่วโมง NPO และประเมิน Full stomach อัตโนมัติ
+                        </div>
+                      )
+                    )}
+                  </div>
+                );
+              })()}
               <label className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-slate-700 shrink-0">on IVF</span>
                 <input

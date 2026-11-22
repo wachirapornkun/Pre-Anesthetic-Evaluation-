@@ -132,4 +132,17 @@
   .print-only-sheet.print-scale-90 {
     zoom: 0.9;
   }
+
+  .post-op-single-a4,
+  .print-only-sheet.post-op-single-a4 {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    height: 277mm !important;
+    max-height: 277mm !important;
+    box-sizing: border-box !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    overflow: hidden;
+  }
 }

@@ -389,7 +389,16 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
 
         <div class="sec-title" style="margin-top:6px;">5. Premedication</div>
         <div class="field">${pm.items.filter(Boolean).map((item, i) => `${i + 1}. ${esc(item)}`).join('<br/>') || '-'}</div>
-        <div class="field" style="margin-top:4px;padding:4px 6px;border:1.5px solid #0f172a;background:#fffbeb;font-size:14px;font-weight:800;color:#991b1b;">NPO: ${esc(pm.npoTime || '__________________')}</div>
+        <div class="field" style="margin-top:4px;padding:4px 6px;border:1.5px solid #0f172a;background:#fffbeb;font-size:14px;font-weight:800;color:#991b1b;">NPO: ${esc(pm.npoTime || '__________________')}${
+          pm.lastMealTime || pm.lastWaterTime
+            ? `<div style="font-size:11px;font-weight:600;color:#78350f;margin-top:2px;">${[
+                pm.lastMealTime ? `อาหารล่าสุด ${esc(pm.lastMealTime)} น.` : '',
+                pm.lastWaterTime ? `น้ำเปล่าล่าสุด ${esc(pm.lastWaterTime)} น.` : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')}</div>`
+            : ''
+        }</div>
         <div class="field"><strong>on IVF:</strong> ${esc(pm.onIvf || '-')}</div>
       </div>
 

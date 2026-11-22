@@ -314,6 +314,8 @@ export interface LaboratoryData {
 export interface PremedicationData {
   items: string[];
   npoTime: string;
+  lastMealTime?: string;
+  lastWaterTime?: string;
   onIvf: string;
 }
 
@@ -2485,6 +2487,8 @@ export function createEmptyEvaluation(
       premedication: {
         items: ['', '', '', ''],
         npoTime: '',
+        lastMealTime: '',
+        lastWaterTime: '',
         onIvf: '',
       },
       consult: '',
@@ -2987,6 +2991,8 @@ export function sanitizeEvaluationForFirestore(
       premedication: {
         items: clampStrArray(fd.premedication.items, 10, 200),
         npoTime: clampStr(fd.premedication.npoTime, 100),
+        lastMealTime: clampStr(fd.premedication.lastMealTime ?? '', 32),
+        lastWaterTime: clampStr(fd.premedication.lastWaterTime ?? '', 32),
         onIvf: clampStr(fd.premedication.onIvf, 150),
       },
       consult: clampStr(fd.consult, 1500),
@@ -3514,7 +3520,9 @@ export function computeClinicalSummary(record: PreAnestheticEvaluation): Clinica
     Boolean(laboratory.hb.trim() || laboratory.hct.trim() || laboratory.cr.trim()),
     Boolean(record.asaClass),
     Boolean(anestheticPlan.gaSelected || anestheticPlan.raSelected),
-    Boolean(premedication.npoTime.trim()),
+    Boolean(premedication.npoTime.trim()) ||
+      Boolean((premedication.lastMealTime ?? '').trim()) ||
+      Boolean((premedication.lastWaterTime ?? '').trim()),
   ];
   const filledCount = checkpoints.filter(Boolean).length;
   const completenessPercent = Math.round((filledCount / checkpoints.length) * 100);
@@ -4738,15 +4746,18 @@ export function generateAutoProblemEntries(
     });
   }
 
-  // Explicit Not NPO / Full stomach note
-  const npoCheckText = [premedication.npoTime, history.presentIllness].filter(Boolean).join(' | ');
-  if (
-    /\b(?:not\s+npo|non-?npo|full\s+stomach)\b|ไม่\s*npo|ไม่ได้\s*npo|งดน้ำงดอาหารไม่ครบ|เพิ่งทาน|เพิ่งรับประทาน/i.test(
-      npoCheckText,
-    ) &&
-    !(record.asaEmergency || record.scheduleType === 'emergency')
-  ) {
-    conditionItems.push({ text: 'Full stomach / Not NPO', score: 85 });
+  // NPO fasting evaluation: Food < 8 hr or Water < 2 hr (counted from last intake to operationTime) -> Full stomach
+  const npoEval = evaluateNpoStatus(record);
+  if (npoEval.isFullStomach && npoEval.problemText) {
+    entries.push({
+      key: 'npo_full_stomach',
+      category: 'clinical',
+      categoryLabel: 'NPO / Full stomach',
+      legacyPrefixes: ['full stomach'],
+      text: npoEval.problemText.slice(0, 250),
+      severityScore: 86,
+      severityLevel: severityLevelFromScore(86),
+    });
   }
 
   if (conditionItems.length > 0) {
@@ -5306,7 +5317,167 @@ const KNOWN_AUTO_CONDITION_TOKENS = new Set([
   'hiv',
   'hbv / hcv',
   'full stomach / not npo',
+  'full stomach',
 ]);
+
+export interface NpoEvaluationResult {
+  operationMinutes: number | null;
+  foodHours: number | null;
+  waterHours: number | null;
+  isFoodFullStomach: boolean;
+  isWaterFullStomach: boolean;
+  hasExplicitNotNpo: boolean;
+  isFullStomach: boolean;
+  problemText: string;
+}
+
+function parseClockMinutes(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const cleaned = raw.trim();
+  if (!cleaned) return null;
+  // Match first HH:MM or HH.MM (including 24:00 / 24.00 for midnight)
+  const match = cleaned.match(/\b([01]?\d|2[0-4])[:.]([0-5]\d)\b/);
+  if (!match) return null;
+  const rawHour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isFinite(rawHour) || !Number.isFinite(minute)) return null;
+  if (rawHour === 24 && minute === 0) return 0;
+  if (rawHour < 0 || rawHour > 23 || minute < 0 || minute > 59) return null;
+  return rawHour * 60 + minute;
+}
+
+function computeElapsedFastingHours(lastMinutes: number, opMinutes: number): number {
+  const diffMin =
+    opMinutes >= lastMinutes
+      ? opMinutes - lastMinutes
+      : 24 * 60 - lastMinutes + opMinutes;
+  return Math.round((diffMin / 60) * 10) / 10;
+}
+
+export function formatFastingHours(hours: number): string {
+  return Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
+}
+
+/**
+ * Evaluates NPO adequacy against scheduled operationTime:
+ * - Solid food fasting < 8 hours -> Full stomach
+ * - Clear water fasting < 2 hours -> Full stomach
+ * Supports both dedicated lastMealTime/lastWaterTime fields and smart parsing of free-text npoTime.
+ */
+export function evaluateNpoStatus(record: PreAnestheticEvaluation): NpoEvaluationResult {
+  const pm = record.formData.premedication;
+  const history = record.formData.history;
+  const opMinutes = parseClockMinutes(record.operationTime);
+  const npoRaw = (pm.npoTime || '').trim();
+
+  let foodHours: number | null = null;
+  let waterHours: number | null = null;
+
+  // 1. Dedicated Last Meal Time vs Operation Time
+  const mealMinutes = parseClockMinutes(pm.lastMealTime);
+  if (mealMinutes !== null && opMinutes !== null) {
+    foodHours = computeElapsedFastingHours(mealMinutes, opMinutes);
+  }
+
+  // 2. Dedicated Last Water Time vs Operation Time
+  const waterMinutes = parseClockMinutes(pm.lastWaterTime);
+  if (waterMinutes !== null && opMinutes !== null) {
+    waterHours = computeElapsedFastingHours(waterMinutes, opMinutes);
+  }
+
+  // 3. Fallback smart parsing from free-text npoTime if dedicated fields are not filled
+  if (npoRaw) {
+    if (waterHours === null) {
+      const waterDurMatch = npoRaw.match(
+        /(?:น้ำเปล่า|น้ำดื่ม|น้ำ|water|clear\s*fluid)\s*(?:ล่าสุด|งด|npo)?\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(?:ชม\.?|ชั่วโมง|hr|hrs|hour|hours)/i,
+      );
+      if (waterDurMatch) {
+        const val = Number(waterDurMatch[1]);
+        if (Number.isFinite(val) && val >= 0 && val <= 72) waterHours = Math.round(val * 10) / 10;
+      } else if (opMinutes !== null) {
+        const waterTimeMatch = npoRaw.match(
+          /(?:น้ำเปล่า|น้ำดื่ม|น้ำ|water|clear\s*fluid)[^\d]{0,16}([01]?\d|2[0-4])[:.]([0-5]\d)/i,
+        );
+        if (waterTimeMatch) {
+          const parsedMin = parseClockMinutes(`${waterTimeMatch[1]}:${waterTimeMatch[2]}`);
+          if (parsedMin !== null) {
+            waterHours = computeElapsedFastingHours(parsedMin, opMinutes);
+          }
+        }
+      }
+    }
+
+    if (foodHours === null) {
+      const foodDurMatch = npoRaw.match(
+        /(?:อาหาร|ข้าว|meal|food|solid)\s*(?:ล่าสุด|งด|npo)?\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(?:ชม\.?|ชั่วโมง|hr|hrs|hour|hours)/i,
+      );
+      if (foodDurMatch) {
+        const val = Number(foodDurMatch[1]);
+        if (Number.isFinite(val) && val >= 0 && val <= 72) foodHours = Math.round(val * 10) / 10;
+      } else {
+        const genericDurMatch = npoRaw.match(
+          /(?:^|\b)(?:npo|งดน้ำงดอาหาร|งดอาหารและน้ำ|งด)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(?:ชม\.?|ชั่วโมง|hr|hrs|hour|hours)/i,
+        );
+        if (genericDurMatch) {
+          const val = Number(genericDurMatch[1]);
+          if (Number.isFinite(val) && val >= 0 && val <= 72) foodHours = Math.round(val * 10) / 10;
+        } else if (opMinutes !== null) {
+          const foodTimeMatch = npoRaw.match(
+            /(?:อาหาร|ข้าว|meal|food|solid)[^\d]{0,16}([01]?\d|2[0-4])[:.]([0-5]\d)/i,
+          );
+          if (foodTimeMatch) {
+            const parsedMin = parseClockMinutes(`${foodTimeMatch[1]}:${foodTimeMatch[2]}`);
+            if (parsedMin !== null) {
+              foodHours = computeElapsedFastingHours(parsedMin, opMinutes);
+            }
+          } else if (!/^(?:น้ำเปล่า|น้ำดื่ม|น้ำ|water)/i.test(npoRaw)) {
+            const genericStartMin = parseClockMinutes(npoRaw);
+            if (genericStartMin !== null) {
+              foodHours = computeElapsedFastingHours(genericStartMin, opMinutes);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const isFoodFullStomach = foodHours !== null && foodHours < 8;
+  const isWaterFullStomach = waterHours !== null && waterHours < 2;
+
+  const npoCheckText = [npoRaw, history.presentIllness].filter(Boolean).join(' | ');
+  const hasExplicitNotNpo =
+    /\b(?:not\s+npo|non-?npo|full\s+stomach)\b|ไม่\s*npo|ไม่ได้\s*npo|งดน้ำงดอาหารไม่ครบ|เพิ่งทาน|เพิ่งรับประทาน/i.test(
+      npoCheckText,
+    );
+
+  const isFullStomach = isFoodFullStomach || isWaterFullStomach || hasExplicitNotNpo;
+
+  const detailParts: string[] = [];
+  if (isFoodFullStomach && foodHours !== null) {
+    detailParts.push(`NPO อาหาร ${formatFastingHours(foodHours)} ชม. (< 8 ชม.)`);
+  }
+  if (isWaterFullStomach && waterHours !== null) {
+    detailParts.push(`NPO น้ำเปล่า ${formatFastingHours(waterHours)} ชม. (< 2 ชม.)`);
+  }
+
+  let problemText = '';
+  if (detailParts.length > 0) {
+    problemText = `Full stomach (${detailParts.join(', ')})`;
+  } else if (hasExplicitNotNpo) {
+    problemText = 'Full stomach / Not NPO';
+  }
+
+  return {
+    operationMinutes: opMinutes,
+    foodHours,
+    waterHours,
+    isFoodFullStomach,
+    isWaterFullStomach,
+    hasExplicitNotNpo,
+    isFullStomach,
+    problemText,
+  };
+}
 
 /**
  * Re-evaluates Problem List from current patient data, removing stale or false-positive

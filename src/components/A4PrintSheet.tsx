@@ -301,9 +301,16 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                 <div>—</div>
               )}
               <div className="mt-1 px-2 py-1 border-[1.5px] border-slate-900 bg-amber-50/70">
-                <span className="text-[14px] font-extrabold tracking-wide text-red-800">
+                <div className="text-[14px] font-extrabold tracking-wide text-red-800">
                   NPO: {pm.npoTime || '__________________'}
-                </span>
+                </div>
+                {(pm.lastMealTime || pm.lastWaterTime) && (
+                  <div className="text-[9.5px] font-semibold text-slate-800">
+                    {pm.lastMealTime ? `อาหารล่าสุด ${pm.lastMealTime} น.` : ''}
+                    {pm.lastMealTime && pm.lastWaterTime ? ' · ' : ''}
+                    {pm.lastWaterTime ? `น้ำเปล่าล่าสุด ${pm.lastWaterTime} น.` : ''}
+                  </div>
+                )}
               </div>
               <div className="pt-0.5">
                 <span className="font-semibold">on IVF:</span> {pm.onIvf || '—'}

@@ -2120,6 +2120,7 @@ export function PreAnestheticForm({
                   <MedicationGroupSelector
                     groups={medicationGroups}
                     medicationText={h.medication}
+                    dateOfOperation={value.dateOfOperation}
                     onChangeMedicationText={(nextText, autoUnderlying) => {
                       const nextPremedItems = syncPremedicationWithMedications(
                         pm.items,

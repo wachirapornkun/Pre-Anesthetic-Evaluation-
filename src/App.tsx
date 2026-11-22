@@ -25,6 +25,7 @@ import {
   LogIn,
   LogOut,
   Printer,
+  QrCode,
   RefreshCw,
   Save,
   Search,
@@ -40,6 +41,7 @@ import { PostOpA4PrintSheet } from './components/PostOpA4PrintSheet';
 import { PostOpEvaluationForm } from './components/PostOpEvaluationForm';
 import { PreAnestheticForm } from './components/PreAnestheticForm';
 import { RegistryView } from './components/RegistryView';
+import { ShareQrModal } from './components/ShareQrModal';
 import { ThaiDateInput } from './components/ThaiDateInput';
 import {
   auth,
@@ -175,6 +177,7 @@ export default function App() {
   const [isEmailVerified, setIsEmailVerified] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isShareQrOpen, setIsShareQrOpen] = useState(false);
   const [allowOfflineBypass, setAllowOfflineBypass] = useState(false);
   const isVerifiedCloudUser = Boolean(user && isEmailVerified);
   const [cloudRecords, setCloudRecords] = useState<PreAnestheticEvaluation[]>([]);
@@ -2161,14 +2164,22 @@ export default function App() {
 
   if (!isVerifiedCloudUser && !allowOfflineBypass) {
     return (
-      <AuthModal
-        variant="fullscreen"
-        user={user}
-        onGoogleSignIn={handleGoogleSignIn}
-        onAuthSuccess={handleAuthSuccess}
-        onSignOut={handleSignOut}
-        onContinueOffline={() => setAllowOfflineBypass(true)}
-      />
+      <>
+        <AuthModal
+          variant="fullscreen"
+          user={user}
+          onGoogleSignIn={handleGoogleSignIn}
+          onAuthSuccess={handleAuthSuccess}
+          onSignOut={handleSignOut}
+          onContinueOffline={() => setAllowOfflineBypass(true)}
+          onOpenShareQr={() => setIsShareQrOpen(true)}
+        />
+        <ShareQrModal
+          isOpen={isShareQrOpen}
+          onClose={() => setIsShareQrOpen(false)}
+          onNotify={showNotice}
+        />
+      </>
     );
   }
 
@@ -2447,6 +2458,16 @@ export default function App() {
             >
               <Download className="w-3.5 h-3.5 text-pblue-600" />
               ส่งออก CSV
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsShareQrOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-pblue-800 bg-pblue-50 border border-pblue-200 rounded-lg hover:bg-pblue-100 transition-colors whitespace-nowrap shrink-0"
+              title="แสดง QR Code สำหรับสแกนเข้าใช้งานหรือแชร์ให้ทีม"
+            >
+              <QrCode className="w-3.5 h-3.5 text-pblue-600" />
+              QR แชร์แอป
             </button>
           </div>
         </div>
@@ -3115,9 +3136,17 @@ export default function App() {
           onGoogleSignIn={handleGoogleSignIn}
           onAuthSuccess={handleAuthSuccess}
           onSignOut={handleSignOut}
+          onOpenShareQr={() => setIsShareQrOpen(true)}
           onClose={() => setIsAuthModalOpen(false)}
         />
       )}
+
+      {/* Share QR Code Modal */}
+      <ShareQrModal
+        isOpen={isShareQrOpen}
+        onClose={() => setIsShareQrOpen(false)}
+        onNotify={showNotice}
+      />
 
       {/* Toast Notification */}
       {notice && (

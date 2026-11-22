@@ -1180,10 +1180,47 @@ export function createEmptyOxygenSupport(): OxygenSupportData {
   };
 }
 
+export type AntithromboticDrugClass = 'anticoagulant' | 'antiplatelet';
+export type AntithromboticHoldStatus = '' | 'stopped' | 'not_stopped';
+export type AntithromboticStopUnit = 'วัน' | 'ชั่วโมง' | 'สัปดาห์';
+
 export interface SelectedMedicationEntry {
   name: string;
   dose: string;
   regimen: string;
+  holdStatus?: AntithromboticHoldStatus;
+  stopped?: boolean;
+  stopDate?: string;
+  stopDuration?: string;
+  stopUnit?: AntithromboticStopUnit;
+}
+
+export function detectAntithromboticDrugClass(
+  medName: string,
+  groups?: readonly MedicationGroup[],
+): AntithromboticDrugClass | null {
+  const cleaned = medName.trim();
+  if (!cleaned) return null;
+  if (ANTICOAGULANT_TOKEN_RE.test(cleaned) || /ยาต้านการแข็งตัว|anticoag/i.test(cleaned)) {
+    return 'anticoagulant';
+  }
+  if (ANTIPLATELET_TOKEN_RE.test(cleaned) || /ยาต้านเกล็ดเลือด|antiplatelet/i.test(cleaned)) {
+    return 'antiplatelet';
+  }
+  if (groups && groups.length > 0) {
+    const lower = cleaned.toLowerCase();
+    for (const grp of groups) {
+      if (grp.id !== 'anticoag' && grp.id !== 'antiplatelet') continue;
+      const matchesGroup = grp.items.some((item: string) => {
+        const parsedName = parseMedicationEntry(item).name.trim().toLowerCase();
+        return parsedName && (parsedName === lower || lower.startsWith(`${parsedName} `) || parsedName.startsWith(`${lower} `));
+      });
+      if (matchesGroup) {
+        return grp.id === 'anticoag' ? 'anticoagulant' : 'antiplatelet';
+      }
+    }
+  }
+  return null;
 }
 
 function normalizeDoseDisplay(rawDose: string): string {
@@ -1195,9 +1232,68 @@ function normalizeDoseDisplay(rawDose: string): string {
   return trimmed;
 }
 
+function normalizeStopUnit(rawUnit: string | undefined): AntithromboticStopUnit {
+  if (rawUnit === 'ชั่วโมง' || rawUnit === 'ชม.' || rawUnit === 'ชม') return 'ชั่วโมง';
+  if (rawUnit === 'สัปดาห์') return 'สัปดาห์';
+  return 'วัน';
+}
+
+const MEDICATION_NOT_STOPPED_BRACKET_RE = /\s*\[ไม่หยุดยา(?:ก่อนผ่าตัด)?\]\s*$/;
+const MEDICATION_STOP_BRACKET_RE = /\s*\[หยุดยา([^\]]*)\]\s*$/;
+
 export function parseMedicationEntry(raw: string): SelectedMedicationEntry {
-  const text = raw.trim();
+  let text = raw.trim();
   if (!text) return { name: '', dose: '', regimen: '' };
+
+  let holdStatus: AntithromboticHoldStatus = '';
+  let stopped = false;
+  let stopDate = '';
+  let stopDuration = '';
+  let stopUnit: AntithromboticStopUnit = 'วัน';
+
+  const notStoppedMatch = text.match(MEDICATION_NOT_STOPPED_BRACKET_RE);
+  if (notStoppedMatch) {
+    holdStatus = 'not_stopped';
+    text = text.slice(0, notStoppedMatch.index).trim();
+  } else {
+    const stopMatch = text.match(MEDICATION_STOP_BRACKET_RE);
+    if (stopMatch) {
+      holdStatus = 'stopped';
+      stopped = true;
+      let inner = (stopMatch[1] ?? '').trim();
+      const dateMatch = inner.match(
+        /ตั้งแต่\s*(\d{1,2}[/.-]\d{1,2}[/.-]\d{4}|\d{4}-\d{2}-\d{2})/,
+      );
+      if (dateMatch) {
+        stopDate = parseThaiInputToIsoDate(dateMatch[1]) ?? '';
+        inner = inner.replace(dateMatch[0], '').trim();
+      }
+      const durMatch = inner.match(/(\d+(?:\.\d+)?)\s*(วัน|ชั่วโมง|ชม\.?|สัปดาห์)/);
+      if (durMatch) {
+        stopDuration = durMatch[1];
+        stopUnit = normalizeStopUnit(durMatch[2]);
+      } else {
+        const cleanedRest = inner
+          .replace(/[()]/g, '')
+          .replace(/ก่อนผ่าตัด/g, '')
+          .trim();
+        if (cleanedRest) {
+          stopDuration = cleanedRest;
+        }
+      }
+      text = text.slice(0, stopMatch.index).trim();
+    }
+  }
+
+  const stopMeta: Pick<
+    SelectedMedicationEntry,
+    'holdStatus' | 'stopped' | 'stopDate' | 'stopDuration' | 'stopUnit'
+  > =
+    holdStatus === 'not_stopped'
+      ? { holdStatus: 'not_stopped', stopped: false }
+      : stopped
+        ? { holdStatus: 'stopped', stopped: true, stopDate, stopDuration, stopUnit }
+        : {};
 
   // Pattern 1: "Name (5) 1x1" or "Name (500 mg) 1x2 pc"
   const parenMatch = text.match(/^([^(]+?)\s*\(([^)]+)\)\s*(.*)$/);
@@ -1208,6 +1304,7 @@ export function parseMedicationEntry(raw: string): SelectedMedicationEntry {
         name: parenMatch[1].trim(),
         dose: normalizeDoseDisplay(inside),
         regimen: parenMatch[3].trim(),
+        ...stopMeta,
       };
     }
   }
@@ -1219,6 +1316,7 @@ export function parseMedicationEntry(raw: string): SelectedMedicationEntry {
       name: inlineDoseMatch[1].trim(),
       dose: inlineDoseMatch[2].trim(),
       regimen: inlineDoseMatch[3].trim(),
+      ...stopMeta,
     };
   }
 
@@ -1229,10 +1327,11 @@ export function parseMedicationEntry(raw: string): SelectedMedicationEntry {
       name: regOnlyMatch[1].trim(),
       dose: '',
       regimen: regOnlyMatch[2].trim(),
+      ...stopMeta,
     };
   }
 
-  return { name: text, dose: '', regimen: '' };
+  return { name: text, dose: '', regimen: '', ...stopMeta };
 }
 
 export function formatMedicationEntry(entry: SelectedMedicationEntry): string {
@@ -1240,7 +1339,17 @@ export function formatMedicationEntry(entry: SelectedMedicationEntry): string {
   const d = entry.dose.trim();
   const r = entry.regimen.trim();
   if (!n) return '';
-  return `${n}${d ? ` (${d})` : ''}${r ? ` ${r}` : ''}`;
+  const base = `${n}${d ? ` (${d})` : ''}${r ? ` ${r}` : ''}`;
+  if (entry.holdStatus === 'not_stopped') {
+    return `${base} [ไม่หยุดยา]`;
+  }
+  const isStopped = entry.holdStatus === 'stopped' || Boolean(entry.stopped);
+  if (!isStopped) return base;
+  const thaiStopDate = entry.stopDate ? formatThaiDateBE(entry.stopDate) : '';
+  if (thaiStopDate) {
+    return `${base} [หยุดยาตั้งแต่ ${thaiStopDate}]`;
+  }
+  return `${base} [หยุดยาก่อนผ่าตัด]`;
 }
 
 export function getMedicationLines(medicationText: string | undefined): string[] {
@@ -4704,19 +4813,31 @@ export function generateAutoProblemEntries(
     generalRiskItems.push({ text: 'Emergency (Full stomach risk)', score: 84 });
   }
   if (history.medication.trim()) {
+    const parsedMeds = parseMedicationList(history.medication);
     const matchedAnti = ANTITHROMBOTIC_DRUG_PATTERNS.filter((item) =>
       item.re.test(history.medication),
     );
     if (matchedAnti.length > 0) {
+      const formatAntiLabel = (pattern: (typeof ANTITHROMBOTIC_DRUG_PATTERNS)[number]): string => {
+        const entry = parsedMeds.find((e) => pattern.re.test(e.name));
+        if (entry?.holdStatus === 'not_stopped') {
+          return `${pattern.label} ไม่หยุดยา`;
+        }
+        if (entry?.holdStatus === 'stopped' || entry?.stopped) {
+          const thaiDate = entry.stopDate ? formatThaiDateBE(entry.stopDate) : '';
+          return thaiDate ? `${pattern.label} หยุดตั้งแต่ ${thaiDate}` : `${pattern.label} หยุดยาแล้ว`;
+        }
+        return pattern.label;
+      };
       const anticoagMatched = matchedAnti.filter((m) => m.drugClass === 'anticoagulant');
       const antiplateletMatched = matchedAnti.filter((m) => m.drugClass === 'antiplatelet');
       const hasHighRisk = matchedAnti.some((m) => m.highRisk);
       const parts: string[] = [];
       if (anticoagMatched.length > 0) {
-        parts.push(`On Anticoagulant (${anticoagMatched.map((m) => m.label).join(', ')})`);
+        parts.push(`On Anticoagulant (${anticoagMatched.map(formatAntiLabel).join(', ')})`);
       }
       if (antiplateletMatched.length > 0) {
-        parts.push(`On Antiplatelet (${antiplateletMatched.map((m) => m.label).join(', ')})`);
+        parts.push(`On Antiplatelet (${antiplateletMatched.map(formatAntiLabel).join(', ')})`);
       }
       generalRiskItems.push({
         text: parts.join(' + '),

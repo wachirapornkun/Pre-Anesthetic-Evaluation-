@@ -20,6 +20,7 @@ import {
   LogIn,
   LogOut,
   Mail,
+  QrCode,
   RefreshCw,
   ShieldCheck,
   UserPlus,
@@ -45,6 +46,7 @@ interface AuthViewProps {
   onAuthSuccess: (user: User) => void | Promise<void>;
   onSignOut?: () => Promise<void>;
   onContinueOffline?: () => void;
+  onOpenShareQr?: () => void;
   onClose?: () => void;
 }
 
@@ -55,6 +57,7 @@ export function AuthModal({
   onAuthSuccess,
   onSignOut,
   onContinueOffline,
+  onOpenShareQr,
   onClose,
 }: AuthViewProps) {
   const [mode, setMode] = useState<AuthMode>('login');
@@ -747,17 +750,29 @@ export function AuthModal({
               className="inline-flex items-center gap-1.5 text-pblue-800 hover:text-prose-800 font-medium hover:underline disabled:opacity-50"
             >
               <Wifi className={`w-3.5 h-3.5 ${isRunningDiag ? 'animate-pulse' : ''}`} />
-              {isRunningDiag ? 'กำลังตรวจสอบการเชื่อมต่อ...' : 'เชื่อมต่อไม่ได้? ทดสอบการเชื่อมต่อ Firebase'}
+              {isRunningDiag ? 'กำลังตรวจสอบการเชื่อมต่อ...' : 'ทดสอบการเชื่อมต่อ Firebase'}
             </button>
-            {variant === 'fullscreen' && onContinueOffline && !needsEmailVerification && (
-              <button
-                type="button"
-                onClick={onContinueOffline}
-                className="text-slate-500 hover:text-slate-800 underline"
-              >
-                ใช้งานออฟไลน์ชั่วคราว
-              </button>
-            )}
+            <div className="flex items-center gap-3">
+              {onOpenShareQr && (
+                <button
+                  type="button"
+                  onClick={onOpenShareQr}
+                  className="inline-flex items-center gap-1 text-ppink-800 hover:text-prose-800 font-semibold hover:underline"
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  QR แชร์แอป
+                </button>
+              )}
+              {variant === 'fullscreen' && onContinueOffline && !needsEmailVerification && (
+                <button
+                  type="button"
+                  onClick={onContinueOffline}
+                  className="text-slate-500 hover:text-slate-800 underline"
+                >
+                  ใช้งานออฟไลน์ชั่วคราว
+                </button>
+              )}
+            </div>
           </div>
 
           {diagResult && (

@@ -224,8 +224,8 @@ export function ElectiveMonthlyVisitChart({
     : null;
 
   // Chart geometry
-  const chartHeight = 250;
-  const padTop = 30;
+  const chartHeight = 254;
+  const padTop = 34;
   const padRight = 20;
   const padBottom = 50;
   const padLeft = 44;
@@ -238,7 +238,7 @@ export function ElectiveMonthlyVisitChart({
 
   const yTicks = [0, 25, 50, 75, 100];
   const yForPct = (pct: number) => padTop + plotHeight * (1 - Math.max(0, Math.min(100, pct)) / 100);
-  const target80Y = yForPct(80);
+  const target100Y = yForPct(100);
 
   return (
     <div className="bg-white border border-pborder rounded-xl p-5 space-y-4">
@@ -282,9 +282,9 @@ export function ElectiveMonthlyVisitChart({
               <span className="w-3 h-3 rounded-xs bg-pgreen-400 inline-block" />
               <span>เยี่ยม Post-op (%)</span>
             </span>
-            <span className="inline-flex items-center gap-1.5 text-slate-500">
-              <span className="w-4 border-t border-dashed border-prose-300 inline-block" />
-              <span>เกณฑ์ 80%</span>
+            <span className="inline-flex items-center gap-1.5 text-prose-700 font-medium">
+              <span className="w-4 border-t-[1.5px] border-dashed border-prose-400 inline-block" />
+              <span>เกณฑ์ 100%</span>
             </span>
           </div>
         </div>
@@ -302,12 +302,30 @@ export function ElectiveMonthlyVisitChart({
             เยี่ยม Pre-op รวม:{' '}
             <strong className="text-pblue-800 text-sm">{overallPrePct.toFixed(1)}%</strong>{' '}
             <span className="text-slate-500">({totals.pre}/{totals.elective})</span>
+            {totals.elective > 0 && (
+              <span
+                className={`ml-1.5 font-sans text-[11px] font-semibold ${
+                  overallPrePct >= 100 ? 'text-pgreen-800' : 'text-prose-700'
+                }`}
+              >
+                {overallPrePct >= 100 ? '✓ ผ่านเกณฑ์ 100%' : '(เกณฑ์ 100%)'}
+              </span>
+            )}
           </span>
           <span className="text-slate-300" aria-hidden="true">|</span>
           <span>
             เยี่ยม Post-op รวม:{' '}
             <strong className="text-pgreen-800 text-sm">{overallPostPct.toFixed(1)}%</strong>{' '}
             <span className="text-slate-500">({totals.post}/{totals.elective})</span>
+            {totals.elective > 0 && (
+              <span
+                className={`ml-1.5 font-sans text-[11px] font-semibold ${
+                  overallPostPct >= 100 ? 'text-pgreen-800' : 'text-prose-700'
+                }`}
+              >
+                {overallPostPct >= 100 ? '✓ ผ่านเกณฑ์ 100%' : '(เกณฑ์ 100%)'}
+              </span>
+            )}
           </span>
         </div>
 
@@ -350,20 +368,23 @@ export function ElectiveMonthlyVisitChart({
                 const y = yForPct(tick);
                 return (
                   <g key={tick}>
-                    <line
-                      x1={padLeft}
-                      y1={y}
-                      x2={padLeft + plotWidth}
-                      y2={y}
-                      stroke={tick === 0 ? '#cbd5e1' : '#e2e8f0'}
-                      strokeWidth={tick === 0 ? 1.2 : 1}
-                    />
+                    {tick !== 100 && (
+                      <line
+                        x1={padLeft}
+                        y1={y}
+                        x2={padLeft + plotWidth}
+                        y2={y}
+                        stroke={tick === 0 ? '#cbd5e1' : '#e2e8f0'}
+                        strokeWidth={tick === 0 ? 1.2 : 1}
+                      />
+                    )}
                     <text
                       x={padLeft - 8}
                       y={y + 4}
                       textAnchor="end"
                       fontSize={10.5}
-                      fill="#64748b"
+                      fontWeight={tick === 100 ? 700 : 400}
+                      fill={tick === 100 ? '#944b5c' : '#64748b'}
                       fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
                     >
                       {tick}%
@@ -372,25 +393,25 @@ export function ElectiveMonthlyVisitChart({
                 );
               })}
 
-              {/* 80% Benchmark Dashed Line */}
+              {/* 100% Benchmark Dashed Line */}
               <line
                 x1={padLeft}
-                y1={target80Y}
+                y1={target100Y}
                 x2={padLeft + plotWidth}
-                y2={target80Y}
-                stroke="#94a3b8"
-                strokeWidth={1.1}
-                strokeDasharray="4 4"
+                y2={target100Y}
+                stroke="#c98392"
+                strokeWidth={1.35}
+                strokeDasharray="5 4"
               />
               <text
                 x={padLeft + plotWidth - 2}
-                y={target80Y - 4}
+                y={target100Y - 8}
                 textAnchor="end"
-                fontSize={9.5}
-                fill="#64748b"
-                fontWeight={600}
+                fontSize={10}
+                fill="#944b5c"
+                fontWeight={700}
               >
-                80%
+                เกณฑ์ 100%
               </text>
 
               {/* Grouped Month Columns */}

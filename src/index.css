@@ -179,13 +179,12 @@
     display: flex !important;
     flex-direction: column !important;
     width: 100% !important;
-    height: var(--bph-print-page-h, 295mm) !important;
-    max-height: var(--bph-print-page-h, 295mm) !important;
+    min-height: var(--bph-print-page-h, 295mm) !important;
+    height: auto !important;
+    max-height: none !important;
     padding: var(--bph-print-pad, 7mm 8mm) !important;
     box-sizing: border-box !important;
-    break-inside: avoid;
-    page-break-inside: avoid;
-    overflow: hidden;
+    overflow: visible !important;
   }
 
   .a4-page-break-before {

@@ -5130,33 +5130,6 @@ export function PreAnestheticForm({
                     );
                   })}
                 </div>
-                <span className="text-xs text-slate-400">|</span>
-                <span className="text-xs font-medium text-slate-600">Rh</span>
-                <div className="inline-flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      updateLabPatch({ bloodRh: lab.bloodRh === 'positive' ? '' : 'positive' })
-                    }
-                    className={`${radioBtn(lab.bloodRh === 'positive')} font-mono`}
-                  >
-                    Rh+
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      updateLabPatch({ bloodRh: lab.bloodRh === 'negative' ? '' : 'negative' })
-                    }
-                    className={`${radioBtn(lab.bloodRh === 'negative', 'danger')} font-mono`}
-                  >
-                    Rh-
-                  </button>
-                </div>
-                {lab.bloodRh === 'negative' && (
-                  <span className="text-[11px] font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded">
-                    เลือดหายาก (Rh-)
-                  </span>
-                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
@@ -5295,7 +5268,7 @@ export function PreAnestheticForm({
               })}
             </div>
             <textarea
-              rows={5}
+              rows={4}
               value={fd.consult}
               onChange={(e) => updateFormData({ consult: e.target.value })}
               placeholder="รายละเอียดความเห็นจากแพทย์อายุรกรรม / โรคหัวใจ (Med/Cardio clearance, คำแนะนำก่อนผ่าตัด)..."

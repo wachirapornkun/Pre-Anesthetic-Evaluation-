@@ -125,11 +125,11 @@ export function PostOpA4PrintSheet({
         </span>
       </div>
 
-      {/* Main Bordered Table matching ANE-FM-006-01 (Fills 1 Full A4 Page) */}
-      <div className="border-[1.5px] border-slate-900 flex-1 flex flex-col min-h-0">
-        <div className="grid grid-cols-2 border-b border-slate-900 flex-1 min-h-0">
+      {/* Main Bordered Table matching ANE-FM-006-01 (Fills 1 Full A4 Page without overlap) */}
+      <div className="border-[1.5px] border-slate-900 grow shrink-0 flex flex-col">
+        <div className="grid grid-cols-2 border-b border-slate-900 grow shrink-0">
           {/* Left 35 Complication rows — stretches cleanly to fill full column height */}
-          <div className="border-r border-slate-900 flex flex-col h-full">
+          <div className="border-r border-slate-900 flex flex-col min-w-0">
             <table className="w-full h-full border-collapse">
               <thead>
                 <tr className="border-b border-slate-900 bg-slate-100 font-bold text-[11px]">
@@ -147,7 +147,7 @@ export function PostOpA4PrintSheet({
           </div>
 
           {/* Right column */}
-          <div className="flex flex-col h-full">
+          <div className="flex flex-col min-w-0">
             <table className="w-full border-collapse">
               <thead>
                 <tr className="border-b border-slate-900 bg-slate-100 font-bold text-[11px]">

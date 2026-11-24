@@ -237,14 +237,12 @@ export function buildStandalonePrintableHtml(params: {
       .bph-standalone-sheet-host .print-only-sheet.a4-single-page,
       .bph-standalone-sheet-host .print-only-sheet.pre-op-single-a4,
       .bph-standalone-sheet-host .print-only-sheet.post-op-single-a4 {
-        height: ${pageHeightCss} !important;
-        max-height: ${pageHeightCss} !important;
-        min-height: 0 !important;
+        min-height: ${pageHeightCss} !important;
+        height: auto !important;
+        max-height: none !important;
         padding: ${marginCss} !important;
         box-sizing: border-box !important;
-        break-inside: avoid !important;
-        page-break-inside: avoid !important;
-        overflow: hidden !important;
+        overflow: visible !important;
       }
       .bph-standalone-sheet-host .a4-page-break-before {
         margin-top: 0 !important;

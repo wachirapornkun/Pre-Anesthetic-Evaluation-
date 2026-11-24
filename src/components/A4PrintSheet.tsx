@@ -3,7 +3,6 @@ import {
   BLOOD_PREP_STATUS_OPTIONS,
   computeBloodGasPfRatio,
   CONSULT_TYPE_OPTIONS,
-  formatBloodGroup,
   formatDrugAddictionDetail,
   formatDurationLabel,
   formatOxygenSupportSummary,
@@ -40,12 +39,22 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
   const ap = fd.anestheticPlan;
   const medicationLines = getMedicationLines(h.medication);
 
-  const mark = (active: boolean, text: string, keyProp?: string) => (
-    <span key={keyProp} className="inline-flex items-center gap-0.5 mr-2 whitespace-nowrap">
-      <span className="font-mono">{active ? '●' : '○'}</span>
-      <span className={active ? 'font-bold underline' : ''}>{text}</span>
-    </span>
-  );
+  const mark = (active: boolean, text: string, keyProp?: string) => {
+    const allowWrap = text.length > 18;
+    return (
+      <span
+        key={keyProp}
+        className={`inline-flex items-baseline gap-0.5 mr-2 ${
+          allowWrap ? 'max-w-full break-words' : 'whitespace-nowrap'
+        }`}
+      >
+        <span className="font-mono shrink-0">{active ? '●' : '○'}</span>
+        <span className={`${active ? 'font-bold underline' : ''} ${allowWrap ? 'min-w-0 break-words' : ''}`}>
+          {text}
+        </span>
+      </span>
+    );
+  };
 
   const box = (active: boolean, text: string) => (
     <span className="inline-flex items-center gap-1 mr-2 whitespace-nowrap">
@@ -119,7 +128,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
           : 'hidden print-only-sheet a4-single-page pre-op-single-a4 flex-col text-[10.3px] leading-[1.24] text-black'
       }
     >
-      <div className="border-[1.5px] border-slate-900 flex-1 flex flex-col min-h-0">
+      <div className="border-[1.5px] border-slate-900 grow shrink-0 flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-center gap-3 py-1.5 px-3 border-b-[1.5px] border-slate-900 shrink-0">
           <BphLogo className="w-8 h-8 shrink-0" />
@@ -221,12 +230,12 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
           )}
         </div>
 
-        {/* Two Columns — Stretches evenly to fill full A4 height */}
-        <div className="grid grid-cols-2 border-b border-slate-900 flex-1 min-h-0">
+        {/* Two Columns — Stretches evenly without ever crushing or overlapping */}
+        <div className="grid grid-cols-2 border-b border-slate-900 grow shrink-0">
           {/* Left Column */}
-          <div className="border-r border-slate-900 flex flex-col divide-y divide-slate-900 h-full min-h-0">
+          <div className="border-r border-slate-900 flex flex-col divide-y divide-slate-900 min-w-0">
             {/* 1. History */}
-            <div className="p-2 space-y-1 flex-1 flex flex-col">
+            <div className="p-2 space-y-1 grow shrink-0 flex flex-col min-w-0">
               <div className="space-y-1">
                 <div className="font-bold text-[11px]">1. History</div>
                 {/* 1.1 Present illness — Always 2 dotted writing lines */}
@@ -270,7 +279,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-1.5 border border-slate-400 p-1">
-                    <div className="space-y-0.5">
+                    <div className="space-y-0.5 min-w-0">
                       <div>
                         {mark(
                           h.dm,
@@ -343,7 +352,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                         </div>
                       )}
                     </div>
-                    <div className="border-l border-slate-400 pl-1.5">
+                    <div className="border-l border-slate-400 pl-1.5 min-w-0">
                       <div className="font-semibold">Medication:</div>
                       {renderDottedLines(medicationLines, 7, {
                         rowHeightClass: 'min-h-[14px]',
@@ -370,30 +379,30 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                 </div>
               </div>
 
-              <div className="space-y-0.5">
-                <div className="flex items-baseline flex-nowrap gap-x-1 whitespace-nowrap text-[9.5px]">
-                  <span className="font-semibold text-[10px]">1.6 Drinking:</span>
-                  <span className="inline-flex items-center gap-0.5">
+              <div className="space-y-0.5 min-w-0">
+                <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0.5 text-[9.5px]">
+                  <span className="font-semibold text-[10px] whitespace-nowrap">1.6 Drinking:</span>
+                  <span className="inline-flex items-center gap-0.5 whitespace-nowrap">
                     <span className="font-mono text-[10px]">
                       {h.drinkingStatus === 'no' ? '●' : '○'}
                     </span>
                     <span className={h.drinkingStatus === 'no' ? 'font-bold underline' : ''}>No</span>
                   </span>
-                  <span className="inline-flex items-center gap-0.5">
+                  <span className="inline-flex items-center gap-0.5 whitespace-nowrap">
                     <span className="font-mono text-[10px]">
                       {h.drinkingStatus === 'yes' ? '●' : '○'}
                     </span>
                     <span className={h.drinkingStatus === 'yes' ? 'font-bold underline' : ''}>Yes</span>
                   </span>
-                  <span>ปริมาณ</span>
-                  {writeBlank(h.drinkingAmount, 'min-w-[44px] flex-1')}
+                  <span className="whitespace-nowrap">ปริมาณ</span>
+                  {writeBlank(h.drinkingAmount, 'min-w-[38px] flex-1')}
                   {writeBlank(h.drinkingDaysPerWeek, 'min-w-[18px] text-center')}
-                  <span>วัน/wk</span>
-                  <span>จำนวน</span>
+                  <span className="whitespace-nowrap">วัน/wk</span>
+                  <span className="whitespace-nowrap">จำนวน</span>
                   {writeBlank(h.drinkingYears, 'min-w-[18px] text-center')}
-                  <span>{h.drinkingDurationUnit === 'months' ? 'เดือน' : 'ปี'}</span>
+                  <span className="whitespace-nowrap">{h.drinkingDurationUnit === 'months' ? 'เดือน' : 'ปี'}</span>
                   {(h.drinkingQuit || h.drinkingQuitDuration?.trim()) && (
-                    <span>
+                    <span className="whitespace-nowrap">
                       ·เลิก {formatDurationLabel(h.drinkingQuitDuration || '', h.drinkingQuitUnit)}
                     </span>
                   )}
@@ -503,9 +512,9 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
           </div>
 
           {/* Right Column */}
-          <div className="flex flex-col divide-y divide-slate-900 h-full min-h-0">
+          <div className="flex flex-col divide-y divide-slate-900 min-w-0">
             {/* 2. Physical examination — Spacious pen-writable Vital Signs & Anthropometrics */}
-            <div className="p-2 space-y-1 flex-1">
+            <div className="p-2 space-y-1 grow shrink-0 min-w-0">
               <div className="font-bold text-[11px]">2. Physical examination</div>
               <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 leading-[1.35]">
                 <span>
@@ -592,18 +601,12 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                     </div>
                   </div>
                   <DentalArchBadge
-                    className="w-[68px] h-[43px] -mt-1 -mb-1 shrink-0"
+                    className="w-[64px] h-[40px] shrink-0 self-center"
                     missingTeeth={p.missingTeeth || []}
                     looseTeeth={p.looseTeeth || []}
                   />
                 </div>
-                <div
-                  className={
-                    !p.neckMovementDetail && !p.thyromentalDistanceDetail
-                      ? 'whitespace-nowrap'
-                      : ''
-                  }
-                >
+                <div className="leading-[1.35]">
                   Neck movement {mark(p.neckMovement === 'normal', 'Normal')}
                   {mark(p.neckMovement === 'limited', 'Limited')}
                   {p.neckMovementDetail && <span>({p.neckMovementDetail}) </span>}
@@ -748,16 +751,19 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                     ))}
                 </div>
               )}
-              <div className="space-y-0.5">
-                <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-                  <span>
-                    Group เลือด {writeBlank(formatBloodGroup(lab.bloodGroup, lab.bloodRh), 'min-w-[34px]', { mono: true })}
+              <div className="space-y-0.5 min-w-0">
+                <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0.5 text-[9.6px]">
+                  <span className="whitespace-nowrap">
+                    Group เลือด {writeBlank(lab.bloodGroup, 'min-w-[20px]', { mono: true })}
                   </span>
-                  <span>· {box(Boolean(lab.prepTs), 'T&S')}</span>
-                  <span>PRC {writeBlank(lab.prepPrc, 'min-w-[24px]', { mono: true })}u</span>
-                  <span>FFP {writeBlank(lab.prepFfp, 'min-w-[24px]', { mono: true })}u</span>
-                  <span>Plt {writeBlank(lab.prepPlt, 'min-w-[24px]', { mono: true })}u</span>
-                  <span>Cryo {writeBlank(lab.prepCryo, 'min-w-[24px]', { mono: true })}u</span>
+                  <span className="whitespace-nowrap">
+                    · <span className="font-mono text-[10px]">{lab.prepTs ? '☑' : '☐'}</span>{' '}
+                    <span className={lab.prepTs ? 'font-bold' : ''}>T&amp;S</span>
+                  </span>
+                  <span className="whitespace-nowrap">PRC {writeBlank(lab.prepPrc, 'min-w-[18px]', { mono: true })}u</span>
+                  <span className="whitespace-nowrap">FFP {writeBlank(lab.prepFfp, 'min-w-[18px]', { mono: true })}u</span>
+                  <span className="whitespace-nowrap">Plt {writeBlank(lab.prepPlt, 'min-w-[18px]', { mono: true })}u</span>
+                  <span className="whitespace-nowrap">Cryo {writeBlank(lab.prepCryo, 'min-w-[18px]', { mono: true })}u</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-1">
                   {BLOOD_PREP_STATUS_OPTIONS.map((opt) => (
@@ -777,7 +783,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
               </div>
             </div>
 
-            {/* 6. Consult Med/Cardio — Always 5 full-width dotted writing lines */}
+            {/* 6. Consult Med/Cardio — Always 4 full-width dotted writing lines */}
             <div className="p-2 space-y-1 shrink-0">
               <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
                 <div className="font-bold text-[11px]">6. Consult Med/Cardio</div>
@@ -795,7 +801,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                   ))}
                 </div>
               </div>
-              {renderDottedLines(consultTextLines, 5, {
+              {renderDottedLines(consultTextLines, 4, {
                 rowHeightClass: 'min-h-[17px]',
                 keyPrefix: 'consult',
               })}

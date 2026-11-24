@@ -3,7 +3,6 @@ import {
   computeClinicalSummary,
   CONSULT_TYPE_OPTIONS,
   formatBloodGasSummary,
-  formatBloodGroup,
   formatConsultSummary,
   formatDrinkingDetail,
   formatDrugAddictionDetail,
@@ -164,7 +163,7 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
       formatBloodGasSummary(fd.laboratory),
       formatConsultSummary(fd.consultTypes, fd.consult),
       summary.planSummary,
-      formatBloodGroup(fd.laboratory.bloodGroup, fd.laboratory.bloodRh),
+      fd.laboratory.bloodGroup || '',
       summary.bloodPrepSummary,
       fd.postAnesthesia.complicationStatus === 'yes'
         ? fd.postAnesthesia.complicationDetail || summarizePostOpComplications(fd.postOpComplication) || 'Yes'
@@ -512,7 +511,8 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
                 .join(' · ')}</div>`
             : ''
         }
-        <div class="field"><strong>Group เลือด:</strong> ${esc(formatBloodGroup(lab.bloodGroup, lab.bloodRh) || '-')} · <strong>Blood component prepare:</strong> ${checkMark(Boolean(lab.prepTs), 'T&S')} PRC ${esc(lab.prepPrc || '-')} u · FFP ${esc(lab.prepFfp || '-')} u · Plt ${esc(lab.prepPlt || '-')} u · Cryo ${esc(lab.prepCryo || '-')} u<br/>${BLOOD_PREP_STATUS_OPTIONS.map((opt) =>
+        <div class="field" style="white-space:nowrap;font-size:10px;"><strong>Group เลือด</strong> ${blankSlot(lab.bloodGroup, 24)} · ${checkMark(Boolean(lab.prepTs), 'T&S')} PRC ${blankSlot(lab.prepPrc, 20)}u FFP ${blankSlot(lab.prepFfp, 20)}u Plt ${blankSlot(lab.prepPlt, 20)}u Cryo ${blankSlot(lab.prepCryo, 20)}u</div>
+        <div class="field">${BLOOD_PREP_STATUS_OPTIONS.map((opt) =>
           checkMark(
             (lab.prepStatuses || []).includes(opt.value),
             opt.value === 'other' && lab.prepStatusDetail
@@ -531,7 +531,7 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
         )
           .map((opt) => checkMark((fd.consultTypes || []).includes(opt.value), opt.shortLabel))
           .join(' ')}</div>
-        <div class="field">${dottedRows((fd.consult || '').split(/\r?\n/), 5, false)}</div>
+        <div class="field">${dottedRows((fd.consult || '').split(/\r?\n/), 4, false)}</div>
       </div>
     </div>
 

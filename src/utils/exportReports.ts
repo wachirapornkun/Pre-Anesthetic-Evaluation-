@@ -437,7 +437,7 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
 
         <div class="sec-title" style="margin-top:6px;">5. Premedication</div>
         <div class="field">${dottedRows(pm.items || [], 4, true)}</div>
-        <div class="field" style="margin-top:4px;padding:4px 6px;border:1.5px solid #0f172a;background:#fffbeb;font-size:14px;font-weight:800;color:#991b1b;">NPO: ${esc(pm.npoTime || '__________________')}${
+        <div class="field" style="margin-top:3px;padding:2px 6px;border:1px solid #0f172a;background:#fffbeb;font-size:11px;font-weight:700;color:#0f172a;">NPO: ${esc(pm.npoTime || '__________________')}${
           pm.lastMealTime || pm.lastWaterTime
             ? `<div style="font-size:11px;font-weight:600;color:#78350f;margin-top:2px;">${[
                 pm.lastMealTime ? `อาหารล่าสุด ${esc(pm.lastMealTime)} น.` : '',
@@ -531,7 +531,7 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
         )
           .map((opt) => checkMark((fd.consultTypes || []).includes(opt.value), opt.shortLabel))
           .join(' ')}</div>
-        <div class="field">${dottedRows((fd.consult || '').split(/\r?\n/), 6, false)}</div>
+        <div class="field">${dottedRows((fd.consult || '').split(/\r?\n/), 5, false)}</div>
       </div>
     </div>
 

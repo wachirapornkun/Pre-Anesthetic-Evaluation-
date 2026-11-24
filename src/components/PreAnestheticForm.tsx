@@ -5295,7 +5295,7 @@ export function PreAnestheticForm({
               })}
             </div>
             <textarea
-              rows={6}
+              rows={5}
               value={fd.consult}
               onChange={(e) => updateFormData({ consult: e.target.value })}
               placeholder="รายละเอียดความเห็นจากแพทย์อายุรกรรม / โรคหัวใจ (Med/Cardio clearance, คำแนะนำก่อนผ่าตัด)..."

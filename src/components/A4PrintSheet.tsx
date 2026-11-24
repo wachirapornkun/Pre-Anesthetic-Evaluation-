@@ -456,10 +456,10 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                 rowHeightClass: 'min-h-[17px]',
                 keyPrefix: 'premed',
               })}
-              <div className="mt-1 px-2 py-1 border-[1.5px] border-slate-900 bg-amber-50/70">
-                <div className="text-[13.5px] font-extrabold tracking-wide text-red-800 flex items-baseline gap-1.5">
+              <div className="mt-0.5 px-1.5 py-0.5 border border-slate-800 bg-amber-50/60">
+                <div className="text-[10.5px] font-bold text-slate-950 flex items-baseline gap-1">
                   <span className="shrink-0">NPO:</span>
-                  <span className="flex-1 border-b border-dotted border-red-800/70 px-1 leading-[1.2]">
+                  <span className="flex-1 border-b border-dotted border-slate-700 px-0.5 leading-[1.25]">
                     {pm.npoTime?.trim() || '\u00A0'}
                   </span>
                 </div>
@@ -777,7 +777,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
               </div>
             </div>
 
-            {/* 6. Consult Med/Cardio — Always 6 full-width dotted writing lines */}
+            {/* 6. Consult Med/Cardio — Always 5 full-width dotted writing lines */}
             <div className="p-2 space-y-1 shrink-0">
               <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
                 <div className="font-bold text-[11px]">6. Consult Med/Cardio</div>
@@ -795,7 +795,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                   ))}
                 </div>
               </div>
-              {renderDottedLines(consultTextLines, 6, {
+              {renderDottedLines(consultTextLines, 5, {
                 rowHeightClass: 'min-h-[17px]',
                 keyPrefix: 'consult',
               })}

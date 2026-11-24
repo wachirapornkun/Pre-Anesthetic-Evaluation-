@@ -109,6 +109,7 @@ export function buildStandalonePrintableHtml(params: {
   const { title, bodyHtml, settings, autoPrintOnOpen = true } = params;
   const stylesHtml = collectActiveStylesHtml();
   const marginCss = settings.marginMode === 'narrow' ? '4mm 5mm' : '7mm 8mm';
+  const pageHeightCss = settings.paperSize === 'A5' ? '208mm' : '295mm';
   const colorFilterCss = settings.colorMode === 'bw' ? 'filter: grayscale(100%) contrast(1.08);' : '';
   const scaleCss =
     settings.scalePercent === 95
@@ -125,9 +126,19 @@ export function buildStandalonePrintableHtml(params: {
   <title>${escapeHtmlAttr(title)}</title>
   ${stylesHtml}
   <style>
+    :root {
+      --bph-print-pad: ${marginCss};
+      --bph-print-page-h: ${pageHeightCss};
+    }
     @page {
       size: ${settings.paperSize} portrait;
-      margin: ${marginCss};
+      margin: 0 !important;
+      @top-left { content: none; }
+      @top-center { content: none; }
+      @top-right { content: none; }
+      @bottom-left { content: none; }
+      @bottom-center { content: none; }
+      @bottom-right { content: none; }
     }
     html, body {
       margin: 0;
@@ -181,11 +192,20 @@ export function buildStandalonePrintableHtml(params: {
       padding: 0 !important;
       background: #ffffff !important;
     }
+    .bph-standalone-sheet-host .a4-single-page,
+    .bph-standalone-sheet-host .pre-op-single-a4,
     .bph-standalone-sheet-host .post-op-single-a4,
+    .bph-standalone-sheet-host .print-only-sheet.a4-single-page,
+    .bph-standalone-sheet-host .print-only-sheet.pre-op-single-a4,
     .bph-standalone-sheet-host .print-only-sheet.post-op-single-a4 {
       display: flex !important;
       flex-direction: column !important;
-      min-height: 1050px;
+      min-height: 1060px;
+    }
+    .bph-standalone-sheet-host .a4-page-break-before {
+      margin-top: 24px !important;
+      padding-top: 24px !important;
+      border-top: 2px dashed #cbd5e1 !important;
     }
     @media print {
       html, body {
@@ -207,12 +227,31 @@ export function buildStandalonePrintableHtml(params: {
         ${colorFilterCss}
         ${scaleCss}
       }
+      .bph-standalone-sheet-host .bph-print-test-page {
+        padding: ${marginCss} !important;
+        box-sizing: border-box !important;
+      }
+      .bph-standalone-sheet-host .a4-single-page,
+      .bph-standalone-sheet-host .pre-op-single-a4,
       .bph-standalone-sheet-host .post-op-single-a4,
+      .bph-standalone-sheet-host .print-only-sheet.a4-single-page,
+      .bph-standalone-sheet-host .print-only-sheet.pre-op-single-a4,
       .bph-standalone-sheet-host .print-only-sheet.post-op-single-a4 {
-        height: 277mm !important;
-        max-height: 277mm !important;
+        height: ${pageHeightCss} !important;
+        max-height: ${pageHeightCss} !important;
         min-height: 0 !important;
+        padding: ${marginCss} !important;
+        box-sizing: border-box !important;
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
         overflow: hidden !important;
+      }
+      .bph-standalone-sheet-host .a4-page-break-before {
+        margin-top: 0 !important;
+        padding-top: 0 !important;
+        border-top: none !important;
+        break-before: page !important;
+        page-break-before: always !important;
       }
     }
   </style>

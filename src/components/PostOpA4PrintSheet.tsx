@@ -89,8 +89,8 @@ export function PostOpA4PrintSheet({
       style={pageBreakBefore ? { breakBefore: 'page', pageBreakBefore: 'always' } : undefined}
       className={
         previewMode
-          ? 'post-op-single-a4 flex flex-col bg-white border border-slate-300 shadow-sm mx-auto w-full max-w-[794px] min-h-[1123px] p-6 text-[11px] leading-[1.24] text-slate-950 print:border-0 print:shadow-none print:max-w-none print:min-h-0 print:p-0'
-          : 'hidden print-only-sheet post-op-single-a4 flex-col text-[10.8px] leading-[1.22] text-black'
+          ? `a4-single-page post-op-single-a4 flex flex-col bg-white border border-slate-300 shadow-sm mx-auto w-full max-w-[794px] min-h-[1123px] p-5 text-[11px] leading-[1.24] text-slate-950 print:border-0 print:shadow-none print:max-w-none print:min-h-0 print:p-0 ${pageBreakBefore ? 'a4-page-break-before' : ''}`
+          : `hidden print-only-sheet a4-single-page post-op-single-a4 flex-col text-[10.8px] leading-[1.22] text-black ${pageBreakBefore ? 'a4-page-break-before' : ''}`
       }
     >
       {/* Top Title */}

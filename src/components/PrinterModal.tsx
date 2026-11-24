@@ -495,18 +495,18 @@ export function PrinterModal({
                 [
                   {
                     key: 'pre_op',
-                    title: 'ใบ Pre-op',
-                    desc: 'ANE-FM-002-03 (1 หน้า A4)',
+                    title: 'ด้านหน้า: ใบ Pre-op',
+                    desc: 'ANE-FM-002-03 · เต็ม 1 หน้า A4',
                   },
                   {
                     key: 'post_op',
-                    title: 'ใบ Post-op',
-                    desc: 'ANE-FM-006-01 (1 หน้า A4)',
+                    title: 'ด้านหลัง: ใบ Post-op',
+                    desc: 'ANE-FM-006-01 · เต็ม 1 หน้า A4',
                   },
                   {
                     key: 'both',
-                    title: 'พิมพ์ทั้ง 2 หน้า',
-                    desc: 'Pre-op + Post-op ต่อเนื่อง',
+                    title: '2 ด้าน (หน้า-หลัง)',
+                    desc: 'หน้า 1 Pre-op · หน้า 2 Post-op',
                   },
                 ] as const
               ).map((item) => {
@@ -638,14 +638,18 @@ export function PrinterModal({
               className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-prose-600 rounded-xl hover:bg-prose-700 transition-colors shadow-xs"
             >
               <Printer className="w-4 h-4" />
-              สั่งพิมพ์ออกเครื่องพิมพ์ทันที
+              {selectedSheet === 'pre_op'
+                ? 'พิมพ์ด้านหน้า: Pre-op (1 หน้า A4)'
+                : selectedSheet === 'post_op'
+                  ? 'พิมพ์ด้านหลัง: Post-op (1 หน้า A4)'
+                  : 'พิมพ์ 2 ด้าน (หน้า Pre-op / หลัง Post-op)'}
             </button>
           </div>
 
           {/* Section 4: Hospital Printer Setup Quick Guide */}
           <div className="rounded-xl border border-pyellow-200 bg-pyellow-50/60 p-3 space-y-2 text-[11px] text-pyellow-800">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-semibold">วิธีเลือกเครื่องพิมพ์โรงพยาบาลให้พิมพ์ออกพอดี 1 หน้า A4</span>
+              <span className="font-semibold">วิธีพิมพ์ด้านหน้า Pre-op / ด้านหลัง Post-op ให้เต็ม 1 หน้า A4 พอดี</span>
               <div className="inline-flex rounded-lg border border-pyellow-300 bg-white p-0.5 text-[10.5px]">
                 <button
                   type="button"

@@ -87,9 +87,20 @@
   );
 }
 
+:root {
+  --bph-print-pad: 7mm 8mm;
+  --bph-print-page-h: 295mm;
+}
+
 @page {
   size: A4 portrait;
-  margin: 7mm 8mm;
+  margin: 0 !important;
+  @top-left { content: none; }
+  @top-center { content: none; }
+  @top-right { content: none; }
+  @bottom-left { content: none; }
+  @bottom-center { content: none; }
+  @bottom-right { content: none; }
 }
 
 @media print {
@@ -113,6 +124,12 @@
     margin: 0 !important;
     padding: 0 !important;
     display: block !important;
+  }
+
+  /* Dashboard print keeps clean paper margins while @page margin is 0 */
+  main:not(.bph-has-print-sheet) {
+    padding: var(--bph-print-pad, 7mm 8mm) !important;
+    box-sizing: border-box !important;
   }
 
   .no-print {
@@ -148,16 +165,31 @@
     zoom: 0.9;
   }
 
+  .bph-print-test-page {
+    padding: var(--bph-print-pad, 7mm 8mm) !important;
+    box-sizing: border-box !important;
+  }
+
+  .a4-single-page,
+  .pre-op-single-a4,
   .post-op-single-a4,
+  .print-only-sheet.a4-single-page,
+  .print-only-sheet.pre-op-single-a4,
   .print-only-sheet.post-op-single-a4 {
     display: flex !important;
     flex-direction: column !important;
     width: 100% !important;
-    height: 277mm !important;
-    max-height: 277mm !important;
+    height: var(--bph-print-page-h, 295mm) !important;
+    max-height: var(--bph-print-page-h, 295mm) !important;
+    padding: var(--bph-print-pad, 7mm 8mm) !important;
     box-sizing: border-box !important;
     break-inside: avoid;
     page-break-inside: avoid;
     overflow: hidden;
+  }
+
+  .a4-page-break-before {
+    break-before: page !important;
+    page-break-before: always !important;
   }
 }

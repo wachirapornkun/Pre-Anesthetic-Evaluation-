@@ -2232,7 +2232,8 @@ export default function App() {
       document.head.appendChild(styleEl);
     }
     const marginCss = printerSettings.marginMode === 'narrow' ? '4mm 5mm' : '7mm 8mm';
-    styleEl.textContent = `@page { size: ${printerSettings.paperSize} portrait; margin: ${marginCss}; }`;
+    const pageHeightCss = printerSettings.paperSize === 'A5' ? '208mm' : '295mm';
+    styleEl.textContent = `@page { size: ${printerSettings.paperSize} portrait; margin: 0 !important; @top-left { content: none; } @top-center { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-center { content: none; } @bottom-right { content: none; } } :root { --bph-print-pad: ${marginCss}; --bph-print-page-h: ${pageHeightCss}; }`;
   }, [printerSettings.paperSize, printerSettings.marginMode]);
 
   const handleUpdatePrinterSettings = (next: PrinterSettings) => {
@@ -2620,18 +2621,24 @@ export default function App() {
               type="button"
               onClick={() =>
                 triggerHospitalPrint(
-                  activeTab === 'post_op'
-                    ? 'post_op'
-                    : activeTab === 'print_preview'
-                      ? printSheetMode
-                      : printerSettings.defaultSheet,
+                  activeTab === 'form'
+                    ? 'pre_op'
+                    : activeTab === 'post_op'
+                      ? 'post_op'
+                      : activeTab === 'print_preview'
+                        ? printSheetMode
+                        : printerSettings.defaultSheet,
                 )
               }
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-ppink-800 bg-ppink-50 border border-ppink-200 rounded-lg hover:bg-ppink-100 transition-colors whitespace-nowrap shrink-0"
-              title={`สั่งพิมพ์ทันที (${printerSettings.printerLabel})`}
+              title={`สั่งพิมพ์ทีละหน้าเต็ม A4 (${printerSettings.printerLabel})`}
             >
               <Printer className="w-3.5 h-3.5 text-ppink-600" />
-              พิมพ์ / PDF (1 หน้า A4)
+              {activeTab === 'post_op'
+                ? 'พิมพ์ใบ Post-op (1 หน้า A4)'
+                : activeTab === 'form'
+                  ? 'พิมพ์ใบ Pre-op (1 หน้า A4)'
+                  : 'พิมพ์ / PDF (เต็ม 1 หน้า A4)'}
             </button>
 
             <button
@@ -2908,18 +2915,18 @@ export default function App() {
               <div className="space-y-2">
                 <div>
                   <h2 className="text-sm font-semibold text-prose-800">
-                    ตัวอย่างแบบฟอร์มกระดาษ A4 (Pre-op ANE-FM-002-03 &amp; Post-op ANE-FM-006-01)
+                    ตัวอย่างแบบฟอร์มกระดาษ A4 เต็มหน้า (ด้านหน้า Pre-op · ด้านหลัง Post-op)
                   </h2>
                   <p className="text-xs text-slate-500">
-                    เลือกแบบฟอร์มที่ต้องการดูตัวอย่าง สั่งพิมพ์ หรือบันทึกเป็น PDF ได้ทันที
+                    จัดขนาดเต็ม 1 หน้า A4 พอดีทีละหน้า — สั่งพิมพ์ด้านหน้า (Pre-op) แล้วพลิกกระดาษพิมพ์ด้านหลัง (Post-op) หรือสั่งพิมพ์ 2 หน้าต่อเนื่องแบบ Duplex ได้ทันที
                   </p>
                 </div>
-                <div className="inline-flex items-center gap-1 p-1 bg-ppink-50 border border-ppink-100 rounded-lg">
+                <div className="inline-flex flex-wrap items-center gap-1 p-1 bg-ppink-50 border border-ppink-100 rounded-lg">
                   {(
                     [
-                      { key: 'pre_op', label: 'Pre-op (ANE-FM-002-03)' },
-                      { key: 'post_op', label: 'Post-op (ANE-FM-006-01)' },
-                      { key: 'both', label: 'ทั้ง 2 หน้า' },
+                      { key: 'pre_op', label: 'ด้านหน้า: Pre-op (1 หน้า A4)' },
+                      { key: 'post_op', label: 'ด้านหลัง: Post-op (1 หน้า A4)' },
+                      { key: 'both', label: 'ทั้ง 2 ด้าน (หน้า-หลัง Duplex)' },
                     ] as const
                   ).map((opt) => (
                     <button
@@ -2940,11 +2947,21 @@ export default function App() {
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => exportEvaluationJson(currentForm)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-pborder rounded-lg hover:bg-pblue-50"
+                  onClick={() => triggerHospitalPrint('pre_op')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-pblue-800 bg-pblue-50 border border-pblue-300 rounded-lg hover:bg-pblue-100"
+                  title="สั่งพิมพ์เฉพาะด้านหน้า (ใบ Pre-op เต็ม 1 หน้า A4)"
                 >
-                  <Download className="w-3.5 h-3.5 text-pblue-600" />
-                  ส่งออก JSON
+                  <Printer className="w-3.5 h-3.5 text-pblue-600" />
+                  พิมพ์ด้านหน้า (Pre-op)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => triggerHospitalPrint('post_op')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-pgreen-800 bg-pgreen-50 border border-pgreen-300 rounded-lg hover:bg-pgreen-100"
+                  title="สั่งพิมพ์เฉพาะด้านหลัง (ใบ Post-op เต็ม 1 หน้า A4)"
+                >
+                  <Printer className="w-3.5 h-3.5 text-pgreen-600" />
+                  พิมพ์ด้านหลัง (Post-op)
                 </button>
                 <button
                   type="button"
@@ -2956,8 +2973,16 @@ export default function App() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => exportEvaluationJson(currentForm)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-pborder rounded-lg hover:bg-pblue-50"
+                >
+                  <Download className="w-3.5 h-3.5 text-pblue-600" />
+                  JSON
+                </button>
+                <button
+                  type="button"
                   onClick={() => setIsPrinterModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-pgreen-800 bg-pgreen-50 border border-pgreen-200 rounded-lg hover:bg-pgreen-100"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-pborder rounded-lg hover:bg-pgreen-50"
                 >
                   <Printer className="w-3.5 h-3.5 text-pgreen-600" />
                   ตั้งค่าเครื่องพิมพ์
@@ -2968,7 +2993,11 @@ export default function App() {
                   className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-prose-600 rounded-lg hover:bg-prose-700"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  สั่งพิมพ์ / บันทึก PDF
+                  {printSheetMode === 'pre_op'
+                    ? 'พิมพ์ใบ Pre-op (1 หน้า A4)'
+                    : printSheetMode === 'post_op'
+                      ? 'พิมพ์ใบ Post-op (1 หน้า A4)'
+                      : 'พิมพ์ทั้ง 2 ด้าน (หน้า-หลัง)'}
                 </button>
               </div>
             </div>
@@ -3004,7 +3033,8 @@ export default function App() {
           if (activePrintJob?.mode === 'test_page') {
             return (
               <div ref={printSourceRef} className={printStyleClasses}>
-                <div className="border-2 border-slate-900 p-6 space-y-4 text-black bg-white">
+                <div className="bph-print-test-page">
+                  <div className="border-2 border-slate-900 p-6 space-y-4 text-black bg-white">
                   <div className="border-b-2 border-slate-900 pb-3 text-center space-y-1">
                     <div className="text-lg font-bold">โรงพยาบาลบางพลี · งานวิสัญญีพยาบาล</div>
                     <div className="text-sm font-semibold">
@@ -3040,6 +3070,7 @@ export default function App() {
                   </div>
                   <div className="text-center text-xs font-semibold pt-2">
                     ✓ หากพิมพ์หน้านี้ชัดเจนครบกรอบ แสดงว่าเครื่องพิมพ์พร้อมใช้งานสำหรับใบ Pre-op / Post-op แล้ว
+                  </div>
                   </div>
                 </div>
               </div>

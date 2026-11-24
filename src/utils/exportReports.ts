@@ -275,7 +275,16 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
   <meta charset="utf-8" />
   <title>ANE-FM-002-03 - ${esc(record.patientName || 'Patient')}</title>
   <style>
-    @page { size: A4 portrait; margin: 7mm 8mm; }
+    @page {
+      size: A4 portrait;
+      margin: 0 !important;
+      @top-left { content: none; }
+      @top-center { content: none; }
+      @top-right { content: none; }
+      @bottom-left { content: none; }
+      @bottom-center { content: none; }
+      @bottom-right { content: none; }
+    }
     * { box-sizing: border-box; }
     body { font-family: 'Sarabun', 'Segoe UI', Tahoma, sans-serif; font-size: 11px; color: #111827; margin: 0; padding: 12px; background: #fff; }
     .sheet { width: 100%; max-width: 794px; margin: 0 auto; border: 1.5px solid #1e293b; }
@@ -294,7 +303,7 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
     table.fish { border-collapse: collapse; width: 100%; margin: 3px 0; font-size: 10px; }
     table.fish td { border: 1px solid #475569; padding: 2px 4px; text-align: center; }
     .footer-code { text-align: right; font-size: 9.5px; padding: 3px 8px; color: #334155; }
-    @media print { body { padding: 0; } }
+    @media print { body { padding: 7mm 8mm; } .sheet { max-width: none; } }
   </style>
 </head>
 <body>

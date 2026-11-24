@@ -59,24 +59,24 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
     <div
       className={
         previewMode
-          ? 'bg-white border border-slate-300 shadow-sm mx-auto max-w-[820px] p-4 text-[11px] leading-[1.32] text-slate-950 print:border-0 print:shadow-none print:max-w-none print:p-0'
-          : 'hidden print-only-sheet text-[10.5px] leading-[1.28] text-black'
+          ? 'a4-single-page pre-op-single-a4 flex flex-col bg-white border border-slate-300 shadow-sm mx-auto w-full max-w-[794px] min-h-[1123px] p-5 text-[11px] leading-[1.3] text-slate-950 print:border-0 print:shadow-none print:max-w-none print:min-h-0 print:p-0'
+          : 'hidden print-only-sheet a4-single-page pre-op-single-a4 flex-col text-[10.8px] leading-[1.28] text-black'
       }
     >
-      <div className="border-[1.5px] border-slate-900">
+      <div className="border-[1.5px] border-slate-900 flex-1 flex flex-col min-h-0">
         {/* Header */}
-        <div className="flex items-center justify-center gap-3 py-1.5 px-3 border-b-[1.5px] border-slate-900">
-          <BphLogo className="w-8 h-8 shrink-0" />
+        <div className="flex items-center justify-center gap-3 py-2 px-3 border-b-[1.5px] border-slate-900 shrink-0">
+          <BphLogo className="w-9 h-9 shrink-0" />
           <div className="text-center">
-            <div className="text-[13px] font-bold leading-tight">Bangplee Hospital</div>
-            <div className="text-[11.5px] font-semibold leading-tight">
+            <div className="text-[14.5px] font-bold leading-tight">Bangplee Hospital</div>
+            <div className="text-[12.5px] font-semibold leading-tight">
               Pre Anesthetic Evaluation form
             </div>
           </div>
         </div>
 
         {/* Demographics */}
-        <div className="px-2.5 py-1.5 border-b border-slate-900 space-y-1">
+        <div className="px-2.5 py-2 border-b border-slate-900 space-y-1 shrink-0">
           <div className="flex flex-wrap gap-x-3 gap-y-0.5">
             <span>
               Name: <strong className="underline decoration-dotted">{evaluation.patientName || '________________'}</strong>
@@ -144,13 +144,13 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
           )}
         </div>
 
-        {/* Two Columns */}
-        <div className="grid grid-cols-2 border-b border-slate-900">
+        {/* Two Columns — Stretches evenly to fill full A4 height */}
+        <div className="grid grid-cols-2 border-b border-slate-900 flex-1 min-h-0">
           {/* Left Column */}
-          <div className="border-r border-slate-900 divide-y divide-slate-900">
+          <div className="border-r border-slate-900 flex flex-col divide-y divide-slate-900 h-full min-h-0">
             {/* 1. History */}
-            <div className="p-2 space-y-1">
-              <div className="font-bold text-[11px]">1. History</div>
+            <div className="p-2.5 space-y-1.5 flex-1">
+              <div className="font-bold text-[11.5px]">1. History</div>
               <div>
                 <span className="font-semibold">1.1 Present illness:</span>{' '}
                 <span>{h.presentIllness || '—'}</span>
@@ -269,8 +269,8 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
             </div>
 
             {/* 3. Investigation */}
-            <div className="p-2 space-y-0.5">
-              <div className="font-bold text-[11px]">3. Investigation</div>
+            <div className="p-2.5 space-y-1 shrink-0">
+              <div className="font-bold text-[11.5px]">3. Investigation</div>
               <div>
                 <span className="font-semibold">3.1 Chest x-ray:</span>{' '}
                 {mark(inv.cxrStatus === 'normal', 'Normal')}
@@ -289,8 +289,8 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
             </div>
 
             {/* 5. Premedication */}
-            <div className="p-2 space-y-0.5">
-              <div className="font-bold text-[11px]">5. Premedication</div>
+            <div className="p-2.5 space-y-1 shrink-0">
+              <div className="font-bold text-[11.5px]">5. Premedication</div>
               {pm.items.filter(Boolean).length > 0 ? (
                 pm.items.filter(Boolean).map((it, idx) => (
                   <div key={idx}>
@@ -319,10 +319,10 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
           </div>
 
           {/* Right Column */}
-          <div className="divide-y divide-slate-900">
+          <div className="flex flex-col divide-y divide-slate-900 h-full min-h-0">
             {/* 2. Physical examination */}
-            <div className="p-2 space-y-1">
-              <div className="font-bold text-[11px]">2. Physical examination</div>
+            <div className="p-2.5 space-y-1.5 flex-1">
+              <div className="font-bold text-[11.5px]">2. Physical examination</div>
               <div className="font-mono">
                 BW: <strong>{p.bw || '___'}</strong> kg &nbsp; HT:{' '}
                 <strong>{p.ht || '___'}</strong> cm &nbsp; BMI:{' '}
@@ -399,13 +399,13 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
             </div>
 
             {/* 4. Laboratory Evaluation */}
-            <div className="p-2 space-y-1">
+            <div className="p-2.5 space-y-1 shrink-0">
               {(() => {
                 const effectiveCbcDate = lab.cbcDate || (!lab.chemDate ? lab.labDate : '');
                 const effectiveChemDate = lab.chemDate || (!lab.cbcDate ? lab.labDate : '');
                 return (
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <div className="font-bold text-[11px]">4. Laboratory Evaluation</div>
+                    <div className="font-bold text-[11.5px]">4. Laboratory Evaluation</div>
                     {(effectiveCbcDate || effectiveChemDate) && (
                       <div className="text-[10px] font-mono flex flex-wrap gap-x-2">
                         {effectiveCbcDate && (
@@ -524,8 +524,8 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
             </div>
 
             {/* 6. Consult Med/Cardio */}
-            <div className="p-2 space-y-0.5">
-              <div className="font-bold text-[11px]">6. Consult Med/Cardio</div>
+            <div className="p-2.5 space-y-1 shrink-0">
+              <div className="font-bold text-[11.5px]">6. Consult Med/Cardio</div>
               <div className="flex flex-wrap items-center gap-x-1">
                 {CONSULT_TYPE_OPTIONS.filter(
                   (opt) =>
@@ -545,7 +545,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
         </div>
 
         {/* Lower Sections 7-10 */}
-        <div className="p-2 space-y-1">
+        <div className="p-2.5 space-y-1.5 shrink-0">
           <div>
             <span className="font-bold">7. ASA Classification:</span>{' '}
             {(['I', 'II', 'III', 'IV', 'V', 'VI'] as const).map((cls) =>
@@ -596,7 +596,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                   .join(' · ')
               : '—'}
           </div>
-          <div className="pt-1 mt-1 border-t border-slate-400 flex items-center justify-end gap-4">
+          <div className="pt-1.5 mt-1 border-t border-slate-400 flex items-center justify-end gap-4">
             <span>
               <strong>Summarized by:</strong>{' '}
               <strong>{fd.postAnesthesia.summarizedBy || '________________________'}</strong>
@@ -610,7 +610,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
           </div>
         </div>
       </div>
-      <div className="text-right text-[9.5px] text-slate-600 mt-1">
+      <div className="text-right text-[9.5px] text-slate-600 mt-1 leading-none shrink-0">
         ANE-FM-002-03 อนุมัติใช้วันที่ 21 มิถุนายน 2564
       </div>
     </div>

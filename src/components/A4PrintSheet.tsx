@@ -131,52 +131,73 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
           </div>
         </div>
 
-        {/* Demographics */}
+        {/* Demographics — 3 structured rows */}
         <div className="px-2.5 py-1.5 border-b border-slate-900 space-y-1 shrink-0">
-          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+          {/* Row 1: Patient ID, Ward, สาขา, ห้อง */}
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span>
-              Name: {writeBlank(evaluation.patientName, 'min-w-[135px]')}
+              Name: {writeBlank(evaluation.patientName, 'min-w-[130px]')}
             </span>
             <span>
-              Age: {writeBlank(evaluation.age, 'min-w-[34px]', { mono: true })} yr
+              Age: {writeBlank(evaluation.age, 'min-w-[30px]', { mono: true })} yr
             </span>
             <span>
-              HN: {writeBlank(evaluation.hn, 'min-w-[74px]', { mono: true })}
+              HN: {writeBlank(evaluation.hn, 'min-w-[66px]', { mono: true })}
             </span>
             <span>
-              AN: {writeBlank(evaluation.an, 'min-w-[74px]', { mono: true })}
+              AN: {writeBlank(evaluation.an, 'min-w-[66px]', { mono: true })}
             </span>
             <span>
-              Ward: {writeBlank(formatWardWithBed(evaluation.ward, evaluation.bed), 'min-w-[68px]')}
+              Ward: {writeBlank(formatWardWithBed(evaluation.ward, evaluation.bed), 'min-w-[62px]')}
             </span>
             <span>
-              สาขา: {writeBlank(evaluation.specialty, 'min-w-[62px]')}
+              สาขา: {writeBlank(evaluation.specialty, 'min-w-[56px]')}
             </span>
             <span>
-              Date of visit: {writeBlank(formatThaiDateBE(evaluation.dateOfVisit), 'min-w-[72px]', { mono: true })}
+              ห้อง:{' '}
+              {writeBlank(
+                evaluation.orRoom
+                  ? `${evaluation.orRoom}${evaluation.caseOrder ? ` #${evaluation.caseOrder}` : ''}`
+                  : evaluation.caseOrder
+                  ? `#${evaluation.caseOrder}`
+                  : '',
+                'min-w-[48px]',
+                { mono: true },
+              )}
             </span>
           </div>
-          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+
+          {/* Row 2: Diagnosis & Operation */}
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+            <span className="flex-1 min-w-[220px] inline-flex items-baseline gap-1">
+              <span className="shrink-0">Diagnosis:</span>
+              {writeBlank(evaluation.diagnosis, 'min-w-[160px] flex-1')}
+            </span>
+            <span className="flex-1 min-w-[220px] inline-flex items-baseline gap-1">
+              <span className="shrink-0">Operation:</span>
+              {writeBlank(evaluation.operation, 'min-w-[160px] flex-1')}
+            </span>
+          </div>
+
+          {/* Row 3: Date of visit, Date of operation, เวลา, Surgeon */}
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
             <span>
-              Diagnosis: {writeBlank(evaluation.diagnosis, 'min-w-[140px]')}
+              Date of visit:{' '}
+              {writeBlank(formatThaiDateBE(evaluation.dateOfVisit), 'min-w-[78px]', { mono: true })}
             </span>
             <span>
-              Operation: {writeBlank(evaluation.operation, 'min-w-[155px]')}
+              Date of operation:{' '}
+              {writeBlank(formatThaiDateBE(evaluation.dateOfOperation), 'min-w-[78px]', {
+                mono: true,
+              })}
             </span>
             <span>
-              Surgeon: {writeBlank(evaluation.surgeon, 'min-w-[110px]')}
+              เวลา: {writeBlank(evaluation.operationTime, 'min-w-[52px]', { mono: true })}
             </span>
-            <span>
-              Date of operation: {writeBlank(formatThaiDateBE(evaluation.dateOfOperation), 'min-w-[74px]', { mono: true })}
+            <span className="flex-1 min-w-[140px] inline-flex items-baseline gap-1">
+              <span className="shrink-0">Surgeon:</span>
+              {writeBlank(evaluation.surgeon, 'min-w-[100px] flex-1')}
             </span>
-            <span>
-              Time: {writeBlank(evaluation.operationTime, 'min-w-[48px]', { mono: true })}
-            </span>
-            {(evaluation.orRoom || evaluation.caseOrder) && (
-              <span>
-                OR: <strong className="font-mono">{evaluation.orRoom || '—'}{evaluation.caseOrder ? ` #${evaluation.caseOrder}` : ''}</strong>
-              </span>
-            )}
           </div>
           {fd.surgeryPostponement?.isPostponed && (
             <div className="text-[10px] text-amber-950 bg-amber-50 border border-amber-300 px-1.5 py-0.5 rounded-xs">
@@ -208,7 +229,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
             <div className="p-2 space-y-1 flex-1 flex flex-col justify-between">
               <div className="space-y-1">
                 <div className="font-bold text-[11px]">1. History</div>
-                {/* 1.1 Present illness — Always 4 dotted writing lines */}
+                {/* 1.1 Present illness — Always 3 dotted writing lines */}
                 <div className="space-y-0.5">
                   <div className="font-semibold">1.1 Present illness:</div>
                   {renderDottedLines(
@@ -216,11 +237,11 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                       .split(/\r?\n/)
                       .map((s) => s.trim())
                       .filter(Boolean),
-                    4,
+                    3,
                     { rowHeightClass: 'min-h-[14px]', keyPrefix: 'pi' },
                   )}
                 </div>
-                {/* 1.2 Past illness — Always 4 dotted writing lines */}
+                {/* 1.2 Past illness — Always 2 dotted writing lines */}
                 <div className="space-y-0.5">
                   <div className="font-semibold">1.2 Past illness:</div>
                   {renderDottedLines(
@@ -228,7 +249,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                       .split(/\r?\n/)
                       .map((s) => s.trim())
                       .filter(Boolean),
-                    4,
+                    2,
                     { rowHeightClass: 'min-h-[14px]', keyPrefix: 'past' },
                   )}
                 </div>
@@ -310,10 +331,10 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                           }${h.heartDiseaseDetail?.trim() ? ` (${h.heartDiseaseDetail.trim()})` : ''}`.trim(),
                         )}
                       </div>
-                      {/* 3 dotted writing lines below heart disease */}
+                      {/* 2 dotted writing lines below heart disease (total 7 rows in Underlying) */}
                       {renderDottedLines(
                         h.otherUnderlying.map((u) => u.trim()).filter(Boolean),
-                        3,
+                        2,
                         { rowHeightClass: 'min-h-[14px]', keyPrefix: 'other_ud' },
                       )}
                       {h.underlyingDetail?.trim() && (
@@ -324,7 +345,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                     </div>
                     <div className="border-l border-slate-400 pl-1.5">
                       <div className="font-semibold">Medication:</div>
-                      {renderDottedLines(medicationLines, 8, {
+                      {renderDottedLines(medicationLines, 7, {
                         rowHeightClass: 'min-h-[14px]',
                         keyPrefix: 'med',
                       })}
@@ -350,20 +371,30 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
               </div>
 
               <div className="space-y-0.5 pt-1">
-                <div className="flex flex-wrap items-baseline gap-x-1">
-                  <span className="font-semibold">1.6 Drinking:</span>
-                  {mark(h.drinkingStatus === 'no', 'No')}
-                  {mark(h.drinkingStatus === 'yes', 'Yes')}
+                <div className="flex items-baseline flex-nowrap gap-x-1 whitespace-nowrap text-[9.5px]">
+                  <span className="font-semibold text-[10px]">1.6 Drinking:</span>
+                  <span className="inline-flex items-center gap-0.5">
+                    <span className="font-mono text-[10px]">
+                      {h.drinkingStatus === 'no' ? '●' : '○'}
+                    </span>
+                    <span className={h.drinkingStatus === 'no' ? 'font-bold underline' : ''}>No</span>
+                  </span>
+                  <span className="inline-flex items-center gap-0.5">
+                    <span className="font-mono text-[10px]">
+                      {h.drinkingStatus === 'yes' ? '●' : '○'}
+                    </span>
+                    <span className={h.drinkingStatus === 'yes' ? 'font-bold underline' : ''}>Yes</span>
+                  </span>
                   <span>ปริมาณ</span>
-                  {writeBlank(h.drinkingAmount, 'min-w-[74px]')}
-                  {writeBlank(h.drinkingDaysPerWeek, 'min-w-[26px] text-center')}
+                  {writeBlank(h.drinkingAmount, 'min-w-[44px] flex-1')}
+                  {writeBlank(h.drinkingDaysPerWeek, 'min-w-[18px] text-center')}
                   <span>วัน/wk</span>
                   <span>จำนวน</span>
-                  {writeBlank(h.drinkingYears, 'min-w-[26px] text-center')}
+                  {writeBlank(h.drinkingYears, 'min-w-[18px] text-center')}
                   <span>{h.drinkingDurationUnit === 'months' ? 'เดือน' : 'ปี'}</span>
                   {(h.drinkingQuit || h.drinkingQuitDuration?.trim()) && (
                     <span>
-                      · เลิก {formatDurationLabel(h.drinkingQuitDuration || '', h.drinkingQuitUnit)}
+                      ·เลิก {formatDurationLabel(h.drinkingQuitDuration || '', h.drinkingQuitUnit)}
                     </span>
                   )}
                 </div>
@@ -538,42 +569,42 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                   <strong>{formatOxygenSupportSummary(p.oxygenSupport)}</strong>
                 </div>
               )}
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
+              <div className="flow-root leading-[1.35]">
+                <DentalArchBadge
+                  className="float-right ml-1.5 w-[56px] h-[35px]"
+                  missingTeeth={p.missingTeeth || []}
+                  looseTeeth={p.looseTeeth || []}
+                />
+                <div>
                   <span className="font-semibold">2.1 Tooth:</span>{' '}
                   {(['Normal', 'Denture', 'Loose', 'Avulsion'] as const).map((t) =>
                     mark(p.toothStatus.includes(t), t, `tooth_${t}`),
                   )}
                   {p.toothDetail && <span>({p.toothDetail})</span>}
                   {formatToothMarksSummary(p.missingTeeth, p.looseTeeth) && (
-                    <div className="text-[9.5px] text-slate-700 mt-0.5">
+                    <div className="text-[9.5px] text-slate-700">
                       {formatToothMarksSummary(p.missingTeeth, p.looseTeeth)}
                     </div>
                   )}
                 </div>
-                <DentalArchBadge
-                  className="w-[74px] h-[46px] shrink-0"
-                  missingTeeth={p.missingTeeth || []}
-                  looseTeeth={p.looseTeeth || []}
-                />
+                <div>
+                  <span className="font-semibold">2.2 Airway:</span> Mouth opening{' '}
+                  {mark(p.mouthOpening === 'normal', 'Normal')}
+                  {mark(p.mouthOpening === 'limited', 'Limited')}
+                  {p.mouthOpeningDetail && <span>({p.mouthOpeningDetail})</span>}
+                  <br />
+                  Neck movement {mark(p.neckMovement === 'normal', 'Normal')}
+                  {mark(p.neckMovement === 'limited', 'Limited')}
+                  {p.neckMovementDetail && <span>({p.neckMovementDetail}) </span>}
+                  · TMD {mark(p.thyromentalDistance === '<6', '<6 cm')}
+                  {mark(p.thyromentalDistance === '>=6', '>=6 cm')}
+                  {p.thyromentalDistanceDetail && <span>({p.thyromentalDistanceDetail})</span>}
+                </div>
               </div>
-              <div>
-                <span className="font-semibold">2.2 Airway:</span> Mouth opening{' '}
-                {mark(p.mouthOpening === 'normal', 'Normal')}
-                {mark(p.mouthOpening === 'limited', 'Limited')}
-                {p.mouthOpeningDetail && <span>({p.mouthOpeningDetail})</span>}
-                <br />
-                Neck movement {mark(p.neckMovement === 'normal', 'Normal')}
-                {mark(p.neckMovement === 'limited', 'Limited')}
-                {p.neckMovementDetail && <span>({p.neckMovementDetail}) </span>}
-                · TMD {mark(p.thyromentalDistance === '<6', '<6 cm')}
-                {mark(p.thyromentalDistance === '>=6', '>=6 cm')}
-                {p.thyromentalDistanceDetail && <span>({p.thyromentalDistanceDetail})</span>}
-              </div>
-              <div>
-                <div className="font-semibold mb-0.5">2.3 Mallampati class</div>
+              <div className="space-y-0.5">
+                <div className="font-semibold leading-tight">2.3 Mallampati class</div>
                 <MallampatiSelector value={p.mallampatiClass} compact />
-                <div className="mt-0.5">
+                <div className="leading-tight">
                   Expected difficult airway:{' '}
                   {mark(p.expectedDifficultAirway === 'no', 'No')}
                   {mark(p.expectedDifficultAirway === 'yes', 'Yes')}

@@ -341,20 +341,30 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
     </div>
     <div class="row">
       <div class="field">
-        Name: ${blankSlot(record.patientName, 130)} &nbsp;
-        Age: ${blankSlot(record.age, 34)} yr &nbsp;
-        HN: ${blankSlot(record.hn, 74)} &nbsp;
-        AN: ${blankSlot(record.an, 74)} &nbsp;
-        Ward: ${blankSlot(formatWardWithBed(record.ward, record.bed), 68)} &nbsp;
-        สาขา: ${blankSlot(record.specialty, 60)} &nbsp;
-        Date of visit: ${blankSlot(formatThaiDateBE(record.dateOfVisit), 72)}
+        Name: ${blankSlot(record.patientName, 125)} &nbsp;
+        Age: ${blankSlot(record.age, 30)} yr &nbsp;
+        HN: ${blankSlot(record.hn, 66)} &nbsp;
+        AN: ${blankSlot(record.an, 66)} &nbsp;
+        Ward: ${blankSlot(formatWardWithBed(record.ward, record.bed), 62)} &nbsp;
+        สาขา: ${blankSlot(record.specialty, 56)} &nbsp;
+        ห้อง: ${blankSlot(
+          record.orRoom
+            ? `${record.orRoom}${record.caseOrder ? ` #${record.caseOrder}` : ''}`
+            : record.caseOrder
+            ? `#${record.caseOrder}`
+            : '',
+          48,
+        )}
       </div>
       <div class="field">
-        Diagnosis: ${blankSlot(record.diagnosis, 135)} &nbsp;
-        Operation: ${blankSlot(record.operation, 150)} &nbsp;
-        Surgeon: ${blankSlot(record.surgeon, 105)} &nbsp;
-        Date of operation: ${blankSlot(formatThaiDateBE(record.dateOfOperation), 72)} &nbsp;
-        Time: ${blankSlot(record.operationTime, 48)}
+        Diagnosis: ${blankSlot(record.diagnosis, 230)} &nbsp;
+        Operation: ${blankSlot(record.operation, 240)}
+      </div>
+      <div class="field">
+        Date of visit: ${blankSlot(formatThaiDateBE(record.dateOfVisit), 76)} &nbsp;
+        Date of operation: ${blankSlot(formatThaiDateBE(record.dateOfOperation), 76)} &nbsp;
+        เวลา: ${blankSlot(record.operationTime, 52)} &nbsp;
+        Surgeon: ${blankSlot(record.surgeon, 130)}
       </div>
       ${
         fd.surgeryPostponement?.isPostponed
@@ -385,8 +395,8 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
     <div class="cols">
       <div class="col-left">
         <div class="sec-title">1. History</div>
-        <div class="field"><strong>1.1 Present illness:</strong>${dottedRows((h.presentIllness || '').split(/\r?\n/), 4, false)}</div>
-        <div class="field"><strong>1.2 Past illness:</strong>${dottedRows((h.pastIllness || '').split(/\r?\n/), 4, false)}</div>
+        <div class="field"><strong>1.1 Present illness:</strong>${dottedRows((h.presentIllness || '').split(/\r?\n/), 3, false)}</div>
+        <div class="field"><strong>1.2 Past illness:</strong>${dottedRows((h.pastIllness || '').split(/\r?\n/), 2, false)}</div>
         <div class="field"><strong>1.3 Allergy:</strong> ${radioMark(h.allergyStatus === 'no', 'No')} ${radioMark(h.allergyStatus === 'yes', 'Yes')} ${blankSlot(h.allergyDetail, 110)}</div>
         <div class="field"><strong>1.4 Underlying:</strong> ${radioMark(h.underlyingStatus === 'no', 'No')} ${radioMark(h.underlyingStatus === 'yes', 'Yes')} &nbsp; ${radioMark(h.underlyingControl === 'good', 'Good control')} ${radioMark(h.underlyingControl === 'poor', 'Poor control')}</div>
         <div class="field">
@@ -395,20 +405,20 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
           ${checkMark(Boolean(h.dlp), esc(formatUnderlyingDiseaseTag('DLP', h.dlpYears, h.dlpDetail, 'ปี', h.dlpControl)))}
           ${checkMark(Boolean(h.ckd), esc(formatUnderlyingDiseaseTag('โรคไต', h.ckdYears, h.ckdDetail, 'ปี', h.ckdControl)))}
           ${checkMark(h.heartDisease, esc(formatUnderlyingDiseaseTag('โรคหัวใจ', h.heartDiseaseYears, h.heartDiseaseDetail, 'ปี', h.heartDiseaseControl)))}
-          ${dottedRows(h.otherUnderlying || [], 3, false)}
+          ${dottedRows(h.otherUnderlying || [], 2, false)}
         </div>
         ${
           h.underlyingDetail?.trim()
             ? `<div class="field"><strong>รายละเอียดโรคประจำตัว:</strong> ${esc(h.underlyingDetail.trim())}</div>`
             : ''
         }
-        <div class="field"><strong>Medication:</strong>${dottedRows(getMedicationLines(h.medication), 8, false)}</div>
+        <div class="field"><strong>Medication:</strong>${dottedRows(getMedicationLines(h.medication), 7, false)}</div>
         <div class="field">
           <strong>1.5 Previous operation / anesthesia:</strong>
           ${dottedRows(h.previousOps || [], 4, true)}
         </div>
         <div class="field" style="display:flex;align-items:flex-end;gap:4px;"><strong>Complication:</strong><span class="dotted-line">${esc(h.previousOpComplication || '') || '&nbsp;'}</span></div>
-        <div class="field"><strong>1.6 Drinking:</strong> ${radioMark(h.drinkingStatus === 'no', 'No')} ${radioMark(h.drinkingStatus === 'yes', 'Yes')} ปริมาณ ${blankSlot(h.drinkingAmount, 76)} ${blankSlot(h.drinkingDaysPerWeek, 28)} วัน/wk จำนวน ${blankSlot(h.drinkingYears, 28)} ${h.drinkingDurationUnit === 'months' ? 'เดือน' : 'ปี'}${
+        <div class="field" style="white-space:nowrap;font-size:10px;"><strong>1.6 Drinking:</strong> ${radioMark(h.drinkingStatus === 'no', 'No')}${radioMark(h.drinkingStatus === 'yes', 'Yes')}ปริมาณ ${blankSlot(h.drinkingAmount, 54)} ${blankSlot(h.drinkingDaysPerWeek, 20)} วัน/wk จำนวน ${blankSlot(h.drinkingYears, 20)} ${h.drinkingDurationUnit === 'months' ? 'เดือน' : 'ปี'}${
           h.drinkingQuit || h.drinkingQuitDuration?.trim()
             ? ` · เลิก ${esc(formatDurationLabel(h.drinkingQuitDuration || '', h.drinkingQuitUnit))}`
             : ''

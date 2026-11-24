@@ -94,7 +94,7 @@ export function MallampatiSelector({ value, onChange, compact = false }: Mallamp
   ];
 
   return (
-    <div className={`grid grid-cols-4 ${compact ? 'gap-1.5' : 'gap-2'}`}>
+    <div className={`grid grid-cols-4 ${compact ? 'gap-1' : 'gap-2'}`}>
       {classes.map((item) => {
         const selected = value === item.id;
         const InteractiveTag = onChange ? 'button' : 'div';
@@ -105,7 +105,7 @@ export function MallampatiSelector({ value, onChange, compact = false }: Mallamp
             onClick={onChange ? () => onChange(selected ? '' : item.id) : undefined}
             title={`Class ${item.label}: ${item.desc}`}
             className={`group flex flex-col items-center rounded-md border transition-colors ${
-              compact ? 'p-1' : 'p-1.5'
+              compact ? 'px-1 py-0.5' : 'p-1.5'
             } ${
               selected
                 ? 'border-blue-800 bg-blue-50 text-blue-950'
@@ -113,7 +113,9 @@ export function MallampatiSelector({ value, onChange, compact = false }: Mallamp
             }`}
           >
             <span
-              className={`font-mono text-xs font-semibold leading-none mb-1 ${
+              className={`font-mono font-semibold leading-none ${
+                compact ? 'text-[10px] mb-0.5' : 'text-xs mb-1'
+              } ${
                 selected ? 'text-blue-900' : 'text-slate-700'
               }`}
             >
@@ -121,7 +123,7 @@ export function MallampatiSelector({ value, onChange, compact = false }: Mallamp
             </span>
             <svg
               viewBox="0 0 60 54"
-              className={compact ? 'w-10 h-9' : 'w-12 h-11'}
+              className={compact ? 'w-7 h-[25px]' : 'w-12 h-11'}
               aria-hidden="true"
             >
               {/* Oral cavity outer lips */}

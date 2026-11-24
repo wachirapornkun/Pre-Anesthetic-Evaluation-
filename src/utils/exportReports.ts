@@ -419,7 +419,11 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
         <div class="sec-title" style="margin-top:6px;">3. Investigation</div>
         <div class="field"><strong>3.1 Chest x-ray:</strong> ${radioMark(inv.cxrStatus === 'normal', 'Normal')} ${radioMark(inv.cxrStatus === 'abnormal', 'Abnormal')} ${esc(inv.cxrDetail)}</div>
         <div class="field"><strong>3.2 EKG:</strong> ${radioMark(inv.ekgStatus === 'normal', 'Normal')} ${radioMark(inv.ekgStatus === 'abnormal', 'Abnormal')} ${esc(inv.ekgDetail)}</div>
-        <div class="field" style="display:flex;align-items:flex-start;gap:4px;"><strong style="flex-shrink:0;">3.3 Other (ex. CT):</strong><span class="dotted-line" style="white-space:pre-wrap;word-break:break-word;">${esc(inv.other?.trim() || '') || '&nbsp;'}</span></div>
+        <div class="field"><strong>3.3 Other (ex. CT):</strong>${
+          inv.other?.trim()
+            ? `<div style="margin-top:2px;text-align:left;white-space:pre-wrap;word-break:break-word;border-bottom:1px dotted #475569;padding-bottom:2px;">${esc(inv.other.trim())}</div>`
+            : dottedRows([], 2, false)
+        }</div>
 
         <div class="sec-title" style="margin-top:6px;">5. Premedication</div>
         <div class="field">${dottedRows(pm.items || [], 5, true)}</div>

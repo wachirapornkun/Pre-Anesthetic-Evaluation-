@@ -2946,16 +2946,16 @@ export function PreAnestheticForm({
               />
             </div>
 
-            <label className="flex items-start gap-2">
-              <span className="text-xs font-semibold text-slate-700 w-24 shrink-0 pt-1.5">
+            <label className="block space-y-1">
+              <span className="text-xs font-semibold text-slate-700">
                 3.3 Other (ex. CT)
               </span>
               <textarea
                 rows={2}
                 value={inv.other}
                 onChange={(e) => updateInvestigation({ other: e.target.value })}
-                placeholder="Echo, PFT, CT หรือผลตรวจเพิ่มเติม..."
-                className={`${inputBase} flex-1 text-xs resize-y`}
+                placeholder="Echo, PFT, CT brain หรือผลตรวจเพิ่มเติม..."
+                className={`${inputBase} w-full text-xs resize-y`}
               />
             </label>
           </div>

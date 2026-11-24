@@ -3068,7 +3068,7 @@ export function sanitizeEvaluationForFirestore(
         npoTime: clampStr(fd.premedication.npoTime, 100),
         lastMealTime: clampStr(fd.premedication.lastMealTime ?? '', 32),
         lastWaterTime: clampStr(fd.premedication.lastWaterTime ?? '', 32),
-        onIvf: clampStr(fd.premedication.onIvf, 150),
+        onIvf: clampStr(fd.premedication.onIvf, 250),
       },
       consult: clampStr(fd.consult, 1500),
       consultTypes: (() => {

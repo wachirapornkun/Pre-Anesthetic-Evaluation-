@@ -395,20 +395,14 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
           ${checkMark(Boolean(h.dlp), esc(formatUnderlyingDiseaseTag('DLP', h.dlpYears, h.dlpDetail, 'ปี', h.dlpControl)))}
           ${checkMark(Boolean(h.ckd), esc(formatUnderlyingDiseaseTag('โรคไต', h.ckdYears, h.ckdDetail, 'ปี', h.ckdControl)))}
           ${checkMark(h.heartDisease, esc(formatUnderlyingDiseaseTag('โรคหัวใจ', h.heartDiseaseYears, h.heartDiseaseDetail, 'ปี', h.heartDiseaseControl)))}
-          ${h.otherUnderlying.filter(Boolean).map((u) => esc(u)).join(', ')}
+          ${dottedRows(h.otherUnderlying || [], 3, false)}
         </div>
         ${
           h.underlyingDetail?.trim()
             ? `<div class="field"><strong>รายละเอียดโรคประจำตัว:</strong> ${esc(h.underlyingDetail.trim())}</div>`
             : ''
         }
-        <div class="field"><strong>Medication:</strong>${
-          getMedicationLines(h.medication).length > 0
-            ? `<div style="margin-top:2px;padding-left:10px;line-height:1.35;">${getMedicationLines(h.medication)
-                .map((m) => `<div>${esc(m)}</div>`)
-                .join('')}</div>`
-            : ' -'
-        }</div>
+        <div class="field"><strong>Medication:</strong>${dottedRows(getMedicationLines(h.medication), 8, false)}</div>
         <div class="field">
           <strong>1.5 Previous operation / anesthesia:</strong>
           ${dottedRows(h.previousOps || [], 4, true)}
@@ -439,7 +433,11 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
                 .join(' · ')}</div>`
             : ''
         }</div>
-        <div class="field"><strong>on IVF:</strong> ${esc(pm.onIvf || '-')}</div>
+        ${
+          pm.onIvf?.trim()
+            ? `<div class="field"><strong>on IVF:</strong> <span class="val">${esc(pm.onIvf.trim())}</span></div>`
+            : `<div class="field"><strong>on IVF:</strong> ${radioMark(false, 'LSR 1000 ml')} ${radioMark(false, 'Acetar 1000 ml')} ${radioMark(false, 'NSS 1000 ml')} ${radioMark(false, '5%D/N/2 1000 ml')}<br/>&#9675; NSS ${blankSlot('', 32)} ml + KCl ${blankSlot('', 26)} mEq &nbsp; IV rate ${blankSlot('', 38)} ml/hr</div>`
+        }
       </div>
 
       <div class="col-right">

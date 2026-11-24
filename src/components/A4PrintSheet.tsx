@@ -217,7 +217,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                       .map((s) => s.trim())
                       .filter(Boolean),
                     4,
-                    { rowHeightClass: 'min-h-[15px]', keyPrefix: 'pi' },
+                    { rowHeightClass: 'min-h-[14px]', keyPrefix: 'pi' },
                   )}
                 </div>
                 {/* 1.2 Past illness — Always 4 dotted writing lines */}
@@ -229,7 +229,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                       .map((s) => s.trim())
                       .filter(Boolean),
                     4,
-                    { rowHeightClass: 'min-h-[15px]', keyPrefix: 'past' },
+                    { rowHeightClass: 'min-h-[14px]', keyPrefix: 'past' },
                   )}
                 </div>
                 <div className="flex flex-wrap items-baseline gap-x-1">
@@ -310,9 +310,12 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                           }${h.heartDiseaseDetail?.trim() ? ` (${h.heartDiseaseDetail.trim()})` : ''}`.trim(),
                         )}
                       </div>
-                      {h.otherUnderlying.filter(Boolean).map((u, idx) => (
-                        <div key={idx}>● {u}</div>
-                      ))}
+                      {/* 3 dotted writing lines below heart disease */}
+                      {renderDottedLines(
+                        h.otherUnderlying.map((u) => u.trim()).filter(Boolean),
+                        3,
+                        { rowHeightClass: 'min-h-[14px]', keyPrefix: 'other_ud' },
+                      )}
                       {h.underlyingDetail?.trim() && (
                         <div className="pt-0.5 text-[9.5px] whitespace-pre-wrap">
                           <span className="font-semibold">รายละเอียด:</span> {h.underlyingDetail.trim()}
@@ -321,15 +324,10 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                     </div>
                     <div className="border-l border-slate-400 pl-1.5">
                       <div className="font-semibold">Medication:</div>
-                      {medicationLines.length > 0 ? (
-                        <div className="space-y-0.5 leading-snug">
-                          {medicationLines.map((med, idx) => (
-                            <div key={idx}>{med}</div>
-                          ))}
-                        </div>
-                      ) : (
-                        renderDottedLines([], 4, { rowHeightClass: 'min-h-[15px]', keyPrefix: 'med' })
-                      )}
+                      {renderDottedLines(medicationLines, 8, {
+                        rowHeightClass: 'min-h-[14px]',
+                        keyPrefix: 'med',
+                      })}
                     </div>
                   </div>
                 </div>
@@ -339,7 +337,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                   <div className="font-semibold">1.5 Previous operation / anesthesia</div>
                   {renderDottedLines(filledPreviousOps, 4, {
                     numbered: true,
-                    rowHeightClass: 'min-h-[17px]',
+                    rowHeightClass: 'min-h-[15px]',
                     keyPrefix: 'prev_op',
                   })}
                   <div className="flex items-end gap-1 pt-0.5">
@@ -435,12 +433,34 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                   </div>
                 )}
               </div>
-              <div className="flex items-end gap-1 pt-0.5">
-                <span className="font-semibold shrink-0">on IVF:</span>
-                <span className="flex-1 border-b border-dotted border-slate-600 px-0.5 leading-[1.22]">
-                  {pm.onIvf?.trim() || '\u00A0'}
-                </span>
-              </div>
+              {pm.onIvf?.trim() ? (
+                <div className="flex items-end gap-1 pt-0.5">
+                  <span className="font-semibold shrink-0">on IVF:</span>
+                  <span className="flex-1 border-b border-dotted border-slate-600 px-0.5 leading-[1.22] font-semibold">
+                    {pm.onIvf.trim()}
+                  </span>
+                </div>
+              ) : (
+                <div className="pt-0.5 space-y-0.5 text-[9.5px] leading-[1.3]">
+                  <div className="flex flex-wrap items-baseline gap-x-1">
+                    <span className="font-semibold text-[10.5px]">on IVF:</span>
+                    {mark(false, 'LSR 1000 ml')}
+                    {mark(false, 'Acetar 1000 ml')}
+                    {mark(false, 'NSS 1000 ml')}
+                    {mark(false, '5%D/N/2 1000 ml')}
+                  </div>
+                  <div className="flex flex-wrap items-baseline gap-x-1 pl-1">
+                    <span>○ NSS</span>
+                    {writeBlank('', 'min-w-[30px]')}
+                    <span>ml + KCl</span>
+                    {writeBlank('', 'min-w-[24px]')}
+                    <span>mEq</span>
+                    <span className="ml-1">IV rate</span>
+                    {writeBlank('', 'min-w-[36px]')}
+                    <span>ml/hr</span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

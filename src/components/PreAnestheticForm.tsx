@@ -3129,16 +3129,229 @@ export function PreAnestheticForm({
                   </div>
                 );
               })()}
-              <label className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-slate-700 shrink-0">on IVF</span>
-                <input
-                  type="text"
-                  value={pm.onIvf}
-                  onChange={(e) => updatePremed({ onIvf: e.target.value })}
-                  placeholder="เช่น 0.9% NSS 80 ml/hr"
-                  className={`${inputBase} flex-1 text-xs`}
-                />
-              </label>
+              {(() => {
+                type IvfPresetKey = 'lsr' | 'acetar' | 'nss' | 'd5n2' | 'nss_kcl';
+                const stdPresets: readonly {
+                  key: Exclude<IvfPresetKey, 'nss_kcl'>;
+                  label: string;
+                  prefix: string;
+                }[] = [
+                  { key: 'lsr', label: 'LSR 1000 ml', prefix: 'LSR 1000 ml' },
+                  { key: 'acetar', label: 'Acetar 1000 ml', prefix: 'Acetar 1000 ml' },
+                  { key: 'nss', label: 'NSS 1000 ml', prefix: 'NSS 1000 ml' },
+                  { key: 'd5n2', label: '5%D/N/2 1000 ml', prefix: '5%D/N/2 1000 ml' },
+                ];
+                const cleanVal = (v: string) =>
+                  v && !/^[._…]+$/.test(v.trim()) ? v.trim() : '';
+                const rawIvf = (pm.onIvf || '').trim();
+                let activePreset: IvfPresetKey | '' = '';
+                let nssMl = '';
+                let kclMeq = '';
+                let ivRate = '';
+
+                const kclMatch =
+                  /^NSS\s+([^\s+]+)\s*ml\s*\+\s*KCl\s+([^\s]+)\s*mEq(?:\s+IV\s+rate\s+([^\s]+)\s*ml\/hr)?/i.exec(
+                    rawIvf,
+                  );
+                if (kclMatch) {
+                  activePreset = 'nss_kcl';
+                  nssMl = cleanVal(kclMatch[1]);
+                  kclMeq = cleanVal(kclMatch[2]);
+                  ivRate = cleanVal(kclMatch[3] || '');
+                } else {
+                  for (const item of stdPresets) {
+                    const escaped = item.prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const m = new RegExp(
+                      `^${escaped}(?:\\s+IV\\s+rate\\s+([^\\s]+)\\s*ml\\/hr)?`,
+                      'i',
+                    ).exec(rawIvf);
+                    if (m) {
+                      activePreset = item.key;
+                      ivRate = cleanVal(m[1] || '');
+                      break;
+                    }
+                  }
+                }
+
+                const buildIvfText = (
+                  preset: IvfPresetKey,
+                  opts: { nssMl?: string; kclMeq?: string; rate?: string },
+                ) => {
+                  const r = opts.rate?.trim() || '......';
+                  if (preset === 'nss_kcl') {
+                    const v = opts.nssMl?.trim() || '......';
+                    const k = opts.kclMeq?.trim() || '......';
+                    return `NSS ${v} ml + KCl ${k} mEq IV rate ${r} ml/hr`;
+                  }
+                  const found = stdPresets.find((x) => x.key === preset);
+                  return `${found?.prefix || 'NSS 1000 ml'} IV rate ${r} ml/hr`;
+                };
+
+                return (
+                  <div className="border border-slate-200 rounded-lg p-2.5 bg-slate-50/60 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-slate-700">
+                        on IVF (สารน้ำทางหลอดเลือดดำ)
+                      </span>
+                      {pm.onIvf.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => updatePremed({ onIvf: '' })}
+                          className="inline-flex items-center gap-1 text-[11px] font-medium text-red-600 hover:text-red-800"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          ล้าง IVF
+                        </button>
+                      )}
+                    </div>
+
+                    {/* 5 IVF fluid presets */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {stdPresets.map((item) => {
+                        const isSelected = activePreset === item.key;
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            onClick={() =>
+                              updatePremed({
+                                onIvf: isSelected
+                                  ? ''
+                                  : buildIvfText(item.key, { rate: ivRate }),
+                              })
+                            }
+                            className={radioBtn(isSelected)}
+                          >
+                            {isSelected ? '●' : '○'} {item.label}
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updatePremed({
+                            onIvf:
+                              activePreset === 'nss_kcl'
+                                ? ''
+                                : buildIvfText('nss_kcl', {
+                                    nssMl: nssMl || '1000',
+                                    kclMeq,
+                                    rate: ivRate,
+                                  }),
+                          })
+                        }
+                        className={radioBtn(activePreset === 'nss_kcl')}
+                      >
+                        {activePreset === 'nss_kcl' ? '●' : '○'} NSS + KCl
+                      </button>
+                    </div>
+
+                    {/* Inline numeric fields when a preset is active */}
+                    {activePreset && (
+                      <div className="flex flex-wrap items-center gap-2 bg-white border border-blue-200/80 rounded-md px-2.5 py-1.5 text-xs">
+                        {activePreset === 'nss_kcl' && (
+                          <>
+                            <label className="inline-flex items-center gap-1">
+                              <span className="text-slate-600 font-medium">NSS</span>
+                              <input
+                                type="text"
+                                value={nssMl}
+                                onChange={(e) =>
+                                  updatePremed({
+                                    onIvf: buildIvfText('nss_kcl', {
+                                      nssMl: e.target.value,
+                                      kclMeq,
+                                      rate: ivRate,
+                                    }),
+                                  })
+                                }
+                                placeholder="1000"
+                                aria-label="NSS ปริมาตร ml"
+                                className={`${inputBase} w-16 text-center font-mono tabular-nums text-xs`}
+                              />
+                              <span className="text-slate-600">ml</span>
+                            </label>
+                            <label className="inline-flex items-center gap-1">
+                              <span className="text-slate-600 font-medium">+ KCl</span>
+                              <input
+                                type="text"
+                                value={kclMeq}
+                                onChange={(e) =>
+                                  updatePremed({
+                                    onIvf: buildIvfText('nss_kcl', {
+                                      nssMl,
+                                      kclMeq: e.target.value,
+                                      rate: ivRate,
+                                    }),
+                                  })
+                                }
+                                placeholder="20"
+                                aria-label="KCl mEq"
+                                className={`${inputBase} w-14 text-center font-mono tabular-nums text-xs`}
+                              />
+                              <span className="text-slate-600">mEq</span>
+                            </label>
+                          </>
+                        )}
+                        <label className="inline-flex items-center gap-1">
+                          <span className="text-slate-600 font-medium">IV rate</span>
+                          <input
+                            type="text"
+                            value={ivRate}
+                            onChange={(e) =>
+                              updatePremed({
+                                onIvf: buildIvfText(activePreset, {
+                                  nssMl,
+                                  kclMeq,
+                                  rate: e.target.value,
+                                }),
+                              })
+                            }
+                            placeholder="80"
+                            aria-label="IV rate ml ต่อชั่วโมง"
+                            className={`${inputBase} w-16 text-center font-mono tabular-nums text-xs`}
+                          />
+                          <span className="text-slate-600">ml/hr</span>
+                        </label>
+                        <div className="inline-flex items-center gap-1 ml-auto">
+                          {(['60', '80', '100', '120'] as const).map((presetRate) => (
+                            <button
+                              key={presetRate}
+                              type="button"
+                              onClick={() =>
+                                updatePremed({
+                                  onIvf: buildIvfText(activePreset, {
+                                    nssMl,
+                                    kclMeq,
+                                    rate: presetRate,
+                                  }),
+                                })
+                              }
+                              className={`px-1.5 py-0.5 rounded text-[11px] font-mono border transition-colors ${
+                                ivRate === presetRate
+                                  ? 'bg-blue-800 border-blue-800 text-white font-semibold'
+                                  : 'bg-slate-50 border-slate-300 text-slate-600 hover:bg-slate-100'
+                              }`}
+                            >
+                              {presetRate}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Direct editable summary/custom input */}
+                    <input
+                      type="text"
+                      value={pm.onIvf}
+                      onChange={(e) => updatePremed({ onIvf: e.target.value })}
+                      placeholder="เลือกสูตรสารน้ำด้านบน หรือพิมพ์เอง เช่น LSR 1000 ml IV rate 80 ml/hr"
+                      aria-label="ข้อความ on IVF"
+                      className={`${inputBase} w-full text-xs bg-white`}
+                    />
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>

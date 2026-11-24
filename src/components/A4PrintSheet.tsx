@@ -226,10 +226,10 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
           {/* Left Column */}
           <div className="border-r border-slate-900 flex flex-col divide-y divide-slate-900 h-full min-h-0">
             {/* 1. History */}
-            <div className="p-2 space-y-1 flex-1 flex flex-col justify-between">
+            <div className="p-2 space-y-1 flex-1 flex flex-col">
               <div className="space-y-1">
                 <div className="font-bold text-[11px]">1. History</div>
-                {/* 1.1 Present illness — Always 3 dotted writing lines */}
+                {/* 1.1 Present illness — Always 2 dotted writing lines */}
                 <div className="space-y-0.5">
                   <div className="font-semibold">1.1 Present illness:</div>
                   {renderDottedLines(
@@ -237,7 +237,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                       .split(/\r?\n/)
                       .map((s) => s.trim())
                       .filter(Boolean),
-                    3,
+                    2,
                     { rowHeightClass: 'min-h-[14px]', keyPrefix: 'pi' },
                   )}
                 </div>
@@ -370,7 +370,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                 </div>
               </div>
 
-              <div className="space-y-0.5 pt-1">
+              <div className="space-y-0.5">
                 <div className="flex items-baseline flex-nowrap gap-x-1 whitespace-nowrap text-[9.5px]">
                   <span className="font-semibold text-[10px]">1.6 Drinking:</span>
                   <span className="inline-flex items-center gap-0.5">
@@ -448,10 +448,10 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
               </div>
             </div>
 
-            {/* 5. Premedication — Always 5 numbered dotted writing lines */}
+            {/* 5. Premedication — Always 4 numbered dotted writing lines */}
             <div className="p-2 space-y-1 shrink-0">
               <div className="font-bold text-[11px]">5. Premedication</div>
-              {renderDottedLines(filledPremeds, 5, {
+              {renderDottedLines(filledPremeds, 4, {
                 numbered: true,
                 rowHeightClass: 'min-h-[17px]',
                 keyPrefix: 'premed',
@@ -569,30 +569,41 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                   <strong>{formatOxygenSupportSummary(p.oxygenSupport)}</strong>
                 </div>
               )}
-              <div className="flow-root leading-[1.35]">
-                <DentalArchBadge
-                  className="float-right ml-1.5 w-[56px] h-[35px]"
-                  missingTeeth={p.missingTeeth || []}
-                  looseTeeth={p.looseTeeth || []}
-                />
-                <div>
-                  <span className="font-semibold">2.1 Tooth:</span>{' '}
-                  {(['Normal', 'Denture', 'Loose', 'Avulsion'] as const).map((t) =>
-                    mark(p.toothStatus.includes(t), t, `tooth_${t}`),
-                  )}
-                  {p.toothDetail && <span>({p.toothDetail})</span>}
-                  {formatToothMarksSummary(p.missingTeeth, p.looseTeeth) && (
-                    <div className="text-[9.5px] text-slate-700">
-                      {formatToothMarksSummary(p.missingTeeth, p.looseTeeth)}
+              <div className="leading-[1.35]">
+                <div className="flex items-start justify-between gap-1.5">
+                  <div className="min-w-0 flex-1">
+                    <div>
+                      <span className="font-semibold">2.1 Tooth:</span>{' '}
+                      {(['Normal', 'Denture', 'Loose', 'Avulsion'] as const).map((t) =>
+                        mark(p.toothStatus.includes(t), t, `tooth_${t}`),
+                      )}
+                      {p.toothDetail && <span>({p.toothDetail})</span>}
+                      {formatToothMarksSummary(p.missingTeeth, p.looseTeeth) && (
+                        <div className="text-[9.5px] text-slate-700">
+                          {formatToothMarksSummary(p.missingTeeth, p.looseTeeth)}
+                        </div>
+                      )}
                     </div>
-                  )}
+                    <div>
+                      <span className="font-semibold">2.2 Airway:</span> Mouth opening{' '}
+                      {mark(p.mouthOpening === 'normal', 'Normal')}
+                      {mark(p.mouthOpening === 'limited', 'Limited')}
+                      {p.mouthOpeningDetail && <span>({p.mouthOpeningDetail})</span>}
+                    </div>
+                  </div>
+                  <DentalArchBadge
+                    className="w-[68px] h-[43px] -mt-1 -mb-1 shrink-0"
+                    missingTeeth={p.missingTeeth || []}
+                    looseTeeth={p.looseTeeth || []}
+                  />
                 </div>
-                <div>
-                  <span className="font-semibold">2.2 Airway:</span> Mouth opening{' '}
-                  {mark(p.mouthOpening === 'normal', 'Normal')}
-                  {mark(p.mouthOpening === 'limited', 'Limited')}
-                  {p.mouthOpeningDetail && <span>({p.mouthOpeningDetail})</span>}
-                  <br />
+                <div
+                  className={
+                    !p.neckMovementDetail && !p.thyromentalDistanceDetail
+                      ? 'whitespace-nowrap'
+                      : ''
+                  }
+                >
                   Neck movement {mark(p.neckMovement === 'normal', 'Normal')}
                   {mark(p.neckMovement === 'limited', 'Limited')}
                   {p.neckMovementDetail && <span>({p.neckMovementDetail}) </span>}

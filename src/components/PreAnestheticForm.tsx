@@ -1726,7 +1726,7 @@ export function PreAnestheticForm({
             <label className="block space-y-1">
               <span className="text-xs font-semibold text-slate-700">1.1 Present illness</span>
               <textarea
-                rows={3}
+                rows={2}
                 value={h.presentIllness}
                 onChange={(e) => updateHistory({ presentIllness: e.target.value })}
                 placeholder="อาการสำคัญและประวัติปัจจุบัน..."

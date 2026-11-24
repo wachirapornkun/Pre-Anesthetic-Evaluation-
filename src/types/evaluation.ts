@@ -2517,7 +2517,7 @@ export function createEmptyEvaluation(
         prepStatusDetail: '',
       },
       premedication: {
-        items: ['', '', '', '', ''],
+        items: ['', '', '', ''],
         npoTime: '',
         lastMealTime: '',
         lastWaterTime: '',

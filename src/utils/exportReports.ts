@@ -395,7 +395,7 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
     <div class="cols">
       <div class="col-left">
         <div class="sec-title">1. History</div>
-        <div class="field"><strong>1.1 Present illness:</strong>${dottedRows((h.presentIllness || '').split(/\r?\n/), 3, false)}</div>
+        <div class="field"><strong>1.1 Present illness:</strong>${dottedRows((h.presentIllness || '').split(/\r?\n/), 2, false)}</div>
         <div class="field"><strong>1.2 Past illness:</strong>${dottedRows((h.pastIllness || '').split(/\r?\n/), 2, false)}</div>
         <div class="field"><strong>1.3 Allergy:</strong> ${radioMark(h.allergyStatus === 'no', 'No')} ${radioMark(h.allergyStatus === 'yes', 'Yes')} ${blankSlot(h.allergyDetail, 110)}</div>
         <div class="field"><strong>1.4 Underlying:</strong> ${radioMark(h.underlyingStatus === 'no', 'No')} ${radioMark(h.underlyingStatus === 'yes', 'Yes')} &nbsp; ${radioMark(h.underlyingControl === 'good', 'Good control')} ${radioMark(h.underlyingControl === 'poor', 'Poor control')}</div>
@@ -436,7 +436,7 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
         }</div>
 
         <div class="sec-title" style="margin-top:6px;">5. Premedication</div>
-        <div class="field">${dottedRows(pm.items || [], 5, true)}</div>
+        <div class="field">${dottedRows(pm.items || [], 4, true)}</div>
         <div class="field" style="margin-top:4px;padding:4px 6px;border:1.5px solid #0f172a;background:#fffbeb;font-size:14px;font-weight:800;color:#991b1b;">NPO: ${esc(pm.npoTime || '__________________')}${
           pm.lastMealTime || pm.lastWaterTime
             ? `<div style="font-size:11px;font-weight:600;color:#78350f;margin-top:2px;">${[

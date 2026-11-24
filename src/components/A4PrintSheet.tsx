@@ -4,8 +4,8 @@ import {
   computeBloodGasPfRatio,
   CONSULT_TYPE_OPTIONS,
   formatBloodGroup,
-  formatDrinkingDetail,
   formatDrugAddictionDetail,
+  formatDurationLabel,
   formatOxygenSupportSummary,
   formatPostponementReasons,
   formatPreOpNotVisitedReasons,
@@ -15,7 +15,6 @@ import {
   formatToothMarksSummary,
   formatWardWithBed,
   getMedicationLines,
-  hasBloodGasValues,
   PreAnestheticEvaluation,
 } from '../types/evaluation';
 import {
@@ -55,66 +54,123 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
     </span>
   );
 
+  /** Pen-writable inline blank: displays bold value when filled, or a generous dotted writing line when empty */
+  const writeBlank = (
+    val: string | undefined | null,
+    minWidthClass: string,
+    opts?: { mono?: boolean },
+  ) => {
+    const cleaned = (val ?? '').trim();
+    return (
+      <span
+        className={`inline-block border-b border-dotted border-slate-600 px-1 text-center align-baseline leading-[1.2] ${minWidthClass} ${
+          opts?.mono ? 'font-mono' : ''
+        }`}
+      >
+        {cleaned ? <strong>{cleaned}</strong> : '\u00A0'}
+      </span>
+    );
+  };
+
+  /** Full-width dotted writing line(s) for handwritten notes */
+  const renderDottedLines = (
+    lines: string[],
+    minLines: number,
+    opts?: { numbered?: boolean; rowHeightClass?: string; keyPrefix?: string },
+  ) => {
+    const rowCount = Math.max(minLines, lines.length);
+    const heightCls = opts?.rowHeightClass ?? 'min-h-[17px]';
+    const prefix = opts?.keyPrefix ?? 'line';
+    return (
+      <div className="space-y-0.5">
+        {Array.from({ length: rowCount }).map((_, idx) => {
+          const text = (lines[idx] ?? '').trim();
+          return (
+            <div key={`${prefix}_${idx}`} className={`flex items-end gap-1 ${heightCls}`}>
+              {opts?.numbered && (
+                <span className="font-mono text-[10px] text-slate-700 shrink-0 leading-[1.2]">
+                  {idx + 1}.
+                </span>
+              )}
+              <span className="flex-1 border-b border-dotted border-slate-600 px-0.5 leading-[1.22] break-words">
+                {text || '\u00A0'}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const filledPreviousOps = h.previousOps.map((s) => s.trim()).filter(Boolean);
+  const filledPremeds = pm.items.map((s) => s.trim()).filter(Boolean);
+  const consultTextLines = (fd.consult || '')
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const filledProblems = fd.problemList.map((s) => s.trim()).filter(Boolean);
+  const filledPrepOrders = fd.preparationOrders.map((s) => s.trim()).filter(Boolean);
+
   return (
     <div
       className={
         previewMode
-          ? 'a4-single-page pre-op-single-a4 flex flex-col bg-white border border-slate-300 shadow-sm mx-auto w-full max-w-[794px] min-h-[1123px] p-5 text-[11px] leading-[1.3] text-slate-950 print:border-0 print:shadow-none print:max-w-none print:min-h-0 print:p-0'
-          : 'hidden print-only-sheet a4-single-page pre-op-single-a4 flex-col text-[10.8px] leading-[1.28] text-black'
+          ? 'a4-single-page pre-op-single-a4 flex flex-col bg-white border border-slate-300 shadow-sm mx-auto w-full max-w-[794px] min-h-[1123px] p-5 text-[10.5px] leading-[1.26] text-slate-950 print:border-0 print:shadow-none print:max-w-none print:min-h-0 print:p-0'
+          : 'hidden print-only-sheet a4-single-page pre-op-single-a4 flex-col text-[10.3px] leading-[1.24] text-black'
       }
     >
       <div className="border-[1.5px] border-slate-900 flex-1 flex flex-col min-h-0">
         {/* Header */}
-        <div className="flex items-center justify-center gap-3 py-2 px-3 border-b-[1.5px] border-slate-900 shrink-0">
-          <BphLogo className="w-9 h-9 shrink-0" />
+        <div className="flex items-center justify-center gap-3 py-1.5 px-3 border-b-[1.5px] border-slate-900 shrink-0">
+          <BphLogo className="w-8 h-8 shrink-0" />
           <div className="text-center">
-            <div className="text-[14.5px] font-bold leading-tight">Bangplee Hospital</div>
-            <div className="text-[12.5px] font-semibold leading-tight">
+            <div className="text-[14px] font-bold leading-tight">Bangplee Hospital</div>
+            <div className="text-[12px] font-semibold leading-tight">
               Pre Anesthetic Evaluation form
             </div>
           </div>
         </div>
 
         {/* Demographics */}
-        <div className="px-2.5 py-2 border-b border-slate-900 space-y-1 shrink-0">
-          <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+        <div className="px-2.5 py-1.5 border-b border-slate-900 space-y-1 shrink-0">
+          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
             <span>
-              Name: <strong className="underline decoration-dotted">{evaluation.patientName || '________________'}</strong>
+              Name: {writeBlank(evaluation.patientName, 'min-w-[135px]')}
             </span>
             <span>
-              Age: <strong className="font-mono">{evaluation.age || '____'}</strong> yr
+              Age: {writeBlank(evaluation.age, 'min-w-[34px]', { mono: true })} yr
             </span>
             <span>
-              HN: <strong className="font-mono">{evaluation.hn || '________'}</strong>
+              HN: {writeBlank(evaluation.hn, 'min-w-[74px]', { mono: true })}
             </span>
             <span>
-              AN: <strong className="font-mono">{evaluation.an || '________'}</strong>
+              AN: {writeBlank(evaluation.an, 'min-w-[74px]', { mono: true })}
             </span>
             <span>
-              Ward: <strong>{formatWardWithBed(evaluation.ward, evaluation.bed) || '________'}</strong>
+              Ward: {writeBlank(formatWardWithBed(evaluation.ward, evaluation.bed), 'min-w-[68px]')}
             </span>
             <span>
-              สาขา: <strong>{evaluation.specialty || '________'}</strong>
+              สาขา: {writeBlank(evaluation.specialty, 'min-w-[62px]')}
             </span>
             <span>
-              Date of visit: <strong className="font-mono">{formatThaiDateBE(evaluation.dateOfVisit) || '________'}</strong>
+              Date of visit: {writeBlank(formatThaiDateBE(evaluation.dateOfVisit), 'min-w-[72px]', { mono: true })}
             </span>
           </div>
-          <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
             <span>
-              Diagnosis: <strong>{evaluation.diagnosis || '________________________'}</strong>
+              Diagnosis: {writeBlank(evaluation.diagnosis, 'min-w-[140px]')}
             </span>
             <span>
-              Operation: <strong>{evaluation.operation || '________________________'}</strong>
+              Operation: {writeBlank(evaluation.operation, 'min-w-[155px]')}
             </span>
             <span>
-              Surgeon: <strong>{evaluation.surgeon || '____________________'}</strong>
+              Surgeon: {writeBlank(evaluation.surgeon, 'min-w-[110px]')}
             </span>
             <span>
-              Date of operation: <strong className="font-mono">{formatThaiDateBE(evaluation.dateOfOperation) || '________'}</strong>
+              Date of operation: {writeBlank(formatThaiDateBE(evaluation.dateOfOperation), 'min-w-[74px]', { mono: true })}
             </span>
             <span>
-              Time: <strong className="font-mono">{evaluation.operationTime || '______'}</strong>
+              Time: {writeBlank(evaluation.operationTime, 'min-w-[48px]', { mono: true })}
             </span>
             {(evaluation.orRoom || evaluation.caseOrder) && (
               <span>
@@ -149,189 +205,305 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
           {/* Left Column */}
           <div className="border-r border-slate-900 flex flex-col divide-y divide-slate-900 h-full min-h-0">
             {/* 1. History */}
-            <div className="p-2.5 space-y-1.5 flex-1">
-              <div className="font-bold text-[11.5px]">1. History</div>
-              <div>
-                <span className="font-semibold">1.1 Present illness:</span>{' '}
-                <span>{h.presentIllness || '—'}</span>
-              </div>
-              <div>
-                <span className="font-semibold">1.2 Past illness:</span>{' '}
-                <span>{h.pastIllness || '—'}</span>
-              </div>
-              <div>
-                <span className="font-semibold">1.3 Allergy:</span>{' '}
-                {mark(h.allergyStatus === 'no', 'No')}
-                {mark(h.allergyStatus === 'yes', 'Yes')}
-                {h.allergyDetail && <strong className="underline">{h.allergyDetail}</strong>}
-              </div>
-              <div className="space-y-0.5">
-                <div>
-                  <span className="font-semibold">1.4 Underlying:</span>{' '}
-                  {mark(h.underlyingStatus === 'no', 'No')}
-                  {mark(h.underlyingStatus === 'yes', 'Yes')}
+            <div className="p-2 space-y-1 flex-1 flex flex-col justify-between">
+              <div className="space-y-1">
+                <div className="font-bold text-[11px]">1. History</div>
+                {/* 1.1 Present illness — Always 4 dotted writing lines */}
+                <div className="space-y-0.5">
+                  <div className="font-semibold">1.1 Present illness:</div>
+                  {renderDottedLines(
+                    (h.presentIllness || '')
+                      .split(/\r?\n/)
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                    4,
+                    { rowHeightClass: 'min-h-[15px]', keyPrefix: 'pi' },
+                  )}
                 </div>
-                <div className="grid grid-cols-2 gap-1.5 border border-slate-400 p-1">
-                  <div className="space-y-0.5">
-                    <div>
-                      {mark(
-                        h.dm,
-                        `DM ${h.dmYears ? `${h.dmYears} ปี` : ''}${h.dmDetail?.trim() ? ` (${h.dmDetail.trim()})` : ''}`.trim(),
-                      )}
-                    </div>
-                    <div>
-                      {mark(
-                        h.ht,
-                        `HT ${h.htYears ? `${h.htYears} ปี` : ''}${h.htDetail?.trim() ? ` (${h.htDetail.trim()})` : ''}`.trim(),
-                      )}
-                    </div>
-                    <div>
-                      {mark(
-                        Boolean(h.dlp),
-                        `DLP ${h.dlpYears ? `${h.dlpYears} ปี` : ''}${h.dlpDetail?.trim() ? ` (${h.dlpDetail.trim()})` : ''}`.trim(),
-                      )}
-                    </div>
-                    <div>
-                      {mark(
-                        Boolean(h.ckd),
-                        `โรคไต ${h.ckdYears ? `${h.ckdYears} ปี` : ''}${h.ckdDetail?.trim() ? ` (${h.ckdDetail.trim()})` : ''}`.trim(),
-                      )}
-                    </div>
-                    <div>
-                      {mark(
-                        h.heartDisease,
-                        `โรคหัวใจ ${h.heartDiseaseYears ? `${h.heartDiseaseYears} ปี` : ''}${h.heartDiseaseDetail?.trim() ? ` (${h.heartDiseaseDetail.trim()})` : ''}`.trim(),
-                      )}
-                    </div>
-                    {h.otherUnderlying.filter(Boolean).map((u, idx) => (
-                      <div key={idx}>● {u}</div>
-                    ))}
-                    {h.underlyingDetail?.trim() && (
-                      <div className="pt-0.5 text-[9.5px] whitespace-pre-wrap">
-                        <span className="font-semibold">รายละเอียด:</span> {h.underlyingDetail.trim()}
-                      </div>
-                    )}
+                {/* 1.2 Past illness — Always 4 dotted writing lines */}
+                <div className="space-y-0.5">
+                  <div className="font-semibold">1.2 Past illness:</div>
+                  {renderDottedLines(
+                    (h.pastIllness || '')
+                      .split(/\r?\n/)
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                    4,
+                    { rowHeightClass: 'min-h-[15px]', keyPrefix: 'past' },
+                  )}
+                </div>
+                <div className="flex flex-wrap items-baseline gap-x-1">
+                  <span className="font-semibold">1.3 Allergy:</span>
+                  {mark(h.allergyStatus === 'no', 'No')}
+                  {mark(h.allergyStatus === 'yes', 'Yes')}
+                  {writeBlank(h.allergyDetail, 'min-w-[110px] flex-1')}
+                </div>
+                <div className="space-y-0.5">
+                  <div className="flex flex-wrap items-baseline gap-x-1">
+                    <span className="font-semibold">1.4 Underlying:</span>
+                    {mark(h.underlyingStatus === 'no', 'No')}
+                    {mark(h.underlyingStatus === 'yes', 'Yes')}
+                    <span className="inline-flex items-baseline">
+                      {mark(h.underlyingControl === 'good', 'Good control')}
+                      {mark(h.underlyingControl === 'poor', 'Poor control')}
+                    </span>
                   </div>
-                  <div className="border-l border-slate-400 pl-1.5">
-                    <div className="font-semibold">Medication:</div>
-                    {medicationLines.length > 0 ? (
-                      <div className="space-y-0.5 leading-snug">
-                        {medicationLines.map((med, idx) => (
-                          <div key={idx}>{med}</div>
-                        ))}
+                  <div className="grid grid-cols-2 gap-1.5 border border-slate-400 p-1">
+                    <div className="space-y-0.5">
+                      <div>
+                        {mark(
+                          h.dm,
+                          `DM ${h.dmYears ? `${h.dmYears} ปี` : ''}${
+                            h.dmControl === 'good'
+                              ? ' [Good]'
+                              : h.dmControl === 'poor'
+                              ? ' [Poor]'
+                              : ''
+                          }${h.dmDetail?.trim() ? ` (${h.dmDetail.trim()})` : ''}`.trim(),
+                        )}
                       </div>
-                    ) : (
-                      <div>—</div>
-                    )}
+                      <div>
+                        {mark(
+                          h.ht,
+                          `HT ${h.htYears ? `${h.htYears} ปี` : ''}${
+                            h.htControl === 'good'
+                              ? ' [Good]'
+                              : h.htControl === 'poor'
+                              ? ' [Poor]'
+                              : ''
+                          }${h.htDetail?.trim() ? ` (${h.htDetail.trim()})` : ''}`.trim(),
+                        )}
+                      </div>
+                      <div>
+                        {mark(
+                          Boolean(h.dlp),
+                          `DLP ${h.dlpYears ? `${h.dlpYears} ปี` : ''}${
+                            h.dlpControl === 'good'
+                              ? ' [Good]'
+                              : h.dlpControl === 'poor'
+                              ? ' [Poor]'
+                              : ''
+                          }${h.dlpDetail?.trim() ? ` (${h.dlpDetail.trim()})` : ''}`.trim(),
+                        )}
+                      </div>
+                      <div>
+                        {mark(
+                          Boolean(h.ckd),
+                          `โรคไต ${h.ckdYears ? `${h.ckdYears} ปี` : ''}${
+                            h.ckdControl === 'good'
+                              ? ' [Good]'
+                              : h.ckdControl === 'poor'
+                              ? ' [Poor]'
+                              : ''
+                          }${h.ckdDetail?.trim() ? ` (${h.ckdDetail.trim()})` : ''}`.trim(),
+                        )}
+                      </div>
+                      <div>
+                        {mark(
+                          h.heartDisease,
+                          `โรคหัวใจ ${h.heartDiseaseYears ? `${h.heartDiseaseYears} ปี` : ''}${
+                            h.heartDiseaseControl === 'good'
+                              ? ' [Good]'
+                              : h.heartDiseaseControl === 'poor'
+                              ? ' [Poor]'
+                              : ''
+                          }${h.heartDiseaseDetail?.trim() ? ` (${h.heartDiseaseDetail.trim()})` : ''}`.trim(),
+                        )}
+                      </div>
+                      {h.otherUnderlying.filter(Boolean).map((u, idx) => (
+                        <div key={idx}>● {u}</div>
+                      ))}
+                      {h.underlyingDetail?.trim() && (
+                        <div className="pt-0.5 text-[9.5px] whitespace-pre-wrap">
+                          <span className="font-semibold">รายละเอียด:</span> {h.underlyingDetail.trim()}
+                        </div>
+                      )}
+                    </div>
+                    <div className="border-l border-slate-400 pl-1.5">
+                      <div className="font-semibold">Medication:</div>
+                      {medicationLines.length > 0 ? (
+                        <div className="space-y-0.5 leading-snug">
+                          {medicationLines.map((med, idx) => (
+                            <div key={idx}>{med}</div>
+                          ))}
+                        </div>
+                      ) : (
+                        renderDottedLines([], 4, { rowHeightClass: 'min-h-[15px]', keyPrefix: 'med' })
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 1.5 Previous operation / anesthesia — Always 4 dotted writing lines */}
+                <div className="pt-0.5 space-y-0.5">
+                  <div className="font-semibold">1.5 Previous operation / anesthesia</div>
+                  {renderDottedLines(filledPreviousOps, 4, {
+                    numbered: true,
+                    rowHeightClass: 'min-h-[17px]',
+                    keyPrefix: 'prev_op',
+                  })}
+                  <div className="flex items-end gap-1 pt-0.5">
+                    <span className="font-semibold shrink-0">complication:</span>
+                    <span className="flex-1 border-b border-dotted border-slate-600 px-0.5 leading-[1.22]">
+                      {h.previousOpComplication?.trim() || '\u00A0'}
+                    </span>
                   </div>
                 </div>
               </div>
 
-              <div>
-                <div className="font-semibold">1.5 Previous operation / anesthesia</div>
-                {h.previousOps.filter(Boolean).length > 0 ? (
-                  h.previousOps.filter(Boolean).map((op, i) => (
-                    <div key={i}>
-                      {i + 1}. {op}
-                    </div>
-                  ))
-                ) : (
-                  <div>—</div>
-                )}
-                <div>
-                  <span className="font-semibold">complication:</span>{' '}
-                  {h.previousOpComplication || '—'}
+              <div className="space-y-0.5 pt-1">
+                <div className="flex flex-wrap items-baseline gap-x-1">
+                  <span className="font-semibold">1.6 Drinking:</span>
+                  {mark(h.drinkingStatus === 'no', 'No')}
+                  {mark(h.drinkingStatus === 'yes', 'Yes')}
+                  <span>ปริมาณ</span>
+                  {writeBlank(h.drinkingAmount, 'min-w-[74px]')}
+                  {writeBlank(h.drinkingDaysPerWeek, 'min-w-[26px] text-center')}
+                  <span>วัน/wk</span>
+                  <span>จำนวน</span>
+                  {writeBlank(h.drinkingYears, 'min-w-[26px] text-center')}
+                  <span>{h.drinkingDurationUnit === 'months' ? 'เดือน' : 'ปี'}</span>
+                  {(h.drinkingQuit || h.drinkingQuitDuration?.trim()) && (
+                    <span>
+                      · เลิก {formatDurationLabel(h.drinkingQuitDuration || '', h.drinkingQuitUnit)}
+                    </span>
+                  )}
                 </div>
-              </div>
-
-              <div>
-                <span className="font-semibold">1.6 Drinking:</span>{' '}
-                {mark(h.drinkingStatus === 'no', 'No')}
-                {mark(h.drinkingStatus === 'yes', `Yes (${formatDrinkingDetail(h)})`)}
-              </div>
-              <div>
-                <span className="font-semibold">1.7 Smoking:</span>{' '}
-                {mark(h.smokingStatus === 'no', 'No')}
-                {mark(h.smokingStatus === 'yes', `Yes (${formatSmokingDetail(h)})`)}
-              </div>
-              <div>
-                <span className="font-semibold">1.8 Drug addiction:</span>{' '}
-                {mark(h.drugAddictionStatus === 'no', 'No')}
-                {mark(
-                  h.drugAddictionStatus === 'yes',
-                  `Yes${
-                    h.drugAddictionStatus === 'yes' && formatDrugAddictionDetail(h)
-                      ? ` (${formatDrugAddictionDetail(h)})`
-                      : ''
-                  }`,
-                )}
+                <div>
+                  <span className="font-semibold">1.7 Smoking:</span>{' '}
+                  {mark(h.smokingStatus === 'no', 'No')}
+                  {mark(h.smokingStatus === 'yes', `Yes (${formatSmokingDetail(h)})`)}
+                </div>
+                <div>
+                  <span className="font-semibold">1.8 Drug addiction:</span>{' '}
+                  {mark(h.drugAddictionStatus === 'no', 'No')}
+                  {mark(
+                    h.drugAddictionStatus === 'yes',
+                    `Yes${
+                      h.drugAddictionStatus === 'yes' && formatDrugAddictionDetail(h)
+                        ? ` (${formatDrugAddictionDetail(h)})`
+                        : ''
+                    }`,
+                  )}
+                </div>
               </div>
             </div>
 
             {/* 3. Investigation */}
-            <div className="p-2.5 space-y-1 shrink-0">
-              <div className="font-bold text-[11.5px]">3. Investigation</div>
-              <div>
-                <span className="font-semibold">3.1 Chest x-ray:</span>{' '}
+            <div className="p-2 space-y-1 shrink-0">
+              <div className="font-bold text-[11px]">3. Investigation</div>
+              <div className="flex flex-wrap items-baseline gap-x-1">
+                <span className="font-semibold">3.1 Chest x-ray:</span>
                 {mark(inv.cxrStatus === 'normal', 'Normal')}
                 {mark(inv.cxrStatus === 'abnormal', 'Abnormal')}
-                {inv.cxrDetail}
+                {writeBlank(inv.cxrDetail, 'min-w-[90px] flex-1')}
               </div>
-              <div>
-                <span className="font-semibold">3.2 EKG:</span>{' '}
+              <div className="flex flex-wrap items-baseline gap-x-1">
+                <span className="font-semibold">3.2 EKG:</span>
                 {mark(inv.ekgStatus === 'normal', 'Normal')}
                 {mark(inv.ekgStatus === 'abnormal', 'Abnormal')}
-                {inv.ekgDetail}
+                {writeBlank(inv.ekgDetail, 'min-w-[100px] flex-1')}
               </div>
-              <div>
-                <span className="font-semibold">3.3 Other (ex. CT):</span> {inv.other || '—'}
+              <div className="flex items-end gap-1">
+                <span className="font-semibold shrink-0">3.3 Other (ex. CT):</span>
+                <span className="flex-1 border-b border-dotted border-slate-600 px-0.5 leading-[1.22]">
+                  {inv.other?.trim() || '\u00A0'}
+                </span>
               </div>
             </div>
 
-            {/* 5. Premedication */}
-            <div className="p-2.5 space-y-1 shrink-0">
-              <div className="font-bold text-[11.5px]">5. Premedication</div>
-              {pm.items.filter(Boolean).length > 0 ? (
-                pm.items.filter(Boolean).map((it, idx) => (
-                  <div key={idx}>
-                    {idx + 1}. {it}
-                  </div>
-                ))
-              ) : (
-                <div>—</div>
-              )}
+            {/* 5. Premedication — Always 5 numbered dotted writing lines */}
+            <div className="p-2 space-y-1 shrink-0">
+              <div className="font-bold text-[11px]">5. Premedication</div>
+              {renderDottedLines(filledPremeds, 5, {
+                numbered: true,
+                rowHeightClass: 'min-h-[17px]',
+                keyPrefix: 'premed',
+              })}
               <div className="mt-1 px-2 py-1 border-[1.5px] border-slate-900 bg-amber-50/70">
-                <div className="text-[14px] font-extrabold tracking-wide text-red-800">
-                  NPO: {pm.npoTime || '__________________'}
+                <div className="text-[13.5px] font-extrabold tracking-wide text-red-800 flex items-baseline gap-1.5">
+                  <span className="shrink-0">NPO:</span>
+                  <span className="flex-1 border-b border-dotted border-red-800/70 px-1 leading-[1.2]">
+                    {pm.npoTime?.trim() || '\u00A0'}
+                  </span>
                 </div>
                 {(pm.lastMealTime || pm.lastWaterTime) && (
-                  <div className="text-[9.5px] font-semibold text-slate-800">
+                  <div className="text-[9.5px] font-semibold text-slate-800 mt-0.5">
                     {pm.lastMealTime ? `อาหารล่าสุด ${pm.lastMealTime} น.` : ''}
                     {pm.lastMealTime && pm.lastWaterTime ? ' · ' : ''}
                     {pm.lastWaterTime ? `น้ำเปล่าล่าสุด ${pm.lastWaterTime} น.` : ''}
                   </div>
                 )}
               </div>
-              <div className="pt-0.5">
-                <span className="font-semibold">on IVF:</span> {pm.onIvf || '—'}
+              <div className="flex items-end gap-1 pt-0.5">
+                <span className="font-semibold shrink-0">on IVF:</span>
+                <span className="flex-1 border-b border-dotted border-slate-600 px-0.5 leading-[1.22]">
+                  {pm.onIvf?.trim() || '\u00A0'}
+                </span>
               </div>
             </div>
           </div>
 
           {/* Right Column */}
           <div className="flex flex-col divide-y divide-slate-900 h-full min-h-0">
-            {/* 2. Physical examination */}
-            <div className="p-2.5 space-y-1.5 flex-1">
-              <div className="font-bold text-[11.5px]">2. Physical examination</div>
-              <div className="font-mono">
-                BW: <strong>{p.bw || '___'}</strong> kg &nbsp; HT:{' '}
-                <strong>{p.ht || '___'}</strong> cm &nbsp; BMI:{' '}
-                <strong>{p.bmi || '___'}</strong>
+            {/* 2. Physical examination — Spacious pen-writable Vital Signs & Anthropometrics */}
+            <div className="p-2 space-y-1 flex-1">
+              <div className="font-bold text-[11px]">2. Physical examination</div>
+              <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 leading-[1.35]">
+                <span>
+                  <span className="font-semibold">BW:</span>{' '}
+                  {writeBlank(p.bw, 'min-w-[48px]', { mono: true })} kg
+                </span>
+                <span>
+                  <span className="font-semibold">HT:</span>{' '}
+                  {writeBlank(p.ht, 'min-w-[50px]', { mono: true })} cm
+                </span>
+                <span>
+                  <span className="font-semibold">BMI:</span>{' '}
+                  {writeBlank(p.bmi, 'min-w-[48px]', { mono: true })}
+                </span>
               </div>
-              <div className="font-mono">
-                Vital signs: BP=<strong>{p.bp || '_____'}</strong>mmHg · P=
-                <strong>{p.pulse || '___'}</strong>bpm · RR=<strong>{p.rr || '__'}</strong>bpm ·
-                T=<strong>{p.temp || '__._'}</strong>°C · SpO2=<strong>{p.spo2 || '__'}</strong>%
+              <div className="space-y-1 leading-[1.35]">
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <span className="font-semibold">Vital signs:</span>
+                  <span>
+                    BP {writeBlank(p.bp, 'min-w-[74px]', { mono: true })} mmHg
+                  </span>
+                  <span>
+                    P {writeBlank(p.pulse, 'min-w-[46px]', { mono: true })} /min
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 pl-1">
+                  <span>
+                    RR {writeBlank(p.rr, 'min-w-[44px]', { mono: true })} /min
+                  </span>
+                  <span>
+                    T {writeBlank(p.temp, 'min-w-[46px]', { mono: true })} °C
+                  </span>
+                  <span>
+                    SpO2 {writeBlank(p.spo2, 'min-w-[46px]', { mono: true })} %
+                  </span>
+                </div>
+              </div>
+              <div className="space-y-0.5 leading-[1.3] pt-0.5 border-t border-dotted border-slate-300">
+                <div className="flex flex-wrap items-baseline gap-x-1.5">
+                  <span className="font-semibold">Status ปัจจุบัน:</span>
+                  <span>
+                    GCS E{writeBlank(p.gcsE, 'min-w-[22px] text-center', { mono: true })}
+                    V{writeBlank(p.gcsV, 'min-w-[22px] text-center', { mono: true })}
+                    M{writeBlank(p.gcsM, 'min-w-[22px] text-center', { mono: true })}
+                  </span>
+                  <span className="inline-flex flex-wrap items-baseline">
+                    {mark(p.selfCareStatus === 'independent', 'ช่วยเหลือตัวเองได้')}
+                    {mark(p.selfCareStatus === 'dependent', 'ช่วยเหลือตัวเองไม่ได้')}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-baseline gap-x-1.5 pl-1">
+                  <span className="font-semibold">อาการ:</span>
+                  {mark(p.dyspneaStatus === 'no', 'ไม่เหนื่อยหอบ')}
+                  {mark(p.dyspneaStatus === 'yes', 'เหนื่อยหอบ')}
+                  {writeBlank(p.currentStatusDetail, 'min-w-[115px] flex-1')}
+                </div>
               </div>
               {formatOxygenSupportSummary(p.oxygenSupport) && (
                 <div>
@@ -353,7 +525,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                   )}
                 </div>
                 <DentalArchBadge
-                  className="w-[76px] h-[48px] shrink-0"
+                  className="w-[74px] h-[46px] shrink-0"
                   missingTeeth={p.missingTeeth || []}
                   looseTeeth={p.looseTeeth || []}
                 />
@@ -380,34 +552,36 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                   {mark(p.expectedDifficultAirway === 'yes', 'Yes')}
                 </div>
               </div>
-              <div>
-                <span className="font-semibold">2.4 Breath sound:</span>{' '}
+              <div className="flex flex-wrap items-baseline gap-x-1">
+                <span className="font-semibold">2.4 Breath sound:</span>
                 {mark(p.breathSound === 'normal', 'Normal')}
                 {mark(p.breathSound === 'abnormal', 'Abnormal')}
-                {p.breathSoundDetail}
+                {writeBlank(p.breathSoundDetail, 'min-w-[80px] flex-1')}
               </div>
-              <div>
-                <span className="font-semibold">2.5 Heart sound:</span>{' '}
+              <div className="flex flex-wrap items-baseline gap-x-1">
+                <span className="font-semibold">2.5 Heart sound:</span>
                 {mark(p.heartSound === 'normal', 'Normal')}
                 {mark(p.heartSound === 'abnormal', 'Abnormal')}
-                {p.heartSoundDetail}
+                {writeBlank(p.heartSoundDetail, 'min-w-[80px] flex-1')}
               </div>
-              <div>
-                <span className="font-semibold">2.6 Functional Capacity:</span>{' '}
-                {p.functionalCapacity || '—'}
+              <div className="flex flex-wrap items-baseline gap-x-1">
+                <span className="font-semibold shrink-0">2.6 FC:</span>
+                {mark(p.functionalCapacityLevel === '>4', '> 4 METS')}
+                {mark(p.functionalCapacityLevel === '<4', '< 4 METS')}
+                {writeBlank(p.functionalCapacity, 'min-w-[110px] flex-1')}
               </div>
             </div>
 
             {/* 4. Laboratory Evaluation */}
-            <div className="p-2.5 space-y-1 shrink-0">
+            <div className="p-2 space-y-1 shrink-0">
               {(() => {
                 const effectiveCbcDate = lab.cbcDate || (!lab.chemDate ? lab.labDate : '');
                 const effectiveChemDate = lab.chemDate || (!lab.cbcDate ? lab.labDate : '');
                 return (
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <div className="font-bold text-[11.5px]">4. Laboratory Evaluation</div>
+                    <div className="font-bold text-[11px]">4. Laboratory Evaluation</div>
                     {(effectiveCbcDate || effectiveChemDate) && (
-                      <div className="text-[10px] font-mono flex flex-wrap gap-x-2">
+                      <div className="text-[9.5px] font-mono flex flex-wrap gap-x-2">
                         {effectiveCbcDate && (
                           <span>
                             วันที่ CBC: <strong>{formatShortThaiDate(effectiveCbcDate)}</strong>
@@ -427,52 +601,61 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                 <CbcFishbone lab={lab} readOnly />
                 <ChemFishbone lab={lab} readOnly />
               </div>
-              <div className="font-mono">
-                Coag: PT=<strong>{lab.pt || '—'}</strong>s · PTT=<strong>{lab.ptt || '—'}</strong>s · INR=
-                <strong>{lab.inr || '—'}</strong>
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <span className="font-semibold">Coag:</span>
+                <span>PT {writeBlank(lab.pt, 'min-w-[34px]', { mono: true })}s</span>
+                <span>PTT {writeBlank(lab.ptt, 'min-w-[34px]', { mono: true })}s</span>
+                <span>INR {writeBlank(lab.inr, 'min-w-[34px]', { mono: true })}</span>
               </div>
-              <div className="font-mono">
-                LFT: SGOT=<strong>{lab.sgot || '—'}</strong> · SGPT=<strong>{lab.sgpt || '—'}</strong> · ALP=
-                <strong>{lab.alp || '—'}</strong> · Alb=<strong>{lab.alb || '—'}</strong>
+              <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+                <span className="font-semibold">LFT:</span>
+                <span>SGOT {writeBlank(lab.sgot, 'min-w-[30px]', { mono: true })}</span>
+                <span>SGPT {writeBlank(lab.sgpt, 'min-w-[30px]', { mono: true })}</span>
+                <span>ALP {writeBlank(lab.alp, 'min-w-[30px]', { mono: true })}</span>
+                <span>Alb {writeBlank(lab.alb, 'min-w-[30px]', { mono: true })}</span>
               </div>
-              <div>
-                Glucose: <strong className="font-mono">{lab.glucose || '—'}</strong> mg/dl · HbA1C:{' '}
-                <strong className="font-mono">{lab.hba1c || '—'}</strong> · Lactate:{' '}
-                <strong className="font-mono">{lab.lactate || '—'}</strong> · Trop I:{' '}
-                <strong className="font-mono">{lab.tropI || '—'}</strong>
+              <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+                <span>DTX/Glu {writeBlank(lab.glucose, 'min-w-[36px]', { mono: true })}</span>
+                <span>HbA1C {writeBlank(lab.hba1c, 'min-w-[30px]', { mono: true })}</span>
+                <span>Lactate {writeBlank(lab.lactate, 'min-w-[30px]', { mono: true })}</span>
+                <span>Trop I {writeBlank(lab.tropI, 'min-w-[30px]', { mono: true })}</span>
               </div>
-              {(lab.ft3?.trim() || lab.ft4?.trim() || lab.tsh?.trim()) && (
-                <div className="font-mono">
-                  TFT: FT3=<strong>{lab.ft3 || '—'}</strong> · FT4=
-                  <strong>{lab.ft4 || '—'}</strong> · TSH=<strong>{lab.tsh || '—'}</strong>
-                </div>
-              )}
-              {hasBloodGasValues(lab) && (() => {
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <span className="font-semibold">TFT:</span>
+                <span>FT3 {writeBlank(lab.ft3, 'min-w-[36px]', { mono: true })}</span>
+                <span>FT4 {writeBlank(lab.ft4, 'min-w-[36px]', { mono: true })}</span>
+                <span>TSH {writeBlank(lab.tsh, 'min-w-[36px]', { mono: true })}</span>
+              </div>
+              {(() => {
                 const isVbg = lab.bgType === 'VBG';
                 const isAbg = lab.bgType === 'ABG';
-                const bgTitle = isVbg ? 'VBG' : isAbg ? 'ABG' : 'Blood Gas';
                 const pco2Label = isVbg ? 'PvCO2' : isAbg ? 'PaCO2' : 'pCO2';
                 const po2Label = isVbg ? 'PvO2' : isAbg ? 'PaO2' : 'pO2';
                 const satLabel = isVbg ? 'SvO2' : isAbg ? 'SaO2' : 'O2Sat';
                 const pfRatio = computeBloodGasPfRatio(lab);
                 return (
-                  <div className="font-mono">
-                    {bgTitle}: pH=<strong>{lab.bgPh || '—'}</strong> · {pco2Label}=
-                    <strong>{lab.bgPco2 || '—'}</strong> · {po2Label}=
-                    <strong>{lab.bgPo2 || '—'}</strong> · HCO3=
-                    <strong>{lab.bgHco3 || '—'}</strong> · BE=
-                    <strong>{lab.bgBe || '—'}</strong> · {satLabel}=
-                    <strong>{lab.bgSao2 ? `${lab.bgSao2}%` : '—'}</strong>
-                    {lab.bgFio2?.trim() ? (
-                      <>
-                        {' '}· FiO2=<strong>{lab.bgFio2}</strong>
-                      </>
-                    ) : null}
-                    {pfRatio !== null ? (
-                      <>
-                        {' '}· P/F=<strong>{pfRatio}</strong>
-                      </>
-                    ) : null}
+                  <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+                    <span className="font-semibold">Blood Gas:</span>
+                    {mark(isAbg, 'ABG')}
+                    {mark(isVbg, 'VBG')}
+                    <span>pH {writeBlank(lab.bgPh, 'min-w-[28px]', { mono: true })}</span>
+                    <span>
+                      {pco2Label} {writeBlank(lab.bgPco2, 'min-w-[28px]', { mono: true })}
+                    </span>
+                    <span>
+                      {po2Label} {writeBlank(lab.bgPo2, 'min-w-[28px]', { mono: true })}
+                    </span>
+                    <span>HCO3 {writeBlank(lab.bgHco3, 'min-w-[28px]', { mono: true })}</span>
+                    <span>BE {writeBlank(lab.bgBe, 'min-w-[26px]', { mono: true })}</span>
+                    <span>
+                      {satLabel} {writeBlank(lab.bgSao2, 'min-w-[26px]', { mono: true })}%
+                    </span>
+                    <span>FiO2 {writeBlank(lab.bgFio2, 'min-w-[26px]', { mono: true })}</span>
+                    {pfRatio !== null && (
+                      <span className="font-mono">
+                        · P/F=<strong>{pfRatio}</strong>
+                      </span>
+                    )}
                   </div>
                 );
               })()}
@@ -497,13 +680,15 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                 </div>
               )}
               <div className="space-y-0.5">
-                <div className="font-mono">
-                  Group เลือด:{' '}
-                  <strong>{formatBloodGroup(lab.bloodGroup, lab.bloodRh) || '—'}</strong> · Blood
-                  component prepare: {box(Boolean(lab.prepTs), 'T&S')} PRC=
-                  <strong>{lab.prepPrc || '—'}</strong>u · FFP=
-                  <strong>{lab.prepFfp || '—'}</strong>u · Plt=<strong>{lab.prepPlt || '—'}</strong>u · Cryo=
-                  <strong>{lab.prepCryo || '—'}</strong>u
+                <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+                  <span>
+                    Group เลือด {writeBlank(formatBloodGroup(lab.bloodGroup, lab.bloodRh), 'min-w-[34px]', { mono: true })}
+                  </span>
+                  <span>· {box(Boolean(lab.prepTs), 'T&S')}</span>
+                  <span>PRC {writeBlank(lab.prepPrc, 'min-w-[24px]', { mono: true })}u</span>
+                  <span>FFP {writeBlank(lab.prepFfp, 'min-w-[24px]', { mono: true })}u</span>
+                  <span>Plt {writeBlank(lab.prepPlt, 'min-w-[24px]', { mono: true })}u</span>
+                  <span>Cryo {writeBlank(lab.prepCryo, 'min-w-[24px]', { mono: true })}u</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-1">
                   {BLOOD_PREP_STATUS_OPTIONS.map((opt) => (
@@ -523,29 +708,34 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
               </div>
             </div>
 
-            {/* 6. Consult Med/Cardio */}
-            <div className="p-2.5 space-y-1 shrink-0">
-              <div className="font-bold text-[11.5px]">6. Consult Med/Cardio</div>
-              <div className="flex flex-wrap items-center gap-x-1">
-                {CONSULT_TYPE_OPTIONS.filter(
-                  (opt) =>
-                    opt.value === 'none' ||
-                    opt.value === 'med' ||
-                    opt.value === 'cardio' ||
-                    (fd.consultTypes || []).includes(opt.value),
-                ).map((opt) => (
-                  <React.Fragment key={opt.value}>
-                    {box((fd.consultTypes || []).includes(opt.value), opt.shortLabel)}
-                  </React.Fragment>
-                ))}
+            {/* 6. Consult Med/Cardio — Always 6 full-width dotted writing lines */}
+            <div className="p-2 space-y-1 shrink-0">
+              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+                <div className="font-bold text-[11px]">6. Consult Med/Cardio</div>
+                <div className="flex flex-wrap items-center gap-x-0.5">
+                  {CONSULT_TYPE_OPTIONS.filter(
+                    (opt) =>
+                      opt.value === 'none' ||
+                      opt.value === 'med' ||
+                      opt.value === 'cardio' ||
+                      (fd.consultTypes || []).includes(opt.value),
+                  ).map((opt) => (
+                    <React.Fragment key={opt.value}>
+                      {box((fd.consultTypes || []).includes(opt.value), opt.shortLabel)}
+                    </React.Fragment>
+                  ))}
+                </div>
               </div>
-              <div className="whitespace-pre-wrap">{fd.consult || '—'}</div>
+              {renderDottedLines(consultTextLines, 6, {
+                rowHeightClass: 'min-h-[17px]',
+                keyPrefix: 'consult',
+              })}
             </div>
           </div>
         </div>
 
         {/* Lower Sections 7-10 */}
-        <div className="p-2.5 space-y-1.5 shrink-0">
+        <div className="p-2 space-y-1 shrink-0">
           <div>
             <span className="font-bold">7. ASA Classification:</span>{' '}
             {(['I', 'II', 'III', 'IV', 'V', 'VI'] as const).map((cls) =>
@@ -555,12 +745,15 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
           </div>
           <div>
             <span className="font-bold">8. Problem list:</span>{' '}
-            {fd.problemList.filter(Boolean).length > 0
-              ? fd.problemList
-                  .filter(Boolean)
-                  .map((prob, i) => `${i + 1}) ${prob}`)
-                  .join(' · ')
-              : '—'}
+            {filledProblems.length > 0 ? (
+              <span>
+                {filledProblems.map((prob, i) => `${i + 1}) ${prob}`).join(' · ')}
+              </span>
+            ) : (
+              <span className="inline-block w-[82%] border-b border-dotted border-slate-600 align-baseline">
+                {'\u00A0'}
+              </span>
+            )}
           </div>
           <div>
             <span className="font-bold">9. Anesthetic plan:</span>{' '}
@@ -589,23 +782,24 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
           </div>
           <div>
             <span className="font-bold">10. สิ่งที่ต้องเตรียม (ตาม order วิสัญญีแพทย์):</span>{' '}
-            {fd.preparationOrders.filter(Boolean).length > 0
-              ? fd.preparationOrders
-                  .filter(Boolean)
-                  .map((ord, i) => `${i + 1}) ${ord}`)
-                  .join(' · ')
-              : '—'}
+            {filledPrepOrders.length > 0 ? (
+              <span>
+                {filledPrepOrders.map((ord, i) => `${i + 1}) ${ord}`).join(' · ')}
+              </span>
+            ) : (
+              <span className="inline-block w-[66%] border-b border-dotted border-slate-600 align-baseline">
+                {'\u00A0'}
+              </span>
+            )}
           </div>
           <div className="pt-1.5 mt-1 border-t border-slate-400 flex items-center justify-end gap-4">
             <span>
               <strong>Summarized by:</strong>{' '}
-              <strong>{fd.postAnesthesia.summarizedBy || '________________________'}</strong>
+              {writeBlank(fd.postAnesthesia.summarizedBy, 'min-w-[155px]')}
             </span>
             <span>
               <strong>date:</strong>{' '}
-              <strong className="font-mono">
-                {formatThaiDateBE(fd.postAnesthesia.summarizedDate) || '____________'}
-              </strong>
+              {writeBlank(formatThaiDateBE(fd.postAnesthesia.summarizedDate), 'min-w-[85px]', { mono: true })}
             </span>
           </div>
         </div>

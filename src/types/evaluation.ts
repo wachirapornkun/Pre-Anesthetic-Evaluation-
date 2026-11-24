@@ -22,6 +22,10 @@ export type ToothMarkMode = 'cycle' | 'missing' | 'loose' | 'clear';
 export type GaMethod = 'Intubation' | 'LMA' | 'Mask' | 'TIVA' | 'Other';
 export type RaMethod = 'Spinal block' | 'Epidural' | 'Nerve block' | 'Other';
 export type DurationUnit = 'months' | 'years';
+export type SelfCareStatus = '' | 'independent' | 'dependent';
+export type DyspneaStatus = '' | 'no' | 'yes';
+export type FunctionalCapacityLevel = '' | '>4' | '<4';
+export type UnderlyingControlStatus = '' | 'good' | 'poor';
 export type OxygenSupportMode = '' | 'cannula' | 'mask_bag' | 'ett' | 'other';
 export type VentilatorMode = '' | 'vcv' | 'pcv';
 export type AntiHivStatus = '' | 'negative' | 'positive';
@@ -156,20 +160,26 @@ export interface HistoryData {
   allergyStatus: TriStatus;
   allergyDetail: string;
   underlyingStatus: TriStatus;
+  underlyingControl?: UnderlyingControlStatus;
   dm: boolean;
   dmYears: string;
+  dmControl?: UnderlyingControlStatus;
   dmDetail: string;
   ht: boolean;
   htYears: string;
+  htControl?: UnderlyingControlStatus;
   htDetail: string;
   dlp: boolean;
   dlpYears: string;
+  dlpControl?: UnderlyingControlStatus;
   dlpDetail: string;
   ckd: boolean;
   ckdYears: string;
+  ckdControl?: UnderlyingControlStatus;
   ckdDetail: string;
   heartDisease: boolean;
   heartDiseaseYears: string;
+  heartDiseaseControl?: UnderlyingControlStatus;
   heartDiseaseDetail: string;
   otherUnderlying: string[];
   underlyingDetail: string;
@@ -177,6 +187,7 @@ export interface HistoryData {
   previousOps: string[];
   previousOpComplication: string;
   drinkingStatus: TriStatus;
+  drinkingAmount?: string;
   drinkingDaysPerWeek: string;
   drinkingYears: string;
   drinkingDurationUnit: DurationUnit;
@@ -225,6 +236,12 @@ export interface PhysicalExamData {
   rr: string;
   temp: string;
   spo2: string;
+  gcsE?: string;
+  gcsV?: string;
+  gcsM?: string;
+  selfCareStatus?: SelfCareStatus;
+  dyspneaStatus?: DyspneaStatus;
+  currentStatusDetail?: string;
   oxygenSupport: OxygenSupportData;
   toothStatus: ToothCondition[];
   toothDetail: string;
@@ -242,6 +259,7 @@ export interface PhysicalExamData {
   breathSoundDetail: string;
   heartSound: NormalAbnormal;
   heartSoundDetail: string;
+  functionalCapacityLevel?: FunctionalCapacityLevel;
   functionalCapacity: string;
 }
 
@@ -2353,20 +2371,26 @@ export function createEmptyEvaluation(
         allergyStatus: 'none',
         allergyDetail: '',
         underlyingStatus: 'none',
+        underlyingControl: '',
         dm: false,
         dmYears: '',
+        dmControl: '',
         dmDetail: '',
         ht: false,
         htYears: '',
+        htControl: '',
         htDetail: '',
         dlp: false,
         dlpYears: '',
+        dlpControl: '',
         dlpDetail: '',
         ckd: false,
         ckdYears: '',
+        ckdControl: '',
         ckdDetail: '',
         heartDisease: false,
         heartDiseaseYears: '',
+        heartDiseaseControl: '',
         heartDiseaseDetail: '',
         otherUnderlying: [''],
         underlyingDetail: '',
@@ -2374,6 +2398,7 @@ export function createEmptyEvaluation(
         previousOps: ['', '', ''],
         previousOpComplication: '',
         drinkingStatus: 'none',
+        drinkingAmount: '',
         drinkingDaysPerWeek: '',
         drinkingYears: '',
         drinkingDurationUnit: 'years',
@@ -2406,6 +2431,12 @@ export function createEmptyEvaluation(
         rr: '',
         temp: '',
         spo2: '',
+        gcsE: '',
+        gcsV: '',
+        gcsM: '',
+        selfCareStatus: '',
+        dyspneaStatus: '',
+        currentStatusDetail: '',
         oxygenSupport: createEmptyOxygenSupport(),
         toothStatus: [],
         toothDetail: '',
@@ -2423,6 +2454,7 @@ export function createEmptyEvaluation(
         breathSoundDetail: '',
         heartSound: '',
         heartSoundDetail: '',
+        functionalCapacityLevel: '',
         functionalCapacity: '',
       },
       investigation: {
@@ -2485,7 +2517,7 @@ export function createEmptyEvaluation(
         prepStatusDetail: '',
       },
       premedication: {
-        items: ['', '', '', ''],
+        items: ['', '', '', '', ''],
         npoTime: '',
         lastMealTime: '',
         lastWaterTime: '',
@@ -2783,20 +2815,44 @@ export function sanitizeEvaluationForFirestore(
         allergyStatus: sanitizeTri(fd.history.allergyStatus),
         allergyDetail: clampStr(fd.history.allergyDetail, 300),
         underlyingStatus: sanitizeTri(fd.history.underlyingStatus),
+        underlyingControl:
+          fd.history.underlyingControl === 'good' || fd.history.underlyingControl === 'poor'
+            ? fd.history.underlyingControl
+            : '',
         dm: Boolean(fd.history.dm),
         dmYears: clampStr(fd.history.dmYears, 20),
+        dmControl:
+          fd.history.dmControl === 'good' || fd.history.dmControl === 'poor'
+            ? fd.history.dmControl
+            : '',
         dmDetail: clampStr(fd.history.dmDetail ?? '', 200),
         ht: Boolean(fd.history.ht),
         htYears: clampStr(fd.history.htYears, 20),
+        htControl:
+          fd.history.htControl === 'good' || fd.history.htControl === 'poor'
+            ? fd.history.htControl
+            : '',
         htDetail: clampStr(fd.history.htDetail ?? '', 200),
         dlp: Boolean(fd.history.dlp),
         dlpYears: clampStr(fd.history.dlpYears, 20),
+        dlpControl:
+          fd.history.dlpControl === 'good' || fd.history.dlpControl === 'poor'
+            ? fd.history.dlpControl
+            : '',
         dlpDetail: clampStr(fd.history.dlpDetail ?? '', 200),
         ckd: Boolean(fd.history.ckd),
         ckdYears: clampStr(fd.history.ckdYears, 20),
+        ckdControl:
+          fd.history.ckdControl === 'good' || fd.history.ckdControl === 'poor'
+            ? fd.history.ckdControl
+            : '',
         ckdDetail: clampStr(fd.history.ckdDetail ?? '', 200),
         heartDisease: Boolean(fd.history.heartDisease),
         heartDiseaseYears: clampStr(fd.history.heartDiseaseYears, 20),
+        heartDiseaseControl:
+          fd.history.heartDiseaseControl === 'good' || fd.history.heartDiseaseControl === 'poor'
+            ? fd.history.heartDiseaseControl
+            : '',
         heartDiseaseDetail: clampStr(fd.history.heartDiseaseDetail ?? '', 200),
         otherUnderlying: clampStrArray(fd.history.otherUnderlying, 8, 120),
         underlyingDetail: clampStr(fd.history.underlyingDetail ?? '', 500),
@@ -2804,6 +2860,7 @@ export function sanitizeEvaluationForFirestore(
         previousOps: clampStrArray(fd.history.previousOps, 8, 250),
         previousOpComplication: clampStr(fd.history.previousOpComplication, 500),
         drinkingStatus: sanitizeTri(fd.history.drinkingStatus),
+        drinkingAmount: clampStr(fd.history.drinkingAmount ?? '', 120),
         drinkingDaysPerWeek: clampStr(fd.history.drinkingDaysPerWeek, 20),
         drinkingYears: clampStr(fd.history.drinkingYears, 20),
         drinkingDurationUnit: fd.history.drinkingDurationUnit === 'months' ? 'months' : 'years',
@@ -2837,6 +2894,19 @@ export function sanitizeEvaluationForFirestore(
         rr: clampStr(fd.physicalExam.rr, 20),
         temp: clampStr(fd.physicalExam.temp, 20),
         spo2: clampStr(fd.physicalExam.spo2, 20),
+        gcsE: clampStr(fd.physicalExam.gcsE ?? '', 10),
+        gcsV: clampStr(fd.physicalExam.gcsV ?? '', 10),
+        gcsM: clampStr(fd.physicalExam.gcsM ?? '', 10),
+        selfCareStatus:
+          fd.physicalExam.selfCareStatus === 'independent' ||
+          fd.physicalExam.selfCareStatus === 'dependent'
+            ? fd.physicalExam.selfCareStatus
+            : '',
+        dyspneaStatus:
+          fd.physicalExam.dyspneaStatus === 'no' || fd.physicalExam.dyspneaStatus === 'yes'
+            ? fd.physicalExam.dyspneaStatus
+            : '',
+        currentStatusDetail: clampStr(fd.physicalExam.currentStatusDetail ?? '', 200),
         oxygenSupport: (() => {
           const ox = fd.physicalExam.oxygenSupport;
           if (!ox || typeof ox !== 'object') return createEmptyOxygenSupport();
@@ -2895,6 +2965,11 @@ export function sanitizeEvaluationForFirestore(
         breathSoundDetail: clampStr(fd.physicalExam.breathSoundDetail, 300),
         heartSound: sanitizeNormalAbnormal(fd.physicalExam.heartSound),
         heartSoundDetail: clampStr(fd.physicalExam.heartSoundDetail, 300),
+        functionalCapacityLevel:
+          fd.physicalExam.functionalCapacityLevel === '>4' ||
+          fd.physicalExam.functionalCapacityLevel === '<4'
+            ? fd.physicalExam.functionalCapacityLevel
+            : '',
         functionalCapacity: clampStr(fd.physicalExam.functionalCapacity, 200),
       },
       investigation: {
@@ -3149,11 +3224,14 @@ export function formatUnderlyingDiseaseTag(
   years?: string,
   detail?: string,
   unit = 'ปี',
+  control?: UnderlyingControlStatus,
 ): string {
   const y = (years ?? '').trim();
   const d = (detail ?? '').trim();
   const parts: string[] = [];
   if (y) parts.push(`${y} ${unit}`);
+  if (control === 'good') parts.push('Good control');
+  else if (control === 'poor') parts.push('Poor control');
   if (d) parts.push(d);
   return parts.length > 0 ? `${name} (${parts.join(' · ')})` : name;
 }
@@ -3165,7 +3243,8 @@ export function formatDurationLabel(value: string, unit: DurationUnit = 'years')
 }
 
 export function formatDrinkingDetail(h: HistoryData): string {
-  const base = `${h.drinkingDaysPerWeek || '___'} วัน/wk จำนวน ${formatDurationLabel(h.drinkingYears, h.drinkingDurationUnit)}`;
+  const amount = h.drinkingAmount?.trim();
+  const base = `ปริมาณ ${amount || '______'} · ${h.drinkingDaysPerWeek?.trim() || '___'} วัน/wk จำนวน ${formatDurationLabel(h.drinkingYears, h.drinkingDurationUnit)}`;
   if (h.drinkingQuit || h.drinkingQuitDuration?.trim()) {
     return `${base} · เลิก ${formatDurationLabel(h.drinkingQuitDuration || '', h.drinkingQuitUnit)}`;
   }
@@ -3195,6 +3274,23 @@ export function formatDrugAddictionDetail(h: HistoryData): string {
     parts.push(`เลิก ${formatDurationLabel(h.drugAddictionQuitDuration || '', h.drugAddictionQuitUnit)}`);
   }
   return parts.join(' · ');
+}
+
+export function formatGcsTotal(e?: string, v?: string, m?: string): string {
+  const eTrim = (e || '').trim();
+  const vTrim = (v || '').trim();
+  const mTrim = (m || '').trim();
+  if (!eTrim && !vTrim && !mTrim) return '';
+  const eNum = parseInt(eTrim, 10);
+  const mNum = parseInt(mTrim, 10);
+  const vUpper = vTrim.toUpperCase();
+  const vIsTube = vUpper === 'T' || vUpper === 'VT';
+  const vNum = parseInt(vTrim, 10);
+  if (Number.isFinite(eNum) && Number.isFinite(mNum)) {
+    if (vIsTube) return `${eNum + mNum}T`;
+    if (Number.isFinite(vNum)) return `${eNum + vNum + mNum}`;
+  }
+  return '';
 }
 
 export function formatOxygenSupportSummary(ox?: OxygenSupportData): string {
@@ -3465,23 +3561,51 @@ export function computeClinicalSummary(record: PreAnestheticEvaluation): Clinica
 
   const underlyingTags: string[] = [];
   if (history.dm) {
-    underlyingTags.push(formatUnderlyingDiseaseTag('DM', history.dmYears, history.dmDetail, 'yr'));
+    underlyingTags.push(
+      formatUnderlyingDiseaseTag('DM', history.dmYears, history.dmDetail, 'yr', history.dmControl),
+    );
   }
   if (history.ht) {
-    underlyingTags.push(formatUnderlyingDiseaseTag('HT', history.htYears, history.htDetail, 'yr'));
+    underlyingTags.push(
+      formatUnderlyingDiseaseTag('HT', history.htYears, history.htDetail, 'yr', history.htControl),
+    );
   }
   if (history.dlp) {
-    underlyingTags.push(formatUnderlyingDiseaseTag('DLP', history.dlpYears, history.dlpDetail, 'yr'));
+    underlyingTags.push(
+      formatUnderlyingDiseaseTag('DLP', history.dlpYears, history.dlpDetail, 'yr', history.dlpControl),
+    );
   }
   if (history.ckd) {
-    underlyingTags.push(formatUnderlyingDiseaseTag('โรคไต', history.ckdYears, history.ckdDetail, 'yr'));
+    underlyingTags.push(
+      formatUnderlyingDiseaseTag('โรคไต', history.ckdYears, history.ckdDetail, 'yr', history.ckdControl),
+    );
   }
   if (history.heartDisease) {
     underlyingTags.push(
-      formatUnderlyingDiseaseTag('โรคหัวใจ', history.heartDiseaseYears, history.heartDiseaseDetail, 'yr'),
+      formatUnderlyingDiseaseTag(
+        'โรคหัวใจ',
+        history.heartDiseaseYears,
+        history.heartDiseaseDetail,
+        'yr',
+        history.heartDiseaseControl,
+      ),
     );
   }
   history.otherUnderlying.filter((x) => x.trim()).forEach((x) => underlyingTags.push(x.trim()));
+  if (history.underlyingControl === 'good' || history.underlyingControl === 'poor') {
+    const hasPerDiseaseCtrl = Boolean(
+      history.dmControl ||
+        history.htControl ||
+        history.dlpControl ||
+        history.ckdControl ||
+        history.heartDiseaseControl,
+    );
+    if (!hasPerDiseaseCtrl) {
+      underlyingTags.push(
+        history.underlyingControl === 'poor' ? 'Poor control' : 'Good control',
+      );
+    }
+  }
   if (history.underlyingDetail?.trim()) {
     underlyingTags.push(history.underlyingDetail.trim());
   }
@@ -4734,16 +4858,54 @@ export function generateAutoProblemEntries(
 
   // Poor functional capacity (< 4 METs, bedridden, NYHA III-IV)
   const fc = physicalExam.functionalCapacity.trim();
+  const fcLevel = physicalExam.functionalCapacityLevel || '';
   if (
-    fc &&
-    /(?:<\s*4|\b[1-3]\s*met|poor|bedridden|nyha\s*(?:iii|iv|3|4)|ติดเตียง|ช่วยเหลือตัวเองไม่ได้)/i.test(
-      fc,
-    )
+    fcLevel === '<4' ||
+    (fc &&
+      /(?:<\s*4|\b[1-3]\s*met|poor|bedridden|nyha\s*(?:iii|iv|3|4)|ติดเตียง|ช่วยเหลือตัวเองไม่ได้)/i.test(
+        fc,
+      ))
   ) {
+    const fcSummary =
+      fcLevel === '<4'
+        ? fc
+          ? `< 4 METS · ${fc}`
+          : '< 4 METS'
+        : fc;
     conditionItems.push({
-      text: `Poor functional capacity (${fc})`,
+      text: `Poor functional capacity (${fcSummary})`,
       score: 76,
     });
+  }
+
+  // Current Status: Dyspnea / Dependent / Altered GCS
+  if (physicalExam.dyspneaStatus === 'yes') {
+    conditionItems.push({
+      text: 'Dyspnea (เหนื่อยหอบ)',
+      score: 82,
+    });
+  }
+  if (physicalExam.selfCareStatus === 'dependent' && fcLevel !== '<4') {
+    conditionItems.push({
+      text: 'Dependent status (ช่วยเหลือตัวเองไม่ได้)',
+      score: 70,
+    });
+  }
+  const gcsEVal = parseInt((physicalExam.gcsE || '').trim(), 10);
+  const gcsVTrim = (physicalExam.gcsV || '').trim().toUpperCase();
+  const gcsVVal = parseInt(gcsVTrim, 10);
+  const gcsMVal = parseInt((physicalExam.gcsM || '').trim(), 10);
+  if (Number.isFinite(gcsEVal) && Number.isFinite(gcsMVal)) {
+    const isTube = gcsVTrim === 'T' || gcsVTrim === 'VT';
+    const gcsNumeric = isTube ? gcsEVal + gcsMVal : Number.isFinite(gcsVVal) ? gcsEVal + gcsVVal + gcsMVal : NaN;
+    const isAltered = isTube ? gcsEVal + gcsMVal <= 8 : Number.isFinite(gcsNumeric) && gcsNumeric <= 12;
+    if (isAltered) {
+      const gcsLabel = `E${physicalExam.gcsE?.trim()}V${physicalExam.gcsV?.trim()}M${physicalExam.gcsM?.trim()}`;
+      conditionItems.push({
+        text: `Alteration of consciousness (GCS ${gcsLabel})`,
+        score: gcsNumeric <= 8 ? 92 : 84,
+      });
+    }
   }
 
   // NPO fasting evaluation: Food < 8 hr or Water < 2 hr (counted from last intake to operationTime) -> Full stomach
@@ -4944,7 +5106,9 @@ export function generateAutoProblemEntries(
     history.drinkingStatus === 'yes' ||
     hasAlcoholWithdrawal ||
     (history.drinkingStatus !== 'no' &&
-      (Boolean(history.drinkingDaysPerWeek?.trim()) || Boolean(history.drinkingYears?.trim()))) ||
+      (Boolean(history.drinkingAmount?.trim()) ||
+        Boolean(history.drinkingDaysPerWeek?.trim()) ||
+        Boolean(history.drinkingYears?.trim()))) ||
     (history.drinkingStatus !== 'no' &&
       hasPositiveClinicalMatch(
         clinicalCorpus,
@@ -4952,6 +5116,7 @@ export function generateAutoProblemEntries(
       ));
   if (hasAlcoholData) {
     const drinkParts: string[] = [];
+    if (history.drinkingAmount?.trim()) drinkParts.push(`ปริมาณ ${history.drinkingAmount.trim()}`);
     if (history.drinkingDaysPerWeek?.trim()) drinkParts.push(`${history.drinkingDaysPerWeek.trim()} วัน/wk`);
     if (history.drinkingYears?.trim()) {
       drinkParts.push(
@@ -5018,14 +5183,26 @@ export function generateAutoProblemEntries(
   const underlyingItems: { text: string; score: number }[] = [];
   if (history.heartDisease) {
     underlyingItems.push({
-      text: formatUnderlyingDiseaseTag('โรคหัวใจ', history.heartDiseaseYears, history.heartDiseaseDetail, 'ปี'),
-      score: 79,
+      text: formatUnderlyingDiseaseTag(
+        'โรคหัวใจ',
+        history.heartDiseaseYears,
+        history.heartDiseaseDetail,
+        'ปี',
+        history.heartDiseaseControl,
+      ),
+      score: history.heartDiseaseControl === 'poor' ? 86 : 79,
     });
   }
   if (history.ckd) {
     underlyingItems.push({
-      text: formatUnderlyingDiseaseTag('CKD', history.ckdYears, history.ckdDetail, 'ปี'),
-      score: 75,
+      text: formatUnderlyingDiseaseTag(
+        'CKD',
+        history.ckdYears,
+        history.ckdDetail,
+        'ปี',
+        history.ckdControl,
+      ),
+      score: history.ckdControl === 'poor' ? 82 : 75,
     });
   } else if (
     !hasEsrd &&
@@ -5036,14 +5213,26 @@ export function generateAutoProblemEntries(
   }
   if (history.dm) {
     underlyingItems.push({
-      text: formatUnderlyingDiseaseTag('DM', history.dmYears, history.dmDetail, 'ปี'),
-      score: 60,
+      text: formatUnderlyingDiseaseTag(
+        'DM',
+        history.dmYears,
+        history.dmDetail,
+        'ปี',
+        history.dmControl,
+      ),
+      score: history.dmControl === 'poor' ? 72 : 60,
     });
   }
   if (history.ht) {
     underlyingItems.push({
-      text: formatUnderlyingDiseaseTag('HT', history.htYears, history.htDetail, 'ปี'),
-      score: 56,
+      text: formatUnderlyingDiseaseTag(
+        'HT',
+        history.htYears,
+        history.htDetail,
+        'ปี',
+        history.htControl,
+      ),
+      score: history.htControl === 'poor' ? 70 : 56,
     });
   }
   history.otherUnderlying
@@ -5052,9 +5241,26 @@ export function generateAutoProblemEntries(
     .forEach((u) => underlyingItems.push({ text: u, score: 57 }));
   if (history.dlp) {
     underlyingItems.push({
-      text: formatUnderlyingDiseaseTag('DLP', history.dlpYears, history.dlpDetail, 'ปี'),
-      score: 38,
+      text: formatUnderlyingDiseaseTag(
+        'DLP',
+        history.dlpYears,
+        history.dlpDetail,
+        'ปี',
+        history.dlpControl,
+      ),
+      score: history.dlpControl === 'poor' ? 48 : 38,
     });
+  }
+  if (history.underlyingControl === 'poor') {
+    const anyDiseasePoor =
+      history.dmControl === 'poor' ||
+      history.htControl === 'poor' ||
+      history.dlpControl === 'poor' ||
+      history.ckdControl === 'poor' ||
+      history.heartDiseaseControl === 'poor';
+    if (!anyDiseasePoor) {
+      underlyingItems.push({ text: 'Underlying: Poor control', score: 74 });
+    }
   }
   if (history.underlyingDetail?.trim()) {
     underlyingItems.push({

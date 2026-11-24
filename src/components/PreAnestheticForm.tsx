@@ -1726,7 +1726,7 @@ export function PreAnestheticForm({
             <label className="block space-y-1">
               <span className="text-xs font-semibold text-slate-700">1.1 Present illness</span>
               <textarea
-                rows={2}
+                rows={4}
                 value={h.presentIllness}
                 onChange={(e) => updateHistory({ presentIllness: e.target.value })}
                 placeholder="อาการสำคัญและประวัติปัจจุบัน..."
@@ -1737,7 +1737,7 @@ export function PreAnestheticForm({
             <label className="block space-y-1">
               <span className="text-xs font-semibold text-slate-700">1.2 Past illness</span>
               <textarea
-                rows={2}
+                rows={4}
                 value={h.pastIllness}
                 onChange={(e) => updateHistory({ pastIllness: e.target.value })}
                 placeholder="ประวัติการเจ็บป่วยในอดีต..."
@@ -1797,13 +1797,40 @@ export function PreAnestheticForm({
                 >
                   {h.underlyingStatus === 'yes' ? '●' : '○'} Yes
                 </button>
+                <span className="text-slate-300 select-none">|</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = h.underlyingControl === 'good' ? '' : 'good';
+                    updateHistory({
+                      underlyingControl: next,
+                      underlyingStatus: next ? 'yes' : h.underlyingStatus,
+                    });
+                  }}
+                  className={radioBtn(h.underlyingControl === 'good')}
+                >
+                  {h.underlyingControl === 'good' ? '●' : '○'} Good control
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = h.underlyingControl === 'poor' ? '' : 'poor';
+                    updateHistory({
+                      underlyingControl: next,
+                      underlyingStatus: next ? 'yes' : h.underlyingStatus,
+                    });
+                  }}
+                  className={radioBtn(h.underlyingControl === 'poor', 'danger')}
+                >
+                  {h.underlyingControl === 'poor' ? '●' : '○'} Poor control
+                </button>
               </div>
 
               <div className="space-y-3 border border-slate-200 rounded-lg p-3 bg-slate-50/50">
                 <div className="space-y-2">
                   {/* DM */}
                   <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
-                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer w-[92px] shrink-0">
+                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer w-[84px] shrink-0">
                       <input
                         type="checkbox"
                         checked={h.dm}
@@ -1817,7 +1844,7 @@ export function PreAnestheticForm({
                       />
                       DM
                     </label>
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex items-center gap-1 shrink-0">
                       <input
                         type="text"
                         value={h.dmYears}
@@ -1829,9 +1856,47 @@ export function PreAnestheticForm({
                           })
                         }
                         placeholder="จำนวน"
-                        className={`${inputBase} w-14 text-center font-mono tabular-nums text-xs`}
+                        className={`${inputBase} w-12 text-center font-mono tabular-nums text-xs`}
                       />
                       <span className="text-xs text-slate-500">ปี</span>
+                    </div>
+                    <div className="inline-flex rounded border border-slate-300 overflow-hidden text-[11px] shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = h.dmControl === 'good' ? '' : 'good';
+                          updateHistory({
+                            dmControl: next,
+                            dm: next ? true : h.dm,
+                            underlyingStatus: next ? 'yes' : h.underlyingStatus,
+                          });
+                        }}
+                        className={`px-2 py-0.5 font-medium transition-colors ${
+                          h.dmControl === 'good'
+                            ? 'bg-emerald-700 text-white'
+                            : 'bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Good
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = h.dmControl === 'poor' ? '' : 'poor';
+                          updateHistory({
+                            dmControl: next,
+                            dm: next ? true : h.dm,
+                            underlyingStatus: next ? 'yes' : h.underlyingStatus,
+                          });
+                        }}
+                        className={`px-2 py-0.5 font-medium border-l border-slate-300 transition-colors ${
+                          h.dmControl === 'poor'
+                            ? 'bg-red-700 text-white'
+                            : 'bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Poor
+                      </button>
                     </div>
                     <input
                       type="text"
@@ -1844,14 +1909,14 @@ export function PreAnestheticForm({
                         })
                       }
                       maxLength={200}
-                      placeholder="รายละเอียด DM (เช่น คุมได้ / ฉีด Insulin / HbA1c / ขาดยา)"
-                      className={`${inputBase} flex-1 min-w-[180px] text-xs`}
+                      placeholder="รายละเอียด DM (เช่น ฉีด Insulin / HbA1c / ขาดยา)"
+                      className={`${inputBase} flex-1 min-w-[150px] text-xs`}
                     />
                   </div>
 
                   {/* HT */}
                   <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
-                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer w-[92px] shrink-0">
+                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer w-[84px] shrink-0">
                       <input
                         type="checkbox"
                         checked={h.ht}
@@ -1865,7 +1930,7 @@ export function PreAnestheticForm({
                       />
                       HT
                     </label>
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex items-center gap-1 shrink-0">
                       <input
                         type="text"
                         value={h.htYears}
@@ -1877,9 +1942,47 @@ export function PreAnestheticForm({
                           })
                         }
                         placeholder="จำนวน"
-                        className={`${inputBase} w-14 text-center font-mono tabular-nums text-xs`}
+                        className={`${inputBase} w-12 text-center font-mono tabular-nums text-xs`}
                       />
                       <span className="text-xs text-slate-500">ปี</span>
+                    </div>
+                    <div className="inline-flex rounded border border-slate-300 overflow-hidden text-[11px] shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = h.htControl === 'good' ? '' : 'good';
+                          updateHistory({
+                            htControl: next,
+                            ht: next ? true : h.ht,
+                            underlyingStatus: next ? 'yes' : h.underlyingStatus,
+                          });
+                        }}
+                        className={`px-2 py-0.5 font-medium transition-colors ${
+                          h.htControl === 'good'
+                            ? 'bg-emerald-700 text-white'
+                            : 'bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Good
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = h.htControl === 'poor' ? '' : 'poor';
+                          updateHistory({
+                            htControl: next,
+                            ht: next ? true : h.ht,
+                            underlyingStatus: next ? 'yes' : h.underlyingStatus,
+                          });
+                        }}
+                        className={`px-2 py-0.5 font-medium border-l border-slate-300 transition-colors ${
+                          h.htControl === 'poor'
+                            ? 'bg-red-700 text-white'
+                            : 'bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Poor
+                      </button>
                     </div>
                     <input
                       type="text"
@@ -1892,14 +1995,14 @@ export function PreAnestheticForm({
                         })
                       }
                       maxLength={200}
-                      placeholder="รายละเอียด HT (เช่น คุมความดันได้ / BP ประจำ / ขาดยา)"
-                      className={`${inputBase} flex-1 min-w-[180px] text-xs`}
+                      placeholder="รายละเอียด HT (เช่น BP ประจำ / ขาดยา)"
+                      className={`${inputBase} flex-1 min-w-[150px] text-xs`}
                     />
                   </div>
 
                   {/* DLP */}
                   <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
-                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer w-[92px] shrink-0">
+                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer w-[84px] shrink-0">
                       <input
                         type="checkbox"
                         checked={Boolean(h.dlp)}
@@ -1913,7 +2016,7 @@ export function PreAnestheticForm({
                       />
                       DLP
                     </label>
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex items-center gap-1 shrink-0">
                       <input
                         type="text"
                         value={h.dlpYears ?? ''}
@@ -1925,9 +2028,47 @@ export function PreAnestheticForm({
                           })
                         }
                         placeholder="จำนวน"
-                        className={`${inputBase} w-14 text-center font-mono tabular-nums text-xs`}
+                        className={`${inputBase} w-12 text-center font-mono tabular-nums text-xs`}
                       />
                       <span className="text-xs text-slate-500">ปี</span>
+                    </div>
+                    <div className="inline-flex rounded border border-slate-300 overflow-hidden text-[11px] shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = h.dlpControl === 'good' ? '' : 'good';
+                          updateHistory({
+                            dlpControl: next,
+                            dlp: next ? true : h.dlp,
+                            underlyingStatus: next ? 'yes' : h.underlyingStatus,
+                          });
+                        }}
+                        className={`px-2 py-0.5 font-medium transition-colors ${
+                          h.dlpControl === 'good'
+                            ? 'bg-emerald-700 text-white'
+                            : 'bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Good
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = h.dlpControl === 'poor' ? '' : 'poor';
+                          updateHistory({
+                            dlpControl: next,
+                            dlp: next ? true : h.dlp,
+                            underlyingStatus: next ? 'yes' : h.underlyingStatus,
+                          });
+                        }}
+                        className={`px-2 py-0.5 font-medium border-l border-slate-300 transition-colors ${
+                          h.dlpControl === 'poor'
+                            ? 'bg-red-700 text-white'
+                            : 'bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Poor
+                      </button>
                     </div>
                     <input
                       type="text"
@@ -1940,14 +2081,14 @@ export function PreAnestheticForm({
                         })
                       }
                       maxLength={200}
-                      placeholder="รายละเอียด DLP (เช่น ทานยาสม่ำเสมอ / คุมไขมันได้)"
-                      className={`${inputBase} flex-1 min-w-[180px] text-xs`}
+                      placeholder="รายละเอียด DLP (เช่น ทานยาสม่ำเสมอ)"
+                      className={`${inputBase} flex-1 min-w-[150px] text-xs`}
                     />
                   </div>
 
                   {/* โรคไต */}
                   <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
-                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer w-[92px] shrink-0">
+                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer w-[84px] shrink-0">
                       <input
                         type="checkbox"
                         checked={Boolean(h.ckd)}
@@ -1961,7 +2102,7 @@ export function PreAnestheticForm({
                       />
                       โรคไต
                     </label>
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex items-center gap-1 shrink-0">
                       <input
                         type="text"
                         value={h.ckdYears ?? ''}
@@ -1973,9 +2114,47 @@ export function PreAnestheticForm({
                           })
                         }
                         placeholder="จำนวน"
-                        className={`${inputBase} w-14 text-center font-mono tabular-nums text-xs`}
+                        className={`${inputBase} w-12 text-center font-mono tabular-nums text-xs`}
                       />
                       <span className="text-xs text-slate-500">ปี</span>
+                    </div>
+                    <div className="inline-flex rounded border border-slate-300 overflow-hidden text-[11px] shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = h.ckdControl === 'good' ? '' : 'good';
+                          updateHistory({
+                            ckdControl: next,
+                            ckd: next ? true : h.ckd,
+                            underlyingStatus: next ? 'yes' : h.underlyingStatus,
+                          });
+                        }}
+                        className={`px-2 py-0.5 font-medium transition-colors ${
+                          h.ckdControl === 'good'
+                            ? 'bg-emerald-700 text-white'
+                            : 'bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Good
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = h.ckdControl === 'poor' ? '' : 'poor';
+                          updateHistory({
+                            ckdControl: next,
+                            ckd: next ? true : h.ckd,
+                            underlyingStatus: next ? 'yes' : h.underlyingStatus,
+                          });
+                        }}
+                        className={`px-2 py-0.5 font-medium border-l border-slate-300 transition-colors ${
+                          h.ckdControl === 'poor'
+                            ? 'bg-red-700 text-white'
+                            : 'bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Poor
+                      </button>
                     </div>
                     <input
                       type="text"
@@ -1988,14 +2167,14 @@ export function PreAnestheticForm({
                         })
                       }
                       maxLength={200}
-                      placeholder="รายละเอียดโรคไต (เช่น CKD stage 3 / HD วัน จ-พ-ศ / CAPD / ปัสสาวะออก)"
-                      className={`${inputBase} flex-1 min-w-[180px] text-xs`}
+                      placeholder="รายละเอียดโรคไต (เช่น CKD stage 3 / HD วัน จ-พ-ศ / CAPD)"
+                      className={`${inputBase} flex-1 min-w-[150px] text-xs`}
                     />
                   </div>
 
                   {/* โรคหัวใจ */}
                   <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
-                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer w-[92px] shrink-0">
+                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 cursor-pointer w-[84px] shrink-0">
                       <input
                         type="checkbox"
                         checked={h.heartDisease}
@@ -2009,7 +2188,7 @@ export function PreAnestheticForm({
                       />
                       โรคหัวใจ
                     </label>
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex items-center gap-1 shrink-0">
                       <input
                         type="text"
                         value={h.heartDiseaseYears}
@@ -2021,9 +2200,47 @@ export function PreAnestheticForm({
                           })
                         }
                         placeholder="จำนวน"
-                        className={`${inputBase} w-14 text-center font-mono tabular-nums text-xs`}
+                        className={`${inputBase} w-12 text-center font-mono tabular-nums text-xs`}
                       />
                       <span className="text-xs text-slate-500">ปี</span>
+                    </div>
+                    <div className="inline-flex rounded border border-slate-300 overflow-hidden text-[11px] shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = h.heartDiseaseControl === 'good' ? '' : 'good';
+                          updateHistory({
+                            heartDiseaseControl: next,
+                            heartDisease: next ? true : h.heartDisease,
+                            underlyingStatus: next ? 'yes' : h.underlyingStatus,
+                          });
+                        }}
+                        className={`px-2 py-0.5 font-medium transition-colors ${
+                          h.heartDiseaseControl === 'good'
+                            ? 'bg-emerald-700 text-white'
+                            : 'bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Good
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = h.heartDiseaseControl === 'poor' ? '' : 'poor';
+                          updateHistory({
+                            heartDiseaseControl: next,
+                            heartDisease: next ? true : h.heartDisease,
+                            underlyingStatus: next ? 'yes' : h.underlyingStatus,
+                          });
+                        }}
+                        className={`px-2 py-0.5 font-medium border-l border-slate-300 transition-colors ${
+                          h.heartDiseaseControl === 'poor'
+                            ? 'bg-red-700 text-white'
+                            : 'bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Poor
+                      </button>
                     </div>
                     <input
                       type="text"
@@ -2036,8 +2253,8 @@ export function PreAnestheticForm({
                         })
                       }
                       maxLength={200}
-                      placeholder="รายละเอียดโรคหัวใจ (เช่น CAD / AF / EF% / ทำ PCI / ไม่มีเจ็บหน้าอก)"
-                      className={`${inputBase} flex-1 min-w-[180px] text-xs`}
+                      placeholder="รายละเอียดโรคหัวใจ (เช่น CAD / AF / EF% / ทำ PCI)"
+                      className={`${inputBase} flex-1 min-w-[150px] text-xs`}
                     />
                   </div>
                 </div>
@@ -2241,6 +2458,20 @@ export function PreAnestheticForm({
                     h.drinkingStatus === 'no' ? 'opacity-50' : ''
                   }`}
                 >
+                  <span className="text-xs text-slate-600">ปริมาณ</span>
+                  <input
+                    type="text"
+                    value={h.drinkingAmount ?? ''}
+                    onChange={(e) =>
+                      updateHistory({
+                        drinkingAmount: e.target.value,
+                        drinkingStatus: e.target.value.trim() ? 'yes' : h.drinkingStatus,
+                      })
+                    }
+                    placeholder="เช่น 2 กระป๋อง, 1 แบน"
+                    aria-label="ดื่มสุรา ปริมาณ"
+                    className={`${inputBase} w-36 text-xs`}
+                  />
                   <input
                     type="text"
                     value={h.drinkingDaysPerWeek}
@@ -3007,6 +3238,161 @@ export function PreAnestheticForm({
                   value={p.spo2}
                   onChange={(e) => updatePhysical({ spo2: e.target.value })}
                   className={`${inputBase} font-mono tabular-nums text-xs`}
+                />
+              </label>
+            </div>
+
+            {/* Status ปัจจุบัน (GCS, ช่วยเหลือตัวเอง, เหนื่อยหอบ) */}
+            <div className="border border-slate-200 rounded-lg p-2.5 bg-blue-50/30 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-800">
+                  Status ปัจจุบัน (Current Status)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => updatePhysical({ gcsE: '4', gcsV: '5', gcsM: '6' })}
+                  className="text-[11px] font-medium text-blue-800 hover:text-blue-950 bg-white border border-blue-200 rounded px-2 py-0.5 transition-colors"
+                >
+                  ตั้งค่าเร็ว E4V5M6
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                {/* Coma score E V M */}
+                <div className="inline-flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs font-medium text-slate-700">Coma score (GCS):</span>
+                  <label className="inline-flex items-center gap-1">
+                    <span className="text-xs font-bold text-slate-700">E</span>
+                    <input
+                      type="text"
+                      value={p.gcsE ?? ''}
+                      onChange={(e) => updatePhysical({ gcsE: e.target.value })}
+                      placeholder="1-4"
+                      maxLength={4}
+                      aria-label="GCS Eye opening"
+                      className={`${inputBase} w-11 text-center font-mono tabular-nums text-xs`}
+                    />
+                  </label>
+                  <label className="inline-flex items-center gap-1">
+                    <span className="text-xs font-bold text-slate-700">V</span>
+                    <input
+                      type="text"
+                      value={p.gcsV ?? ''}
+                      onChange={(e) => updatePhysical({ gcsV: e.target.value })}
+                      placeholder="1-5/T"
+                      maxLength={4}
+                      aria-label="GCS Verbal response"
+                      className={`${inputBase} w-12 text-center font-mono tabular-nums text-xs`}
+                    />
+                  </label>
+                  <label className="inline-flex items-center gap-1">
+                    <span className="text-xs font-bold text-slate-700">M</span>
+                    <input
+                      type="text"
+                      value={p.gcsM ?? ''}
+                      onChange={(e) => updatePhysical({ gcsM: e.target.value })}
+                      placeholder="1-6"
+                      maxLength={4}
+                      aria-label="GCS Motor response"
+                      className={`${inputBase} w-11 text-center font-mono tabular-nums text-xs`}
+                    />
+                  </label>
+                  {(() => {
+                    const eNum = parseInt((p.gcsE || '').trim(), 10);
+                    const vTrim = (p.gcsV || '').trim().toUpperCase();
+                    const vNum = parseInt(vTrim, 10);
+                    const mNum = parseInt((p.gcsM || '').trim(), 10);
+                    if (!Number.isFinite(eNum) || !Number.isFinite(mNum)) return null;
+                    const isTube = vTrim === 'T' || vTrim === 'VT';
+                    const totalLabel = isTube
+                      ? `${eNum + mNum}T`
+                      : Number.isFinite(vNum)
+                      ? `${eNum + vNum + mNum}`
+                      : '';
+                    if (!totalLabel) return null;
+                    const isLow = isTube ? eNum + mNum <= 8 : eNum + vNum + mNum <= 12;
+                    return (
+                      <span
+                        className={`text-[11px] font-mono font-semibold px-1.5 py-0.5 rounded border ${
+                          isLow
+                            ? 'bg-red-50 border-red-300 text-red-700'
+                            : 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                        }`}
+                      >
+                        รวม {totalLabel}
+                      </span>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                {/* การช่วยเหลือตัวเอง */}
+                <div className="inline-flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs font-medium text-slate-700">การช่วยเหลือตัวเอง:</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updatePhysical({
+                        selfCareStatus: p.selfCareStatus === 'independent' ? '' : 'independent',
+                      })
+                    }
+                    className={radioBtn(p.selfCareStatus === 'independent')}
+                  >
+                    {p.selfCareStatus === 'independent' ? '●' : '○'} ช่วยเหลือตัวเองได้
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updatePhysical({
+                        selfCareStatus: p.selfCareStatus === 'dependent' ? '' : 'dependent',
+                      })
+                    }
+                    className={radioBtn(p.selfCareStatus === 'dependent', 'danger')}
+                  >
+                    {p.selfCareStatus === 'dependent' ? '●' : '○'} ช่วยเหลือตัวเองไม่ได้
+                  </button>
+                </div>
+
+                {/* อาการเหนื่อยหอบ */}
+                <div className="inline-flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs font-medium text-slate-700">อาการเหนื่อยหอบ:</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updatePhysical({
+                        dyspneaStatus: p.dyspneaStatus === 'no' ? '' : 'no',
+                      })
+                    }
+                    className={radioBtn(p.dyspneaStatus === 'no')}
+                  >
+                    {p.dyspneaStatus === 'no' ? '●' : '○'} ไม่เหนื่อยหอบ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updatePhysical({
+                        dyspneaStatus: p.dyspneaStatus === 'yes' ? '' : 'yes',
+                      })
+                    }
+                    className={radioBtn(p.dyspneaStatus === 'yes', 'danger')}
+                  >
+                    {p.dyspneaStatus === 'yes' ? '●' : '○'} เหนื่อยหอบ
+                  </button>
+                </div>
+              </div>
+
+              <label className="flex flex-wrap items-center gap-2 pt-0.5">
+                <span className="text-xs font-medium text-slate-700 shrink-0">
+                  รายละเอียดเพิ่มเติม:
+                </span>
+                <input
+                  type="text"
+                  value={p.currentStatusDetail ?? ''}
+                  onChange={(e) => updatePhysical({ currentStatusDetail: e.target.value })}
+                  placeholder="ระบุรายละเอียด status ปัจจุบัน เช่น รู้สึกตัวดี ทำตามคำสั่งได้ / อ่อนแรงซีกขวา..."
+                  aria-label="รายละเอียด Status ปัจจุบัน"
+                  className={`${inputBase} flex-1 min-w-[200px] text-xs bg-white`}
                 />
               </label>
             </div>
@@ -3900,17 +4286,41 @@ export function PreAnestheticForm({
                 />
               </div>
 
-              <label className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-semibold text-slate-700 w-36 shrink-0">
-                  2.6 Functional Capacity
+                  2.6 Functional Capacity (FC)
                 </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    updatePhysical({
+                      functionalCapacityLevel: p.functionalCapacityLevel === '>4' ? '' : '>4',
+                    })
+                  }
+                  className={radioBtn(p.functionalCapacityLevel === '>4')}
+                >
+                  {p.functionalCapacityLevel === '>4' ? '●' : '○'} &gt; 4 METS
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    updatePhysical({
+                      functionalCapacityLevel: p.functionalCapacityLevel === '<4' ? '' : '<4',
+                    })
+                  }
+                  className={radioBtn(p.functionalCapacityLevel === '<4', 'danger')}
+                >
+                  {p.functionalCapacityLevel === '<4' ? '●' : '○'} &lt; 4 METS
+                </button>
                 <input
                   type="text"
                   value={p.functionalCapacity}
                   onChange={(e) => updatePhysical({ functionalCapacity: e.target.value })}
-                  className={`${inputBase} flex-1 text-xs`}
+                  placeholder="รายละเอียด เช่น เดินขึ้นบันได 2 ชั้นได้ / กิจวัตรประจำวัน..."
+                  aria-label="รายละเอียด Functional Capacity"
+                  className={`${inputBase} flex-1 min-w-[160px] text-xs`}
                 />
-              </label>
+              </div>
             </div>
           </div>
 
@@ -4672,7 +5082,7 @@ export function PreAnestheticForm({
               })}
             </div>
             <textarea
-              rows={3}
+              rows={6}
               value={fd.consult}
               onChange={(e) => updateFormData({ consult: e.target.value })}
               placeholder="รายละเอียดความเห็นจากแพทย์อายุรกรรม / โรคหัวใจ (Med/Cardio clearance, คำแนะนำก่อนผ่าตัด)..."

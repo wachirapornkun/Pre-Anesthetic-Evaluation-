@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
   CheckCircle2,
+  Download,
+  ExternalLink,
   FileText,
   Info,
   Laptop,
@@ -13,7 +16,13 @@ import {
   Wifi,
   X,
 } from 'lucide-react';
+import { PUBLISHED_APP_URL } from '../firebase';
 import { PreAnestheticEvaluation } from '../types/evaluation';
+import {
+  HospitalPrintMode,
+  isEmbeddedIframeEnvironment,
+  isRestrictedInAppBrowser,
+} from '../utils/hospitalPrintEngine';
 
 export type PrinterSheetChoice = 'pre_op' | 'post_op' | 'both';
 export type PrinterPaperSize = 'A4' | 'A5';
@@ -32,7 +41,7 @@ export interface PrinterSettings {
 }
 
 export const DEFAULT_PRINTER_SETTINGS: PrinterSettings = {
-  printerLabel: 'เครื่องพิมพ์เริ่มต้นของระบบ (LAN / Wi-Fi / AirPrint)',
+  printerLabel: 'เครื่องพิมพ์เริ่มต้นของระบบ (LAN / Wi-Fi / USB / AirPrint)',
   defaultSheet: 'pre_op',
   paperSize: 'A4',
   marginMode: 'normal',
@@ -130,7 +139,8 @@ interface PrinterModalProps {
   evaluation: PreAnestheticEvaluation;
   settings: PrinterSettings;
   onChangeSettings: (next: PrinterSettings) => void;
-  onTriggerPrint: (mode: PrinterSheetChoice | 'test_page') => void;
+  onTriggerPrint: (mode: HospitalPrintMode) => void;
+  onDownloadPrintable: (mode: HospitalPrintMode) => void;
   onNotify?: (type: 'success' | 'error', text: string) => void;
 }
 
@@ -141,6 +151,7 @@ export function PrinterModal({
   settings,
   onChangeSettings,
   onTriggerPrint,
+  onDownloadPrintable,
   onNotify,
 }: PrinterModalProps) {
   const [selectedSheet, setSelectedSheet] = useState<PrinterSheetChoice>(settings.defaultSheet);
@@ -150,6 +161,9 @@ export function PrinterModal({
   const [isPairingUsb, setIsPairingUsb] = useState(false);
   const [usbStatusMsg, setUsbStatusMsg] = useState<string | null>(null);
   const [showGuideTab, setShowGuideTab] = useState<'pc' | 'mobile'>('pc');
+
+  const inEmbeddedFrame = isEmbeddedIframeEnvironment();
+  const inRestrictedWebView = isRestrictedInAppBrowser();
 
   useEffect(() => {
     setSelectedSheet(settings.defaultSheet);
@@ -196,16 +210,21 @@ export function PrinterModal({
 
   const handlePairUsbPrinter = async () => {
     const nav = typeof navigator !== 'undefined' ? (navigator as unknown as WebUsbNavigatorLike) : null;
+    if (inEmbeddedFrame) {
+      setUsbStatusMsg(
+        'หน้าต่าง Preview แบบฝังกรอบ (Iframe) จำกัดสิทธิ์ WebUSB — หากเครื่องพิมพ์ติดตั้งใน Windows/Mac แล้ว ให้เปิดแอปในแท็บเต็มจอแล้วกด "สั่งพิมพ์ออกเครื่องพิมพ์ทันที" ได้เลย',
+      );
+      return;
+    }
     if (!nav?.usb) {
       setUsbStatusMsg(
-        'เบราว์เซอร์นี้ไม่รองรับการจับคู่ USB โดยตรง — สามารถกดสั่งพิมพ์ผ่านเครื่องพิมพ์ระบบ / Wi-Fi / AirPrint ได้ทันที',
+        'เบราว์เซอร์นี้ไม่รองรับการจับคู่ WebUSB โดยตรง — สามารถกด "สั่งพิมพ์ออกเครื่องพิมพ์ทันที" เพื่อเลือกเครื่องพิมพ์ USB / LAN / Wi-Fi / AirPrint ของระบบได้เลย',
       );
       return;
     }
     setIsPairingUsb(true);
     setUsbStatusMsg(null);
     try {
-      // USB Class 0x07 = Standard Printer Class (HP, Canon, Epson, Brother, Ricoh, Xerox, etc.)
       const device = await nav.usb.requestDevice({
         filters: [{ classCode: 7 }],
       });
@@ -227,15 +246,15 @@ export function PrinterModal({
       const name = error instanceof Error ? error.name : '';
       if (name === 'NotFoundError') {
         setUsbStatusMsg(
-          'ไม่ได้เลือกเครื่องพิมพ์ USB (หรือเครื่องพิมพ์นี้เชื่อมต่อผ่าน Wi-Fi / LAN อยู่แล้ว — สามารถกดปุ่ม "สั่งพิมพ์ทันที" ด้านล่างได้เลย)',
+          'เครื่องพิมพ์ที่ติดตั้งไดรเวอร์ใน Windows / Mac แล้ว (ทั้งสาย USB และ LAN/Wi-Fi) จะเชื่อมต่อผ่านระบบของเครื่องโดยอัตโนมัติ — กดปุ่ม "สั่งพิมพ์ออกเครื่องพิมพ์ทันที" ด้านล่างแล้วเลือกชื่อเครื่องพิมพ์ได้เลยครับ',
         );
       } else if (name === 'SecurityError') {
         setUsbStatusMsg(
-          'หน้าต่างนี้จำกัดสิทธิ์ WebUSB — ให้เปิดผ่าน Chrome/Edge โดยตรง หรือสั่งพิมพ์ผ่านเครื่องพิมพ์ระบบได้ทันที',
+          'หน้าต่างนี้จำกัดสิทธิ์ WebUSB — แนะนำกด "เปิดในเบราว์เซอร์เต็มจอ" หรือกด "สั่งพิมพ์ออกเครื่องพิมพ์ทันที" เพื่อใช้เครื่องพิมพ์ระบบของ Windows/Mac',
         );
       } else {
         setUsbStatusMsg(
-          'ไม่สามารถจับคู่ USB โดยตรงได้ — แนะนำใช้การสั่งพิมพ์ผ่านเครื่องพิมพ์ระบบ (LAN / Wi-Fi / USB Spooler) ด้านล่าง',
+          'แนะนำใช้การสั่งพิมพ์ผ่านเครื่องพิมพ์ระบบ (USB / LAN / Wi-Fi / AirPrint) ด้วยปุ่ม "สั่งพิมพ์ออกเครื่องพิมพ์ทันที" ด้านล่าง',
         );
       }
     } finally {
@@ -264,7 +283,7 @@ export function PrinterModal({
     setUsbStatusMsg('ยกเลิกการจับคู่เครื่องพิมพ์ USB แล้ว (กลับไปใช้เครื่องพิมพ์เริ่มต้นของระบบ)');
   };
 
-  const handlePrintNow = (target: PrinterSheetChoice | 'test_page') => {
+  const handlePrintNow = (target: HospitalPrintMode) => {
     const nowLabel = new Date().toLocaleTimeString('th-TH', {
       hour: '2-digit',
       minute: '2-digit',
@@ -274,8 +293,12 @@ export function PrinterModal({
       defaultSheet: target === 'test_page' ? settings.defaultSheet : target,
       lastPrintedAt: nowLabel,
     });
-    onClose();
+    // Trigger synchronously inside the click gesture (App flushes modal close + print sheet together)
     onTriggerPrint(target);
+  };
+
+  const handleDownloadNow = (target: HospitalPrintMode) => {
+    onDownloadPrintable(target);
   };
 
   const patientSummary = evaluation.patientName.trim()
@@ -321,6 +344,44 @@ export function PrinterModal({
 
         {/* Body */}
         <div className="p-5 space-y-4 max-h-[78vh] overflow-y-auto">
+          {/* Embedded Preview / In-App Browser Notice */}
+          {(inEmbeddedFrame || inRestrictedWebView) && (
+            <div className="rounded-xl border border-prose-300 bg-prose-50/80 p-3.5 space-y-2.5 text-xs text-prose-800">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-prose-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="font-bold">
+                    {inRestrictedWebView
+                      ? 'กำลังเปิดแอปผ่านเบราว์เซอร์ในแชต (LINE / Facebook) ซึ่งบล็อกหน้าต่างเครื่องพิมพ์'
+                      : 'กำลังเปิดแอปในหน้าต่าง Preview แบบฝังกรอบ ซึ่งอาจบล็อกหน้าต่างเครื่องพิมพ์ของเบราว์เซอร์'}
+                  </div>
+                  <p className="text-[11px] text-slate-700 leading-relaxed">
+                    หากกดสั่งพิมพ์แล้วหน้าต่างเครื่องพิมพ์ไม่เด้งขึ้น ให้เลือกวิธีใดวิธีหนึ่งด้านล่าง — พิมพ์ออกเครื่องพิมพ์โรงพยาบาลได้ 100%:
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 pl-6">
+                <a
+                  href={PUBLISHED_APP_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-pblue-600 rounded-lg hover:bg-pblue-700 transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  เปิดแอปในแท็บเบราว์เซอร์เต็มจอ (Chrome / Safari)
+                </a>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadNow(selectedSheet)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-prose-800 bg-white border border-prose-300 rounded-lg hover:bg-prose-100 transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5 text-prose-600" />
+                  ดาวน์โหลดไฟล์พร้อมพิมพ์ A4
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Section 1: Printer Connection Status & USB Pairing */}
           <div className="rounded-xl border border-pblue-200/80 bg-pblue-50/45 p-3.5 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -336,7 +397,11 @@ export function PrinterModal({
               </div>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-pgreen-50 text-pgreen-800 border border-pgreen-200">
                 <CheckCircle2 className="w-3 h-3 text-pgreen-600" />
-                {connectedUsb ? 'เชื่อมต่อ USB แล้ว' : 'พร้อมพิมพ์ผ่านระบบ / Wi-Fi'}
+                {connectedUsb
+                  ? 'เชื่อมต่อ USB แล้ว'
+                  : inEmbeddedFrame
+                    ? 'โหมด Preview (รองรับดาวน์โหลดไฟล์พร้อมพิมพ์)'
+                    : 'พร้อมพิมพ์ผ่านระบบ / LAN / Wi-Fi'}
               </span>
             </div>
 
@@ -400,6 +465,9 @@ export function PrinterModal({
                   {usbSupported ? 'ค้นหาเครื่องพิมพ์ USB' : 'ตรวจสอบ USB'}
                 </button>
               </div>
+              <p className="text-[10.5px] text-slate-500">
+                * เครื่องพิมพ์ที่ติดตั้งใน Windows / Mac (USB, LAN, Wi-Fi) ไม่จำเป็นต้องกดจับคู่ WebUSB สามารถกดปุ่ม <strong>สั่งพิมพ์ออกเครื่องพิมพ์ทันที</strong> ด้านล่างเพื่อเลือกเครื่องพิมพ์ได้เลย
+              </p>
             </div>
 
             {usbStatusMsg && (
@@ -544,14 +612,25 @@ export function PrinterModal({
 
           {/* Primary Print Action Buttons */}
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-            <button
-              type="button"
-              onClick={() => handlePrintNow('test_page')}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-pgreen-800 bg-pgreen-50 border border-pgreen-300 rounded-xl hover:bg-pgreen-100 transition-colors"
-            >
-              <Wifi className="w-3.5 h-3.5 text-pgreen-600" />
-              พิมพ์หน้าทดสอบเครื่องพิมพ์
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handlePrintNow('test_page')}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-pgreen-800 bg-pgreen-50 border border-pgreen-300 rounded-xl hover:bg-pgreen-100 transition-colors"
+              >
+                <Wifi className="w-3.5 h-3.5 text-pgreen-600" />
+                พิมพ์หน้าทดสอบ
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDownloadNow(selectedSheet)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-pblue-800 bg-pblue-50 border border-pblue-300 rounded-xl hover:bg-pblue-100 transition-colors"
+                title="ดาวน์โหลดไฟล์ HTML A4 พร้อมปุ่มสั่งพิมพ์ กรณีหน้าต่างพิมพ์ถูกบล็อก"
+              >
+                <Download className="w-3.5 h-3.5 text-pblue-600" />
+                ดาวน์โหลดไฟล์พร้อมพิมพ์
+              </button>
+            </div>
 
             <button
               type="button"
@@ -607,10 +686,10 @@ export function PrinterModal({
             ) : (
               <ul className="list-disc pl-4 space-y-0.5 leading-relaxed">
                 <li>
-                  <strong>iPhone / iPad (AirPrint):</strong> เชื่อมต่อ Wi-Fi เดียวกับเครื่องพิมพ์โรงพยาบาล แล้วกด <strong>สั่งพิมพ์ออกเครื่องพิมพ์ทันที</strong> → แตะ <strong>เลือกเครื่องพิมพ์ (Select Printer)</strong>
+                  <strong>iPhone / iPad (AirPrint):</strong> เชื่อมต่อ Wi-Fi เดียวกับเครื่องพิมพ์โรงพยาบาล แล้วเปิดผ่าน Safari → กด <strong>สั่งพิมพ์ออกเครื่องพิมพ์ทันที</strong> → แตะ <strong>เลือกเครื่องพิมพ์ (Select Printer)</strong>
                 </li>
                 <li>
-                  <strong>Android (Mopria / Wi-Fi Print):</strong> กดสั่งพิมพ์ → เลือกเครื่องพิมพ์ Wi-Fi ในแถบด้านบน (หากยังไม่พบให้เปิด Default Print Service ในการตั้งค่ามือถือ)
+                  <strong>Android (Mopria / Wi-Fi Print):</strong> เปิดผ่าน Chrome → กดสั่งพิมพ์ → เลือกเครื่องพิมพ์ Wi-Fi ในแถบด้านบน (หากยังไม่พบให้เปิด Default Print Service ในการตั้งค่ามือถือ)
                 </li>
               </ul>
             )}
@@ -620,3 +699,4 @@ export function PrinterModal({
     </div>
   );
 }
+

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Download, FilePlus2, Printer, RotateCcw } from 'lucide-react';
 import {
   AsaClass,
@@ -27,6 +27,13 @@ import {
   SurgeryPostponementReasonKey,
 } from '../types/evaluation';
 import { exportEvaluationsCsv } from '../utils/exportReports';
+import {
+  attemptNativePrintSync,
+  buildStandalonePrintableHtml,
+  downloadPrintableHtmlFile,
+  tryPrintViaHiddenIframe,
+} from '../utils/hospitalPrintEngine';
+import { DEFAULT_PRINTER_SETTINGS, loadPrinterSettings } from './PrinterModal';
 import {
   AgeBracketChart,
   AgeBracketItem,
@@ -264,6 +271,29 @@ export function DashboardView({
   const [tableSortBy, setTableSortBy] = useState<'risk' | 'date'>('risk');
   const [showAllRows, setShowAllRows] = useState<boolean>(false);
   const [visitYearFilter, setVisitYearFilter] = useState<string>('ALL');
+  const dashboardRef = useRef<HTMLDivElement | null>(null);
+
+  const handlePrintDashboard = () => {
+    const { opened, onCleanupReady } = attemptNativePrintSync();
+    if (opened) {
+      onCleanupReady(() => {});
+      return;
+    }
+    const bodyHtml = dashboardRef.current?.innerHTML || '';
+    const settings = { ...DEFAULT_PRINTER_SETTINGS, ...loadPrinterSettings(), colorMode: 'color' as const };
+    const title = `Bangplee_Anesthesia_Dashboard_${new Date().toISOString().slice(0, 10)}`;
+    const html = buildStandalonePrintableHtml({
+      title,
+      bodyHtml,
+      settings,
+      autoPrintOnOpen: true,
+    });
+    void tryPrintViaHiddenIframe(html).then((iframeOpened) => {
+      if (!iframeOpened) {
+        downloadPrintableHtmlFile(html, `${title}.html`);
+      }
+    });
+  };
 
   const riskById = useMemo(() => {
     const map = new Map<string, CaseRiskProfile>();
@@ -1228,7 +1258,7 @@ export function DashboardView({
   const visibleRows = showAllRows ? sortedFiltered : sortedFiltered.slice(0, 8);
 
   return (
-    <div className="space-y-5">
+    <div ref={dashboardRef} className="space-y-5">
       {/* Filter & Export Bar */}
       <div className="no-print bg-white border border-pborder rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
@@ -1309,7 +1339,7 @@ export function DashboardView({
           </button>
           <button
             type="button"
-            onClick={() => window.print()}
+            onClick={handlePrintDashboard}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-pblue-600 rounded-lg hover:bg-pblue-700 transition-colors whitespace-nowrap shrink-0"
           >
             <Printer className="w-3.5 h-3.5" />

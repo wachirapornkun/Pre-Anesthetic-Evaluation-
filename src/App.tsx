@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import {
   getRedirectResult,
   onAuthStateChanged,
@@ -27,6 +28,7 @@ import {
   Calendar,
   CheckCircle2,
   Download,
+  ExternalLink,
   FileCode2,
   FilePlus2,
   LogIn,
@@ -68,6 +70,7 @@ import {
   isRunningInIframe,
   logFirestoreError,
   OperationType,
+  PUBLISHED_APP_URL,
 } from './firebase';
 import {
   addDaysToIsoDate,
@@ -102,6 +105,16 @@ import {
 } from './types/evaluation';
 import { exportEvaluationJson, exportEvaluationsCsv, exportSingleHtmlReport } from './utils/exportReports';
 import { handleFormTabNavigation } from './utils/formTabNavigation';
+import {
+  attemptNativePrintSync,
+  buildHospitalPrintJobTitle,
+  buildStandalonePrintableHtml,
+  downloadPrintableHtmlFile,
+  HospitalPrintMode,
+  isEmbeddedIframeEnvironment,
+  isRestrictedInAppBrowser,
+  tryPrintViaHiddenIframe,
+} from './utils/hospitalPrintEngine';
 
 type ActiveTab = 'form' | 'post_op' | 'dashboard' | 'registry' | 'print_preview';
 type PrintSheetMode = 'pre_op' | 'post_op' | 'both';
@@ -197,9 +210,18 @@ export default function App() {
   const [printerSettings, setPrinterSettings] = useState<PrinterSettings>(() =>
     loadPrinterSettings(),
   );
-  const [activePrintJob, setActivePrintJob] = useState<PrinterSheetChoice | 'test_page' | null>(
-    null,
-  );
+  const [activePrintJob, setActivePrintJob] = useState<{
+    mode: HospitalPrintMode;
+    record: PreAnestheticEvaluation;
+  } | null>(null);
+  const [blockedPrintFallback, setBlockedPrintFallback] = useState<{
+    mode: HospitalPrintMode;
+    jobTitle: string;
+    html: string;
+    fileName: string;
+    reason: 'iframe_sandbox' | 'in_app_browser' | 'browser_blocked';
+  } | null>(null);
+  const printSourceRef = useRef<HTMLDivElement | null>(null);
   const [allowOfflineBypass, setAllowOfflineBypass] = useState(false);
   const isVerifiedCloudUser = Boolean(user && isEmailVerified);
   const [cloudRecords, setCloudRecords] = useState<PreAnestheticEvaluation[]>([]);
@@ -2218,43 +2240,103 @@ export default function App() {
     savePrinterSettings(next);
   };
 
+  const capturePrintableHtmlForMode = (
+    mode: HospitalPrintMode,
+    targetRecord: PreAnestheticEvaluation,
+  ): { jobTitle: string; html: string; fileName: string } => {
+    const jobTitle = buildHospitalPrintJobTitle(mode, targetRecord);
+    const wasActive = activePrintJob;
+    flushSync(() => {
+      setActivePrintJob({ mode, record: targetRecord });
+    });
+    const bodyHtml = printSourceRef.current?.innerHTML || '';
+    flushSync(() => {
+      setActivePrintJob(wasActive);
+    });
+    const html = buildStandalonePrintableHtml({
+      title: jobTitle,
+      bodyHtml,
+      settings: printerSettings,
+      autoPrintOnOpen: true,
+    });
+    return { jobTitle, html, fileName: `${jobTitle}.html` };
+  };
+
+  const handleDownloadPrintableSheet = (
+    mode: HospitalPrintMode,
+    recordOverride?: PreAnestheticEvaluation,
+  ) => {
+    const targetRecord = recordOverride ?? currentFormRef.current;
+    const { html, fileName } = capturePrintableHtmlForMode(mode, targetRecord);
+    downloadPrintableHtmlFile(html, fileName);
+    showNotice(
+      'success',
+      'ดาวน์โหลดไฟล์เอกสารพร้อมพิมพ์ A4 เรียบร้อยแล้ว — เปิดไฟล์ที่ดาวน์โหลดเพื่อสั่งพิมพ์ออกเครื่องพิมพ์ได้ทันที',
+    );
+  };
+
   const triggerHospitalPrint = (
-    mode: PrinterSheetChoice | 'test_page',
+    mode: HospitalPrintMode,
     recordOverride?: PreAnestheticEvaluation,
   ) => {
     const targetRecord = recordOverride ?? currentFormRef.current;
     const originalTitle = document.title;
-    const cleanHn = (targetRecord.hn || '').trim().replace(/[^\w-]/g, '');
-    const cleanName = (targetRecord.patientName || '')
-      .trim()
-      .replace(/[\\/:*?"<>|]/g, '')
-      .slice(0, 40);
-    const jobTitle =
-      mode === 'test_page'
-        ? 'Bangplee_Printer_Test_Page'
-        : `${mode === 'post_op' ? 'PostOp' : mode === 'both' ? 'PreOp_PostOp' : 'PreOp'}${cleanHn ? `_HN${cleanHn}` : ''}${cleanName ? `_${cleanName}` : ''}`;
+    const jobTitle = buildHospitalPrintJobTitle(mode, targetRecord);
 
-    setActivePrintJob(mode);
+    // Synchronously close PrinterModal and mount the exact target sheet inside the click gesture
+    flushSync(() => {
+      setIsPrinterModalOpen(false);
+      setBlockedPrintFallback(null);
+      setActivePrintJob({ mode, record: targetRecord });
+    });
+
     document.body.classList.add('bph-print-isolated');
     document.title = jobTitle;
 
-    let cleanedUp = false;
+    // Snapshot rendered A4 sheet HTML before printing (used if fallback iframe/download is needed)
+    const renderedBodyHtml = printSourceRef.current?.innerHTML || '';
+
     const cleanup = () => {
-      if (cleanedUp) return;
-      cleanedUp = true;
       document.title = originalTitle;
       document.body.classList.remove('bph-print-isolated');
       setActivePrintJob(null);
-      window.removeEventListener('afterprint', cleanup);
     };
 
-    window.addEventListener('afterprint', cleanup);
-    window.requestAnimationFrame(() => {
-      setTimeout(() => {
-        window.print();
-        // Safety fallback for mobile browsers that don't always fire afterprint
-        setTimeout(cleanup, 1500);
-      }, 140);
+    // 1. Primary: synchronous native browser print dialog (preserves user gesture on Chrome/Edge/Safari/iOS/Android)
+    const { opened, onCleanupReady } = attemptNativePrintSync();
+    if (opened) {
+      onCleanupReady(cleanup);
+      return;
+    }
+
+    // Native print did not open (commonly blocked inside embedded preview iframe or LINE in-app browser)
+    cleanup();
+
+    const standaloneHtml = buildStandalonePrintableHtml({
+      title: jobTitle,
+      bodyHtml: renderedBodyHtml,
+      settings: printerSettings,
+      autoPrintOnOpen: true,
+    });
+
+    // 2. Secondary: attempt printing through a clean isolated same-origin iframe
+    void tryPrintViaHiddenIframe(standaloneHtml).then((iframeOpened) => {
+      if (iframeOpened) return;
+
+      // 3. Guaranteed Fallback: show instant 1-click Print-Ready Download & Full-Browser Launch dialog
+      const reason = isRestrictedInAppBrowser()
+        ? 'in_app_browser'
+        : isEmbeddedIframeEnvironment()
+          ? 'iframe_sandbox'
+          : 'browser_blocked';
+
+      setBlockedPrintFallback({
+        mode,
+        jobTitle,
+        html: standaloneHtml,
+        fileName: `${jobTitle}.html`,
+        reason,
+      });
     });
   };
 
@@ -2601,7 +2683,11 @@ export default function App() {
       </div>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 py-5 space-y-5">
+      <main
+        className={`flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 py-5 space-y-5 ${
+          activePrintJob !== null || activeTab !== 'dashboard' ? 'bph-has-print-sheet' : ''
+        }`}
+      >
         {authReady && !isVerifiedCloudUser && (
           <div
             role="status"
@@ -2862,11 +2948,11 @@ export default function App() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => exportSingleHtmlReport(currentForm)}
+                  onClick={() => handleDownloadPrintableSheet(printSheetMode)}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-pyellow-800 bg-pyellow-50 border border-pyellow-200 rounded-lg hover:bg-pyellow-100"
                 >
                   <FileCode2 className="w-3.5 h-3.5 text-pyellow-600" />
-                  ดาวน์โหลด HTML
+                  ไฟล์พร้อมพิมพ์ (HTML)
                 </button>
                 <button
                   type="button"
@@ -2915,9 +3001,9 @@ export default function App() {
             .filter(Boolean)
             .join(' ');
 
-          if (activePrintJob === 'test_page') {
+          if (activePrintJob?.mode === 'test_page') {
             return (
-              <div className={printStyleClasses}>
+              <div ref={printSourceRef} className={printStyleClasses}>
                 <div className="border-2 border-slate-900 p-6 space-y-4 text-black bg-white">
                   <div className="border-b-2 border-slate-900 pb-3 text-center space-y-1">
                     <div className="text-lg font-bold">โรงพยาบาลบางพลี · งานวิสัญญีพยาบาล</div>
@@ -2961,16 +3047,18 @@ export default function App() {
           }
 
           if (activePrintJob) {
+            const jobMode = activePrintJob.mode;
+            const jobRecord = activePrintJob.record;
             return (
-              <div className={printStyleClasses}>
-                {(activePrintJob === 'pre_op' || activePrintJob === 'both') && (
-                  <A4PrintSheet evaluation={currentForm} previewMode={false} />
+              <div ref={printSourceRef} className={printStyleClasses}>
+                {(jobMode === 'pre_op' || jobMode === 'both') && (
+                  <A4PrintSheet evaluation={jobRecord} previewMode={false} />
                 )}
-                {(activePrintJob === 'post_op' || activePrintJob === 'both') && (
+                {(jobMode === 'post_op' || jobMode === 'both') && (
                   <PostOpA4PrintSheet
-                    evaluation={currentForm}
+                    evaluation={jobRecord}
                     previewMode={false}
-                    pageBreakBefore={activePrintJob === 'both'}
+                    pageBreakBefore={jobMode === 'both'}
                   />
                 )}
               </div>
@@ -2981,7 +3069,7 @@ export default function App() {
           if (activeTab === 'dashboard') return null;
           if (activeTab === 'print_preview') {
             return (
-              <div className={printStyleClasses}>
+              <div ref={printSourceRef} className={printStyleClasses}>
                 {(printSheetMode === 'pre_op' || printSheetMode === 'both') && (
                   <A4PrintSheet evaluation={currentForm} previewMode={false} />
                 )}
@@ -2996,7 +3084,7 @@ export default function App() {
             );
           }
           return (
-            <div className={printStyleClasses}>
+            <div ref={printSourceRef} className={printStyleClasses}>
               {activeTab === 'post_op' ? (
                 <PostOpA4PrintSheet evaluation={currentForm} previewMode={false} />
               ) : (
@@ -3369,8 +3457,95 @@ export default function App() {
         settings={printerSettings}
         onChangeSettings={handleUpdatePrinterSettings}
         onTriggerPrint={(mode) => triggerHospitalPrint(mode)}
+        onDownloadPrintable={(mode) => handleDownloadPrintableSheet(mode)}
         onNotify={showNotice}
       />
+
+      {/* Blocked Print Dialog Recovery Modal (when embedded preview iframe / LINE blocks window.print) */}
+      {blockedPrintFallback && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="ตัวช่วยสั่งพิมพ์ออกเครื่องพิมพ์"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setBlockedPrintFallback(null);
+          }}
+          className="no-print fixed inset-0 z-50 bg-[#243040]/45 backdrop-blur-[1px] flex items-center justify-center p-4"
+        >
+          <div className="bg-white border border-prose-200 rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="h-[3px] w-full pastel-top-ribbon" aria-hidden="true" />
+            <div className="px-5 py-4 border-b border-pborder bg-prose-50/70 flex items-start justify-between gap-3">
+              <div className="space-y-0.5">
+                <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-prose-800">
+                  <Printer className="w-4 h-4 text-prose-600" />
+                  เบราว์เซอร์หน้าต่างนี้บล็อกการเปิดหน้าต่างเครื่องพิมพ์
+                </div>
+                <h2 className="text-sm font-bold text-[#243040]">
+                  เลือกวิธีสั่งพิมพ์เอกสาร A4 ทันที
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBlockedPrintFallback(null)}
+                aria-label="ปิดหน้าต่างช่วยพิมพ์"
+                className="p-1 text-slate-400 hover:text-prose-800 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-3.5 text-xs text-slate-700">
+              <p className="leading-relaxed">
+                {blockedPrintFallback.reason === 'in_app_browser'
+                  ? 'เบราว์เซอร์ภายในแอปแชต (เช่น LINE / Facebook) ไม่อนุญาตให้สั่งพิมพ์ออกเครื่องพิมพ์โดยตรง กรุณาเปิดผ่าน Chrome / Safari หรือดาวน์โหลดไฟล์พร้อมพิมพ์ด้านล่างครับ'
+                  : blockedPrintFallback.reason === 'iframe_sandbox'
+                    ? 'หน้าต่าง Preview แบบฝังกรอบถูกจำกัดสิทธิ์การเรียกหน้าต่างเครื่องพิมพ์ของระบบ (OS Print Dialog) — คุณสามารถพิมพ์ได้ทันทีด้วย 2 วิธีด้านล่างครับ'
+                    : 'เบราว์เซอร์ไม่สามารถเปิดหน้าต่างเครื่องพิมพ์อัตโนมัติได้ — คุณสามารถดาวน์โหลดไฟล์พร้อมพิมพ์ A4 หรือกด Ctrl+P (Cmd+P) เพื่อพิมพ์ได้ทันที'}
+              </p>
+
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    downloadPrintableHtmlFile(
+                      blockedPrintFallback.html,
+                      blockedPrintFallback.fileName,
+                    );
+                    showNotice(
+                      'success',
+                      'ดาวน์โหลดไฟล์พร้อมพิมพ์ A4 แล้ว — ดับเบิลคลิกเปิดไฟล์เพื่อสั่งพิมพ์ออกเครื่องพิมพ์ทันที',
+                    );
+                  }}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-prose-600 rounded-xl hover:bg-prose-700 transition-colors shadow-xs"
+                >
+                  <Download className="w-4 h-4" />
+                  1. ดาวน์โหลดไฟล์พร้อมพิมพ์ A4 (เปิดแล้วพิมพ์ได้ทันที)
+                </button>
+
+                <a
+                  href={PUBLISHED_APP_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-pblue-800 bg-pblue-50 border border-pblue-300 rounded-xl hover:bg-pblue-100 transition-colors"
+                >
+                  <ExternalLink className="w-4 h-4 text-pblue-600" />
+                  2. เปิดแอปในเบราว์เซอร์เต็มจอ (เชื่อมเครื่องพิมพ์ตรง)
+                </a>
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-pborder text-[11px] text-slate-500">
+                <span>ไฟล์: {blockedPrintFallback.fileName}</span>
+                <button
+                  type="button"
+                  onClick={() => setBlockedPrintFallback(null)}
+                  className="font-semibold text-slate-600 hover:text-prose-800"
+                >
+                  ปิดหน้าต่าง
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast Notification */}
       {notice && (

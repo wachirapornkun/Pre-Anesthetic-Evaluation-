@@ -93,7 +93,10 @@
 }
 
 @media print {
+  html,
   body {
+    margin: 0 !important;
+    padding: 0 !important;
     background: #ffffff !important;
     background-image: none !important;
     color: #000000 !important;
@@ -101,12 +104,24 @@
     print-color-adjust: exact;
   }
 
+  #root,
+  #root > div,
+  main {
+    min-height: 0 !important;
+    max-width: none !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+
   .no-print {
     display: none !important;
   }
 
-  /* When printing a dedicated A4 form or test sheet, suppress all screen views cleanly */
-  body.bph-print-isolated .bph-screen-only {
+  /* Suppress all screen views cleanly whenever a dedicated A4 print sheet is mounted */
+  body.bph-print-isolated .bph-screen-only,
+  main.bph-has-print-sheet .bph-screen-only {
     display: none !important;
   }
 

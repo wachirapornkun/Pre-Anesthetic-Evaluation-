@@ -436,7 +436,7 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
         }</div>
 
         <div class="sec-title" style="margin-top:6px;">5. Premedication</div>
-        <div class="field">${dottedRows(pm.items || [], 4, true)}</div>
+        <div class="field">${dottedRows(pm.items || [], 3, true)}</div>
         <div class="field" style="margin-top:3px;padding:2px 6px;border:1px solid #0f172a;background:#fffbeb;font-size:11px;font-weight:700;color:#0f172a;">NPO: ${esc(pm.npoTime || '__________________')}${
           pm.lastMealTime || pm.lastWaterTime
             ? `<div style="font-size:11px;font-weight:600;color:#78350f;margin-top:2px;">${[

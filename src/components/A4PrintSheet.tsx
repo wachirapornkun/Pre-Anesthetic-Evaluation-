@@ -448,10 +448,10 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
               </div>
             </div>
 
-            {/* 5. Premedication — Always 4 numbered dotted writing lines */}
+            {/* 5. Premedication — Always 3 numbered dotted writing lines */}
             <div className="p-2 space-y-1 shrink-0">
               <div className="font-bold text-[11px]">5. Premedication</div>
-              {renderDottedLines(filledPremeds, 4, {
+              {renderDottedLines(filledPremeds, 3, {
                 numbered: true,
                 rowHeightClass: 'min-h-[17px]',
                 keyPrefix: 'premed',

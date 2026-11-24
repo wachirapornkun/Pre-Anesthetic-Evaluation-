@@ -340,9 +340,9 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                     rowHeightClass: 'min-h-[15px]',
                     keyPrefix: 'prev_op',
                   })}
-                  <div className="flex items-end gap-1 pt-0.5">
-                    <span className="font-semibold shrink-0">complication:</span>
-                    <span className="flex-1 border-b border-dotted border-slate-600 px-0.5 leading-[1.22]">
+                  <div className="flex items-start gap-1 pt-0.5">
+                    <span className="font-semibold shrink-0 leading-[1.3]">complication:</span>
+                    <span className="flex-1 min-w-0 border-b border-dotted border-slate-600 px-0.5 leading-[1.3] whitespace-pre-wrap break-words">
                       {h.previousOpComplication?.trim() || '\u00A0'}
                     </span>
                   </div>
@@ -402,9 +402,9 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                 {mark(inv.ekgStatus === 'abnormal', 'Abnormal')}
                 {writeBlank(inv.ekgDetail, 'min-w-[100px] flex-1')}
               </div>
-              <div className="flex items-end gap-1">
-                <span className="font-semibold shrink-0">3.3 Other (ex. CT):</span>
-                <span className="flex-1 border-b border-dotted border-slate-600 px-0.5 leading-[1.22]">
+              <div className="flex items-start gap-1">
+                <span className="font-semibold shrink-0 leading-[1.3]">3.3 Other (ex. CT):</span>
+                <span className="flex-1 min-w-0 border-b border-dotted border-slate-600 px-0.5 leading-[1.3] whitespace-pre-wrap break-words">
                   {inv.other?.trim() || '\u00A0'}
                 </span>
               </div>
@@ -434,9 +434,9 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                 )}
               </div>
               {pm.onIvf?.trim() ? (
-                <div className="flex items-end gap-1 pt-0.5">
-                  <span className="font-semibold shrink-0">on IVF:</span>
-                  <span className="flex-1 border-b border-dotted border-slate-600 px-0.5 leading-[1.22] font-semibold">
+                <div className="flex items-start gap-1 pt-0.5">
+                  <span className="font-semibold shrink-0 leading-[1.3]">on IVF:</span>
+                  <span className="flex-1 min-w-0 border-b border-dotted border-slate-600 px-0.5 leading-[1.3] font-semibold whitespace-pre-wrap break-words">
                     {pm.onIvf.trim()}
                   </span>
                 </div>

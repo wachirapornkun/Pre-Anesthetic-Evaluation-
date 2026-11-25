@@ -12,7 +12,6 @@ import {
   getDocFromServer,
   getDocsFromServer,
   getFirestore,
-  initializeFirestore,
   limit,
   query,
   where,
@@ -21,23 +20,10 @@ import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 
-function createFirestoreClient() {
-  try {
-    return initializeFirestore(
-      app,
-      {
-        // Force HTTPS long-polling so hospital firewalls, proxies, mobile networks, and iframes
-        // never get stuck on blocked WebChannel/HTTP2 streaming connections.
-        experimentalForceLongPolling: true,
-      },
-      firebaseConfig.firestoreDatabaseId,
-    );
-  } catch {
-    return getFirestore(app, firebaseConfig.firestoreDatabaseId);
-  }
-}
-
-export const db = createFirestoreClient();
+// Standard getFirestore uses experimentalAutoDetectLongPolling by default in Firebase v13+,
+// giving fast WebChannel streaming while still automatically falling back to long-polling
+// behind buffering proxies/hospital firewalls (avoiding 10s timeouts caused by forcing XHR long-polling).
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 setPersistence(auth, browserLocalPersistence).catch(() => {
   // Fallback safely in browsers/webviews that restrict local storage persistence
@@ -373,11 +359,25 @@ async function testConnection() {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     return;
   }
-  try {
+  const attempt = async () => {
     await getDocFromServer(doc(db, 'test', 'connection'));
+  };
+  try {
+    await attempt();
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
+      // Retry once after a short delay in case of a transient cold-start network hiccup
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        return;
+      }
+      try {
+        await attempt();
+      } catch (retryError) {
+        if (retryError instanceof Error && retryError.message.includes('the client is offline')) {
+          console.error('Please check your Firebase configuration.');
+        }
+      }
     }
   }
 }

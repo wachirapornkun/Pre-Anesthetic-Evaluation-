@@ -58,6 +58,7 @@ import {
 import { RegistryView } from './components/RegistryView';
 import { ShareQrModal } from './components/ShareQrModal';
 import { ThaiDateInput } from './components/ThaiDateInput';
+import { Time24Input } from './components/Time24Input';
 import {
   auth,
   db,
@@ -3059,6 +3060,7 @@ export default function App() {
                       {new Date().toLocaleString('th-TH', {
                         dateStyle: 'medium',
                         timeStyle: 'short',
+                        hour12: false,
                       })}
                     </div>
                   </div>
@@ -3417,17 +3419,18 @@ export default function App() {
                         />
                       </label>
                       <label className="flex flex-col gap-1">
-                        <span className="text-xs font-medium text-slate-700">เวลา</span>
-                        <input
-                          type="time"
+                        <span className="text-xs font-medium text-slate-700">เวลา (24 ชม.)</span>
+                        <Time24Input
+                          ariaLabel="เวลาทำผ่าตัด (24 ชั่วโมง)"
                           value={newFormDraft.operationTime}
-                          onChange={(e) =>
+                          onChange={(next) =>
                             setNewFormDraft((prev) => ({
                               ...prev,
-                              operationTime: e.target.value,
+                              operationTime: next,
                             }))
                           }
-                          className="bg-white border border-slate-300 rounded-lg px-1.5 py-1.5 text-xs font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800"
+                          wrapperClassName="w-full"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono tabular-nums text-slate-900 focus:outline-none focus:border-blue-800"
                         />
                       </label>
                     </div>

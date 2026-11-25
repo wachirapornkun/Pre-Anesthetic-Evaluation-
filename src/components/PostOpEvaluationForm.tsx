@@ -41,6 +41,7 @@ import {
 import { BphLogo } from './MedicalDiagrams';
 import { OperationInput } from './OperationInput';
 import { ThaiDateInput } from './ThaiDateInput';
+import { Time24Input } from './Time24Input';
 import { handleFormTabNavigation } from '../utils/formTabNavigation';
 
 interface PostOpEvaluationFormProps {
@@ -1054,12 +1055,13 @@ export function PostOpEvaluationForm({
                 />
               </label>
               <label className="flex flex-col gap-0.5 text-xs">
-                <span className="text-[11px] font-medium text-slate-600">เวลา</span>
-                <input
-                  type="time"
+                <span className="text-[11px] font-medium text-slate-600">เวลา (24 ชม.)</span>
+                <Time24Input
+                  ariaLabel="เวลาบันทึก Peri op (24 ชั่วโมง)"
                   value={pc.periOpTime}
-                  onChange={(e) => updatePostOpComp({ periOpTime: e.target.value })}
-                  className={`${inputBase} font-mono tabular-nums text-xs`}
+                  onChange={(next) => updatePostOpComp({ periOpTime: next })}
+                  wrapperClassName="w-full"
+                  className={`${inputBase} w-full font-mono tabular-nums text-xs`}
                 />
               </label>
             </div>
@@ -1315,11 +1317,10 @@ export function PostOpEvaluationForm({
               </label>
               <label className="inline-flex items-center gap-1.5 text-xs">
                 <span className="text-slate-600 font-medium">เวลา</span>
-                <input
-                  type="time"
-                  aria-label="เวลาบันทึก Post op"
+                <Time24Input
+                  ariaLabel="เวลาบันทึก Post op (24 ชั่วโมง)"
                   value={pc.postOpTime}
-                  onChange={(e) => updatePostOpVisitorAndRecorder({ time: e.target.value })}
+                  onChange={(next) => updatePostOpVisitorAndRecorder({ time: next })}
                   className={`${inputBase} w-28 font-mono tabular-nums text-xs`}
                 />
               </label>

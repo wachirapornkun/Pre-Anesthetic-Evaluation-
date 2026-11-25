@@ -12,6 +12,7 @@ import {
   POST_OP_SEVERITY_LEVELS,
   PreAnestheticEvaluation,
 } from '../types/evaluation';
+import { formatTime24 } from './Time24Input';
 
 interface PostOpA4PrintSheetProps {
   evaluation: PreAnestheticEvaluation;
@@ -273,7 +274,7 @@ export function PostOpA4PrintSheet({
                 </span>
                 <span>
                   วันที่ <strong className="font-mono">{formatThaiDateBE(pc.periOpDate) || '________'}</strong> เวลา{' '}
-                  <strong className="font-mono">{pc.periOpTime || '______'}</strong>
+                  <strong className="font-mono">{formatTime24(pc.periOpTime) || '______'}</strong>
                 </span>
               </div>
             </div>
@@ -355,7 +356,7 @@ export function PostOpA4PrintSheet({
               {pc.postOpTime ? (
                 <>
                   {' '}
-                  เวลา <strong className="font-mono">{pc.postOpTime}</strong>
+                  เวลา <strong className="font-mono">{formatTime24(pc.postOpTime)}</strong>
                 </>
               ) : null}
             </span>

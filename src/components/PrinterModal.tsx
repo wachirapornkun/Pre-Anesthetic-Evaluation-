@@ -287,6 +287,7 @@ export function PrinterModal({
     const nowLabel = new Date().toLocaleTimeString('th-TH', {
       hour: '2-digit',
       minute: '2-digit',
+      hour12: false,
     });
     onChangeSettings({
       ...settings,

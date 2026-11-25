@@ -261,6 +261,8 @@ export interface PhysicalExamData {
   heartSoundDetail: string;
   functionalCapacityLevel?: FunctionalCapacityLevel;
   functionalCapacity: string;
+  chestPainStatus?: DyspneaStatus;
+  chestPainDetail?: string;
 }
 
 export interface InvestigationData {
@@ -2456,6 +2458,8 @@ export function createEmptyEvaluation(
         heartSoundDetail: '',
         functionalCapacityLevel: '',
         functionalCapacity: '',
+        chestPainStatus: '',
+        chestPainDetail: '',
       },
       investigation: {
         cxrStatus: '',
@@ -2517,7 +2521,7 @@ export function createEmptyEvaluation(
         prepStatusDetail: '',
       },
       premedication: {
-        items: ['', '', ''],
+        items: ['', '', '', ''],
         npoTime: '',
         lastMealTime: '',
         lastWaterTime: '',
@@ -2971,6 +2975,11 @@ export function sanitizeEvaluationForFirestore(
             ? fd.physicalExam.functionalCapacityLevel
             : '',
         functionalCapacity: clampStr(fd.physicalExam.functionalCapacity, 200),
+        chestPainStatus:
+          fd.physicalExam.chestPainStatus === 'yes' || fd.physicalExam.chestPainStatus === 'no'
+            ? fd.physicalExam.chestPainStatus
+            : '',
+        chestPainDetail: clampStr(fd.physicalExam.chestPainDetail ?? '', 200),
       },
       investigation: {
         cxrStatus: sanitizeNormalAbnormal(fd.investigation.cxrStatus),
@@ -3626,6 +3635,10 @@ export function computeClinicalSummary(record: PreAnestheticEvaluation): Clinica
     }
     planParts.push(`RA${subs.length ? ` (${subs.join(', ')})` : ''}`);
   }
+  if (anestheticPlan.macSelected) {
+    const macNote = (anestheticPlan.macDetail ?? '').trim();
+    planParts.push(`MAC${macNote ? ` (${macNote})` : ''}`);
+  }
   const planSummary = planParts.length ? planParts.join(' + ') : 'ยังไม่ระบุแผนระงับความรู้สึก';
 
   // Blood prep
@@ -3643,7 +3656,7 @@ export function computeClinicalSummary(record: PreAnestheticEvaluation): Clinica
     physicalExam.expectedDifficultAirway !== 'none',
     Boolean(laboratory.hb.trim() || laboratory.hct.trim() || laboratory.cr.trim()),
     Boolean(record.asaClass),
-    Boolean(anestheticPlan.gaSelected || anestheticPlan.raSelected),
+    Boolean(anestheticPlan.gaSelected || anestheticPlan.raSelected || anestheticPlan.macSelected),
     Boolean(premedication.npoTime.trim()) ||
       Boolean((premedication.lastMealTime ?? '').trim()) ||
       Boolean((premedication.lastWaterTime ?? '').trim()),
@@ -4878,7 +4891,14 @@ export function generateAutoProblemEntries(
     });
   }
 
-  // Current Status: Dyspnea / Dependent / Altered GCS
+  // Current Status: Chest pain / Dyspnea / Dependent / Altered GCS
+  if (physicalExam.chestPainStatus === 'yes') {
+    const cpDetail = (physicalExam.chestPainDetail ?? '').trim();
+    conditionItems.push({
+      text: `Chest pain${cpDetail ? ` (${cpDetail})` : ''}`,
+      score: 88,
+    });
+  }
   if (physicalExam.dyspneaStatus === 'yes') {
     conditionItems.push({
       text: 'Dyspnea (เหนื่อยหอบ)',

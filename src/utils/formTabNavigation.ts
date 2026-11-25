@@ -112,6 +112,7 @@ export function handleSectionArrowNavigation(
   const isTextInput =
     target instanceof HTMLInputElement &&
     target.dataset.thaiDateInput !== 'true' &&
+    target.dataset.time24Input !== 'true' &&
     (target.type === 'text' || target.type === 'number' || target.type === 'search');
   const isButton = target instanceof HTMLButtonElement;
 
@@ -132,7 +133,7 @@ export function handleSectionArrowNavigation(
 
   const rawInputs = Array.from(
     container.querySelectorAll<HTMLInputElement>(
-      'input[type="text"]:not([data-thai-date-input="true"]), input[type="number"], input[type="search"]',
+      'input[type="text"]:not([data-thai-date-input="true"]):not([data-time24-input="true"]), input[type="number"], input[type="search"]',
     ),
   ).filter((el) => !el.disabled && isFieldVisible(el));
 

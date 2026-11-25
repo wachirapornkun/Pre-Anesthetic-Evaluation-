@@ -22,6 +22,7 @@ import {
   PreAnestheticEvaluation,
   summarizePostOpComplications,
 } from '../types/evaluation';
+import { formatTime24 } from '../components/Time24Input';
 
 function escapeCsvCell(val: string | number | boolean): string {
   const s = String(val ?? '');
@@ -107,7 +108,7 @@ export function exportEvaluationsCsv(records: PreAnestheticEvaluation[], filenam
       r.specialty || '',
       formatThaiDateBE(r.dateOfVisit),
       formatThaiDateBE(r.dateOfOperation),
-      r.operationTime || '',
+      formatTime24(r.operationTime) || '',
       r.scheduleType === 'emergency' || (!r.scheduleType && r.asaEmergency) ? 'Emergency' : 'Elective',
       r.orRoom || '',
       r.caseOrder || '',
@@ -340,12 +341,22 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
     </div>
     <div class="row">
       <div class="field">
-        Name: ${blankSlot(record.patientName, 125)} &nbsp;
+        Name: ${blankSlot(record.patientName, 135)} &nbsp;
         Age: ${blankSlot(record.age, 30)} yr &nbsp;
         HN: ${blankSlot(record.hn, 66)} &nbsp;
         AN: ${blankSlot(record.an, 66)} &nbsp;
-        Ward: ${blankSlot(formatWardWithBed(record.ward, record.bed), 62)} &nbsp;
-        สาขา: ${blankSlot(record.specialty, 56)} &nbsp;
+        Ward: ${blankSlot(formatWardWithBed(record.ward, record.bed), 64)} &nbsp;
+        สาขา: ${blankSlot(record.specialty, 60)}
+      </div>
+      <div class="field">
+        Diagnosis: ${blankSlot(record.diagnosis, 230)} &nbsp;
+        Operation: ${blankSlot(record.operation, 240)}
+      </div>
+      <div class="field">
+        Date of visit: ${blankSlot(formatThaiDateBE(record.dateOfVisit), 74)} &nbsp;
+        Date of operation: ${blankSlot(formatThaiDateBE(record.dateOfOperation), 74)} &nbsp;
+        เวลา: ${blankSlot(formatTime24(record.operationTime), 48)} &nbsp;
+        Surgeon: ${blankSlot(record.surgeon, 115)} &nbsp;
         ห้อง: ${blankSlot(
           record.orRoom
             ? `${record.orRoom}${record.caseOrder ? ` #${record.caseOrder}` : ''}`
@@ -354,16 +365,6 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
             : '',
           48,
         )}
-      </div>
-      <div class="field">
-        Diagnosis: ${blankSlot(record.diagnosis, 230)} &nbsp;
-        Operation: ${blankSlot(record.operation, 240)}
-      </div>
-      <div class="field">
-        Date of visit: ${blankSlot(formatThaiDateBE(record.dateOfVisit), 76)} &nbsp;
-        Date of operation: ${blankSlot(formatThaiDateBE(record.dateOfOperation), 76)} &nbsp;
-        เวลา: ${blankSlot(record.operationTime, 52)} &nbsp;
-        Surgeon: ${blankSlot(record.surgeon, 130)}
       </div>
       ${
         fd.surgeryPostponement?.isPostponed
@@ -428,29 +429,21 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
         <div class="sec-title" style="margin-top:6px;">3. Investigation</div>
         <div class="field"><strong>3.1 Chest x-ray:</strong> ${radioMark(inv.cxrStatus === 'normal', 'Normal')} ${radioMark(inv.cxrStatus === 'abnormal', 'Abnormal')} ${esc(inv.cxrDetail)}</div>
         <div class="field"><strong>3.2 EKG:</strong> ${radioMark(inv.ekgStatus === 'normal', 'Normal')} ${radioMark(inv.ekgStatus === 'abnormal', 'Abnormal')} ${esc(inv.ekgDetail)}</div>
-        <div class="field"><strong>3.3 Other (ex. CT):</strong>${
-          inv.other?.trim()
-            ? `<div style="margin-top:2px;text-align:left;white-space:pre-wrap;word-break:break-word;border-bottom:1px dotted #475569;padding-bottom:2px;">${esc(inv.other.trim())}</div>`
-            : dottedRows([], 2, false)
-        }</div>
+        <div class="field"><strong>3.3 Other (ex. CT):</strong>${dottedRows((inv.other || '').split(/\r?\n/), 4, false)}</div>
 
         <div class="sec-title" style="margin-top:6px;">5. Premedication</div>
-        <div class="field">${dottedRows(pm.items || [], 3, true)}</div>
+        <div class="field">${dottedRows(pm.items || [], 4, true)}</div>
         <div class="field" style="margin-top:3px;padding:2px 6px;border:1px solid #0f172a;background:#fffbeb;font-size:11px;font-weight:700;color:#0f172a;">NPO: ${esc(pm.npoTime || '__________________')}${
           pm.lastMealTime || pm.lastWaterTime
             ? `<div style="font-size:11px;font-weight:600;color:#78350f;margin-top:2px;">${[
-                pm.lastMealTime ? `อาหารล่าสุด ${esc(pm.lastMealTime)} น.` : '',
-                pm.lastWaterTime ? `น้ำเปล่าล่าสุด ${esc(pm.lastWaterTime)} น.` : '',
+                pm.lastMealTime ? `อาหารล่าสุด ${esc(formatTime24(pm.lastMealTime))} น.` : '',
+                pm.lastWaterTime ? `น้ำเปล่าล่าสุด ${esc(formatTime24(pm.lastWaterTime))} น.` : '',
               ]
                 .filter(Boolean)
                 .join(' · ')}</div>`
             : ''
         }</div>
-        ${
-          pm.onIvf?.trim()
-            ? `<div class="field"><strong>on IVF:</strong> <span class="val">${esc(pm.onIvf.trim())}</span></div>`
-            : `<div class="field"><strong>on IVF:</strong> ${radioMark(false, 'LSR 1000 ml')} ${radioMark(false, 'Acetar 1000 ml')} ${radioMark(false, 'NSS 1000 ml')} ${radioMark(false, '5%D/N/2 1000 ml')}<br/>&#9675; NSS ${blankSlot('', 32)} ml + KCl ${blankSlot('', 26)} mEq &nbsp; IV rate ${blankSlot('', 38)} ml/hr</div>`
-        }
+        <div class="field" style="display:flex;align-items:flex-end;gap:4px;"><strong>on IVF:</strong><span class="dotted-line">${esc(pm.onIvf?.trim() || '') || '&nbsp;'}</span></div>
       </div>
 
       <div class="col-right">
@@ -476,6 +469,7 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
         <div class="field"><strong>2.4 Breath sound:</strong> ${radioMark(p.breathSound === 'normal', 'Normal')} ${radioMark(p.breathSound === 'abnormal', 'Abnormal')} ${esc(p.breathSoundDetail)}</div>
         <div class="field"><strong>2.5 Heart sound:</strong> ${radioMark(p.heartSound === 'normal', 'Normal')} ${radioMark(p.heartSound === 'abnormal', 'Abnormal')} ${esc(p.heartSoundDetail)}</div>
         <div class="field"><strong>2.6 FC:</strong> ${radioMark(p.functionalCapacityLevel === '>4', '> 4 METS')} ${radioMark(p.functionalCapacityLevel === '<4', '< 4 METS')} ${blankSlot(p.functionalCapacity, 120)}</div>
+        <div class="field">${radioMark(p.chestPainStatus === 'no', 'No chest pain')} ${radioMark(p.chestPainStatus === 'yes', 'Chest pain')} ${blankSlot(p.chestPainDetail, 120)}</div>
 
         <div class="sec-title" style="margin-top:6px;">4. Laboratory Evaluation${(() => {
           const cbcD = lab.cbcDate || (!lab.chemDate ? lab.labDate : '');
@@ -540,7 +534,7 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
       <div class="field"><strong>8. Problem list:</strong> ${fd.problemList.filter(Boolean).map((item, i) => `${i + 1}) ${esc(item)}`).join(' · ') || '-'}</div>
       <div class="field"><strong>9. Anesthetic plan:</strong>
         ${checkMark(ap.gaSelected, 'General anesthesia')} (${(['Intubation', 'LMA', 'Mask', 'TIVA', 'Other'] as const).map((m) => radioMark(ap.gaMethods.includes(m), m)).join('')} ${esc(ap.gaOther)})<br/>
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;${checkMark(ap.raSelected, 'Regional anesthesia')} (${(['Spinal block', 'Epidural', 'Nerve block', 'Other'] as const).map((m) => radioMark(ap.raMethods.includes(m), m)).join('')} ${esc(ap.raOther)})
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;${checkMark(ap.raSelected, 'Regional anesthesia')} (${(['Spinal block', 'Epidural', 'Nerve block', 'Other'] as const).map((m) => radioMark(ap.raMethods.includes(m), m)).join('')} ${esc(ap.raOther)}) &nbsp; ${checkMark(Boolean(ap.macSelected), 'MAC')}${ap.macDetail?.trim() ? ` (${esc(ap.macDetail.trim())})` : ''}
       </div>
       <div class="field"><strong>10. สิ่งที่ต้องเตรียม (ตาม order วิสัญญีแพทย์):</strong> ${fd.preparationOrders.filter(Boolean).map((o, i) => `${i + 1}) ${esc(o)}`).join(' · ') || '-'}</div>
       <div class="field" style="text-align:right;"><strong>Summarized by:</strong> <span class="val">${esc(pa.summarizedBy || '-')}</span> &nbsp; Date: <span class="val">${esc(formatThaiDateBE(pa.summarizedDate) || '-')}</span></div>
@@ -574,7 +568,7 @@ export function exportSingleHtmlReport(record: PreAnestheticEvaluation) {
       <div class="field"><strong>Post Anesthesia Evaluation</strong></div>
       <div class="field">Vital signs: BP ${blankSlot(pa.bp, 68)} mmHg &nbsp; P ${blankSlot(pa.pulse, 44)} /min &nbsp; RR ${blankSlot(pa.rr, 42)} /min &nbsp; T ${blankSlot(pa.temp, 44)} °C &nbsp; SpO2 ${blankSlot(pa.spo2, 44)} % &nbsp; PS ${blankSlot(pa.painScore, 38)} คะแนน</div>
       <div class="field"><strong>Post anesthesia complication:</strong> ${radioMark(pa.complicationStatus === 'no', 'No')} ${radioMark(pa.complicationStatus === 'yes', 'Yes')} ${blankSlot(pa.complicationDetail, 180)}</div>
-      <div class="field" style="text-align:right;">ผู้บันทึกข้อมูล Post op / visit by: ${blankSlot(pa.visitBy || fd.postOpComplication?.postOpRecorder, 130)} วันที่: ${blankSlot(formatThaiDateBE(pa.visitDate || fd.postOpComplication?.postOpDate || ''), 82)}${fd.postOpComplication?.postOpTime ? ` เวลา: <span class="val">${esc(fd.postOpComplication.postOpTime)}</span>` : ''}</div>
+      <div class="field" style="text-align:right;">ผู้บันทึกข้อมูล Post op / visit by: ${blankSlot(pa.visitBy || fd.postOpComplication?.postOpRecorder, 130)} วันที่: ${blankSlot(formatThaiDateBE(pa.visitDate || fd.postOpComplication?.postOpDate || ''), 82)}${fd.postOpComplication?.postOpTime ? ` เวลา: <span class="val">${esc(formatTime24(fd.postOpComplication.postOpTime))}</span>` : ''}</div>
     </div>
   </div>
   <div class="footer-code">ANE-FM-002-03 &amp; ANE-FM-006-01</div>

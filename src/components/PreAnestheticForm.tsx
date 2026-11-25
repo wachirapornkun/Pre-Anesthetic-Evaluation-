@@ -90,6 +90,7 @@ import {
 import { MedicationGroupSelector } from './MedicationGroupSelector';
 import { OperationInput } from './OperationInput';
 import { ThaiDateInput } from './ThaiDateInput';
+import { Time24Input } from './Time24Input';
 
 interface PreAnestheticFormProps {
   value: PreAnestheticEvaluation;
@@ -1220,12 +1221,13 @@ export function PreAnestheticForm({
             )}
           </div>
           <label className="lg:col-span-2 flex flex-col gap-1">
-            <span className="text-xs font-medium text-slate-600">เวลาทำผ่าตัด (Time)</span>
-            <input
-              type="time"
+            <span className="text-xs font-medium text-slate-600">เวลาทำผ่าตัด (24 ชม.)</span>
+            <Time24Input
+              ariaLabel="เวลาทำผ่าตัด (24 ชั่วโมง)"
               value={value.operationTime ?? ''}
-              onChange={(e) => updateTop('operationTime', e.target.value)}
-              className={`${inputBase} font-mono tabular-nums`}
+              onChange={(next) => updateTop('operationTime', next)}
+              wrapperClassName="w-full"
+              className={`${inputBase} w-full font-mono tabular-nums`}
             />
           </label>
           <div className="lg:col-span-2 flex flex-col gap-1">
@@ -2951,7 +2953,7 @@ export function PreAnestheticForm({
                 3.3 Other (ex. CT)
               </span>
               <textarea
-                rows={2}
+                rows={4}
                 value={inv.other}
                 onChange={(e) => updateInvestigation({ other: e.target.value })}
                 placeholder="Echo, PFT, CT brain หรือผลตรวจเพิ่มเติม..."
@@ -3060,24 +3062,26 @@ export function PreAnestheticForm({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
                       <label className="block space-y-0.5">
                         <span className="text-[11px] font-semibold text-slate-700">
-                          เวลารับประทานอาหารล่าสุด
+                          เวลารับประทานอาหารล่าสุด (24 ชม.)
                         </span>
-                        <input
-                          type="time"
+                        <Time24Input
+                          ariaLabel="เวลารับประทานอาหารล่าสุด (24 ชั่วโมง)"
                           value={pm.lastMealTime ?? ''}
-                          onChange={(e) => updatePremed({ lastMealTime: e.target.value })}
+                          onChange={(next) => updatePremed({ lastMealTime: next })}
+                          wrapperClassName="w-full"
                           className="w-full bg-white border border-pborder rounded-md px-2.5 py-1.5 text-xs font-mono tabular-nums text-[#243040] focus:outline-none focus:border-pblue-400"
                         />
                       </label>
 
                       <label className="block space-y-0.5">
                         <span className="text-[11px] font-semibold text-slate-700">
-                          เวลาดื่มน้ำเปล่าล่าสุด
+                          เวลาดื่มน้ำเปล่าล่าสุด (24 ชม.)
                         </span>
-                        <input
-                          type="time"
+                        <Time24Input
+                          ariaLabel="เวลาดื่มน้ำเปล่าล่าสุด (24 ชั่วโมง)"
                           value={pm.lastWaterTime ?? ''}
-                          onChange={(e) => updatePremed({ lastWaterTime: e.target.value })}
+                          onChange={(next) => updatePremed({ lastWaterTime: next })}
+                          wrapperClassName="w-full"
                           className="w-full bg-white border border-pborder rounded-md px-2.5 py-1.5 text-xs font-mono tabular-nums text-[#243040] focus:outline-none focus:border-pblue-400"
                         />
                       </label>
@@ -4531,6 +4535,42 @@ export function PreAnestheticForm({
                   onChange={(e) => updatePhysical({ functionalCapacity: e.target.value })}
                   placeholder="รายละเอียด เช่น เดินขึ้นบันได 2 ชั้นได้ / กิจวัตรประจำวัน..."
                   aria-label="รายละเอียด Functional Capacity"
+                  className={`${inputBase} flex-1 min-w-[160px] text-xs`}
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-slate-700 w-36 shrink-0">
+                  Chest pain
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    updatePhysical({
+                      chestPainStatus: p.chestPainStatus === 'no' ? '' : 'no',
+                    })
+                  }
+                  className={radioBtn(p.chestPainStatus === 'no')}
+                >
+                  {p.chestPainStatus === 'no' ? '●' : '○'} No chest pain
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    updatePhysical({
+                      chestPainStatus: p.chestPainStatus === 'yes' ? '' : 'yes',
+                    })
+                  }
+                  className={radioBtn(p.chestPainStatus === 'yes', 'danger')}
+                >
+                  {p.chestPainStatus === 'yes' ? '●' : '○'} Chest pain
+                </button>
+                <input
+                  type="text"
+                  value={p.chestPainDetail ?? ''}
+                  onChange={(e) => updatePhysical({ chestPainDetail: e.target.value })}
+                  placeholder="รายละเอียดอาการเจ็บหน้าอก (ถ้ามี)..."
+                  aria-label="รายละเอียด Chest pain"
                   className={`${inputBase} flex-1 min-w-[160px] text-xs`}
                 />
               </div>

@@ -23,6 +23,7 @@ import {
   DentalArchBadge,
   MallampatiSelector,
 } from './MedicalDiagrams';
+import { formatTime24 } from './Time24Input';
 
 interface A4PrintSheetProps {
   evaluation: PreAnestheticEvaluation;
@@ -142,10 +143,10 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
 
         {/* Demographics — 3 structured rows */}
         <div className="px-2.5 py-1.5 border-b border-slate-900 space-y-1 shrink-0">
-          {/* Row 1: Patient ID, Ward, สาขา, ห้อง */}
+          {/* Row 1: Patient ID, Ward, สาขา */}
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span>
-              Name: {writeBlank(evaluation.patientName, 'min-w-[130px]')}
+              Name: {writeBlank(evaluation.patientName, 'min-w-[140px]')}
             </span>
             <span>
               Age: {writeBlank(evaluation.age, 'min-w-[30px]', { mono: true })} yr
@@ -157,22 +158,10 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
               AN: {writeBlank(evaluation.an, 'min-w-[66px]', { mono: true })}
             </span>
             <span>
-              Ward: {writeBlank(formatWardWithBed(evaluation.ward, evaluation.bed), 'min-w-[62px]')}
+              Ward: {writeBlank(formatWardWithBed(evaluation.ward, evaluation.bed), 'min-w-[64px]')}
             </span>
             <span>
-              สาขา: {writeBlank(evaluation.specialty, 'min-w-[56px]')}
-            </span>
-            <span>
-              ห้อง:{' '}
-              {writeBlank(
-                evaluation.orRoom
-                  ? `${evaluation.orRoom}${evaluation.caseOrder ? ` #${evaluation.caseOrder}` : ''}`
-                  : evaluation.caseOrder
-                  ? `#${evaluation.caseOrder}`
-                  : '',
-                'min-w-[48px]',
-                { mono: true },
-              )}
+              สาขา: {writeBlank(evaluation.specialty, 'min-w-[60px]')}
             </span>
           </div>
 
@@ -188,24 +177,36 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
             </span>
           </div>
 
-          {/* Row 3: Date of visit, Date of operation, เวลา, Surgeon */}
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          {/* Row 3: Date of visit, Date of operation, เวลา, Surgeon, ห้อง */}
+          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
             <span>
               Date of visit:{' '}
-              {writeBlank(formatThaiDateBE(evaluation.dateOfVisit), 'min-w-[78px]', { mono: true })}
+              {writeBlank(formatThaiDateBE(evaluation.dateOfVisit), 'min-w-[74px]', { mono: true })}
             </span>
             <span>
               Date of operation:{' '}
-              {writeBlank(formatThaiDateBE(evaluation.dateOfOperation), 'min-w-[78px]', {
+              {writeBlank(formatThaiDateBE(evaluation.dateOfOperation), 'min-w-[74px]', {
                 mono: true,
               })}
             </span>
             <span>
-              เวลา: {writeBlank(evaluation.operationTime, 'min-w-[52px]', { mono: true })}
+              เวลา: {writeBlank(formatTime24(evaluation.operationTime), 'min-w-[46px]', { mono: true })}
             </span>
-            <span className="flex-1 min-w-[140px] inline-flex items-baseline gap-1">
+            <span className="flex-1 min-w-[125px] inline-flex items-baseline gap-1">
               <span className="shrink-0">Surgeon:</span>
-              {writeBlank(evaluation.surgeon, 'min-w-[100px] flex-1')}
+              {writeBlank(evaluation.surgeon, 'min-w-[85px] flex-1')}
+            </span>
+            <span className="shrink-0">
+              ห้อง:{' '}
+              {writeBlank(
+                evaluation.orRoom
+                  ? `${evaluation.orRoom}${evaluation.caseOrder ? ` #${evaluation.caseOrder}` : ''}`
+                  : evaluation.caseOrder
+                  ? `#${evaluation.caseOrder}`
+                  : '',
+                'min-w-[48px]',
+                { mono: true },
+              )}
             </span>
           </div>
           {fd.surgeryPostponement?.isPostponed && (
@@ -235,7 +236,7 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
           {/* Left Column */}
           <div className="border-r border-slate-900 flex flex-col divide-y divide-slate-900 min-w-0">
             {/* 1. History */}
-            <div className="p-2 space-y-1 grow shrink-0 flex flex-col min-w-0">
+            <div className="p-2 space-y-1 shrink-0 flex flex-col min-w-0">
               <div className="space-y-1">
                 <div className="font-bold text-[11px]">1. History</div>
                 {/* 1.1 Present illness — Always 2 dotted writing lines */}
@@ -444,23 +445,24 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
               </div>
               <div className="space-y-0.5">
                 <div className="font-semibold leading-[1.3]">3.3 Other (ex. CT):</div>
-                {inv.other?.trim() ? (
-                  <div className="w-full text-left leading-[1.35] whitespace-pre-wrap break-words border-b border-dotted border-slate-600 pb-0.5">
-                    {inv.other.trim()}
-                  </div>
-                ) : (
-                  renderDottedLines([], 2, {
+                {renderDottedLines(
+                  (inv.other || '')
+                    .split(/\r?\n/)
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                  4,
+                  {
                     rowHeightClass: 'min-h-[15px]',
                     keyPrefix: 'inv_other',
-                  })
+                  },
                 )}
               </div>
             </div>
 
-            {/* 5. Premedication — Always 3 numbered dotted writing lines */}
-            <div className="p-2 space-y-1 shrink-0">
+            {/* 5. Premedication — Always 4 numbered dotted writing lines */}
+            <div className="p-2 space-y-1 grow shrink-0">
               <div className="font-bold text-[11px]">5. Premedication</div>
-              {renderDottedLines(filledPremeds, 3, {
+              {renderDottedLines(filledPremeds, 4, {
                 numbered: true,
                 rowHeightClass: 'min-h-[17px]',
                 keyPrefix: 'premed',
@@ -474,40 +476,18 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                 </div>
                 {(pm.lastMealTime || pm.lastWaterTime) && (
                   <div className="text-[9.5px] font-semibold text-slate-800 mt-0.5">
-                    {pm.lastMealTime ? `อาหารล่าสุด ${pm.lastMealTime} น.` : ''}
+                    {pm.lastMealTime ? `อาหารล่าสุด ${formatTime24(pm.lastMealTime)} น.` : ''}
                     {pm.lastMealTime && pm.lastWaterTime ? ' · ' : ''}
-                    {pm.lastWaterTime ? `น้ำเปล่าล่าสุด ${pm.lastWaterTime} น.` : ''}
+                    {pm.lastWaterTime ? `น้ำเปล่าล่าสุด ${formatTime24(pm.lastWaterTime)} น.` : ''}
                   </div>
                 )}
               </div>
-              {pm.onIvf?.trim() ? (
-                <div className="flex items-start gap-1 pt-0.5">
-                  <span className="font-semibold shrink-0 leading-[1.3]">on IVF:</span>
-                  <span className="flex-1 min-w-0 border-b border-dotted border-slate-600 px-0.5 leading-[1.3] font-semibold whitespace-pre-wrap break-words">
-                    {pm.onIvf.trim()}
-                  </span>
-                </div>
-              ) : (
-                <div className="pt-0.5 space-y-0.5 text-[9.5px] leading-[1.3]">
-                  <div className="flex flex-wrap items-baseline gap-x-1">
-                    <span className="font-semibold text-[10.5px]">on IVF:</span>
-                    {mark(false, 'LSR 1000 ml')}
-                    {mark(false, 'Acetar 1000 ml')}
-                    {mark(false, 'NSS 1000 ml')}
-                    {mark(false, '5%D/N/2 1000 ml')}
-                  </div>
-                  <div className="flex flex-wrap items-baseline gap-x-1 pl-1">
-                    <span>○ NSS</span>
-                    {writeBlank('', 'min-w-[30px]')}
-                    <span>ml + KCl</span>
-                    {writeBlank('', 'min-w-[24px]')}
-                    <span>mEq</span>
-                    <span className="ml-1">IV rate</span>
-                    {writeBlank('', 'min-w-[36px]')}
-                    <span>ml/hr</span>
-                  </div>
-                </div>
-              )}
+              <div className="flex items-start gap-1 pt-0.5">
+                <span className="font-semibold shrink-0 leading-[1.3]">on IVF:</span>
+                <span className="flex-1 min-w-0 border-b border-dotted border-slate-600 px-0.5 leading-[1.3] font-semibold whitespace-pre-wrap break-words">
+                  {pm.onIvf?.trim() || '\u00A0'}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -641,6 +621,11 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
                 {mark(p.functionalCapacityLevel === '>4', '> 4 METS')}
                 {mark(p.functionalCapacityLevel === '<4', '< 4 METS')}
                 {writeBlank(p.functionalCapacity, 'min-w-[110px] flex-1')}
+              </div>
+              <div className="flex flex-wrap items-baseline gap-x-1">
+                {mark(p.chestPainStatus === 'no', 'No chest pain')}
+                {mark(p.chestPainStatus === 'yes', 'Chest pain')}
+                {writeBlank(p.chestPainDetail, 'min-w-[110px] flex-1')}
               </div>
             </div>
 
@@ -843,17 +828,10 @@ export function A4PrintSheet({ evaluation, previewMode = false }: A4PrintSheetPr
               {(['Spinal block', 'Epidural', 'Nerve block', 'Other'] as const).map((m) =>
                 mark(ap.raMethods.includes(m), m, `ra_${m}`),
               )}
-              {ap.raOther && <span>({ap.raOther})</span>}
+              {ap.raOther && <span className="mr-2">({ap.raOther})</span>}
+              {box(Boolean(ap.macSelected), 'MAC')}
+              {ap.macDetail?.trim() && <span>({ap.macDetail.trim()})</span>}
             </span>
-            {ap.macSelected && (
-              <>
-                <br />
-                <span className="pl-24 inline-block">
-                  {box(Boolean(ap.macSelected), 'MAC (Monitored Anesthesia Care)')}
-                  {ap.macDetail && <span>({ap.macDetail})</span>}
-                </span>
-              </>
-            )}
           </div>
           <div>
             <span className="font-bold">10. สิ่งที่ต้องเตรียม (ตาม order วิสัญญีแพทย์):</span>{' '}

@@ -283,49 +283,51 @@ export function PostOpA4PrintSheet({
 
         {/* Bottom Section: Post Anesthesia Evaluation */}
         <div className="px-2.5 py-2 space-y-1.5 text-[11px] leading-[1.35] shrink-0">
-          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-            <span className="font-bold border border-slate-800 px-2 py-0.5 shrink-0">
+          <div>
+            <span className="inline-block font-bold border border-slate-800 px-2 py-0.5">
               Post Anesthesia Evaluation
             </span>
-            <span className="font-semibold">Vital signs:</span>
+          </div>
+          <div className="flex flex-nowrap items-baseline justify-between gap-x-1.5 whitespace-nowrap">
+            <span className="font-semibold shrink-0">Vital signs:</span>
             <span>
               BP{' '}
-              <span className="inline-block min-w-[68px] border-b border-dotted border-slate-600 px-1 text-center font-mono">
+              <span className="inline-block min-w-[66px] border-b border-dotted border-slate-600 px-1 text-center font-mono">
                 {pa.bp?.trim() ? <strong>{pa.bp.trim()}</strong> : '\u00A0'}
               </span>{' '}
               mmHg
             </span>
             <span>
               P{' '}
-              <span className="inline-block min-w-[42px] border-b border-dotted border-slate-600 px-1 text-center font-mono">
+              <span className="inline-block min-w-[40px] border-b border-dotted border-slate-600 px-1 text-center font-mono">
                 {pa.pulse?.trim() ? <strong>{pa.pulse.trim()}</strong> : '\u00A0'}
               </span>{' '}
               /min
             </span>
             <span>
               RR{' '}
-              <span className="inline-block min-w-[40px] border-b border-dotted border-slate-600 px-1 text-center font-mono">
+              <span className="inline-block min-w-[38px] border-b border-dotted border-slate-600 px-1 text-center font-mono">
                 {pa.rr?.trim() ? <strong>{pa.rr.trim()}</strong> : '\u00A0'}
               </span>{' '}
               /min
             </span>
             <span>
               T{' '}
-              <span className="inline-block min-w-[42px] border-b border-dotted border-slate-600 px-1 text-center font-mono">
+              <span className="inline-block min-w-[40px] border-b border-dotted border-slate-600 px-1 text-center font-mono">
                 {pa.temp?.trim() ? <strong>{pa.temp.trim()}</strong> : '\u00A0'}
               </span>{' '}
               °C
             </span>
             <span>
               SpO2{' '}
-              <span className="inline-block min-w-[42px] border-b border-dotted border-slate-600 px-1 text-center font-mono">
+              <span className="inline-block min-w-[40px] border-b border-dotted border-slate-600 px-1 text-center font-mono">
                 {pa.spo2?.trim() ? <strong>{pa.spo2.trim()}</strong> : '\u00A0'}
               </span>{' '}
               %
             </span>
             <span>
               PS{' '}
-              <span className="inline-block min-w-[38px] border-b border-dotted border-slate-600 px-1 text-center font-mono">
+              <span className="inline-block min-w-[36px] border-b border-dotted border-slate-600 px-1 text-center font-mono">
                 {pa.painScore?.trim() ? <strong>{pa.painScore.trim()}</strong> : '\u00A0'}
               </span>{' '}
               คะแนน

@@ -1,12 +1,25 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Calendar, ChevronDown, ChevronRight, FilePlus2, FolderOpen, Plus, Search, X } from 'lucide-react';
 import {
-  compareByDateAndSurgeon,
+  Building2,
+  Calendar,
+  CheckSquare,
+  ChevronDown,
+  ChevronRight,
+  FilePlus2,
+  FolderOpen,
+  Plus,
+  Search,
+  Square,
+  X,
+  XSquare,
+} from 'lucide-react';
+import {
   formatShortThaiDate,
   formatThaiScheduleDate,
-  formatWardWithBed,
   getEffectiveEvaluationStatus,
-  getPostOpVisitCompleteness,
+  isPostOpVisited,
+  isPreOpDraftNotVisited,
+  isPreOpVisited,
   matchesEvaluationSearch,
   PreAnestheticEvaluation,
 } from '../types/evaluation';
@@ -106,13 +119,35 @@ export function CaseFolderSidebar({
         }
         return matchesEvaluationSearch(r, searchQuery);
       })
-      .sort((a, b) => compareByDateAndSurgeon(a, b, 'desc'));
+      .sort((a, b) => {
+        const dA = (a.dateOfOperation || '').trim();
+        const dB = (b.dateOfOperation || '').trim();
+        if (dA !== dB) {
+          if (!dA) return 1;
+          if (!dB) return -1;
+          return dB.localeCompare(dA);
+        }
+        const wA = (a.ward || '').trim();
+        const wB = (b.ward || '').trim();
+        if (wA !== wB) {
+          if (!wA) return 1;
+          if (!wB) return -1;
+          const idxA = wardOptions.indexOf(wA);
+          const idxB = wardOptions.indexOf(wB);
+          if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+          if (idxA !== -1) return -1;
+          if (idxB !== -1) return 1;
+          return wA.localeCompare(wB, 'th');
+        }
+        return (a.patientName || '').localeCompare(b.patientName || '', 'th');
+      });
 
     const dateGroups: {
       date: string;
       total: number;
-      draftCount: number;
-      surgeons: { surgeon: string; items: PreAnestheticEvaluation[] }[];
+      preOpDoneCount: number;
+      postOpDoneCount: number;
+      wards: { ward: string; items: PreAnestheticEvaluation[] }[];
     }[] = [];
     const dateIdxMap = new Map<string, number>();
 
@@ -122,49 +157,33 @@ export function CaseFolderSidebar({
       if (dIdx === undefined) {
         dIdx = dateGroups.length;
         dateIdxMap.set(dateKey, dIdx);
-        dateGroups.push({ date: dateKey, total: 0, draftCount: 0, surgeons: [] });
+        dateGroups.push({
+          date: dateKey,
+          total: 0,
+          preOpDoneCount: 0,
+          postOpDoneCount: 0,
+          wards: [],
+        });
       }
       const dGroup = dateGroups[dIdx];
       dGroup.total += 1;
-      if (item.status === 'draft') dGroup.draftCount += 1;
+      if (isPreOpVisited(item)) dGroup.preOpDoneCount += 1;
+      if (isPostOpVisited(item)) dGroup.postOpDoneCount += 1;
 
-      const surgKey = (item.surgeon || '').trim() || 'ยังไม่ระบุแพทย์ผ่าตัด';
-      let sGroup = dGroup.surgeons.find((s) => s.surgeon === surgKey);
-      if (!sGroup) {
-        sGroup = { surgeon: surgKey, items: [] };
-        dGroup.surgeons.push(sGroup);
+      const wardKey = (item.ward || '').trim() || 'ไม่ระบุหอผู้ป่วย';
+      let wGroup = dGroup.wards.find((w) => w.ward === wardKey);
+      if (!wGroup) {
+        wGroup = { ward: wardKey, items: [] };
+        dGroup.wards.push(wGroup);
       }
-      sGroup.items.push(item);
+      wGroup.items.push(item);
     }
 
     return dateGroups;
-  }, [records, searchQuery, dateFilter, surgeonFilter, wardFilter, statusFilter]);
+  }, [records, searchQuery, dateFilter, surgeonFilter, wardFilter, statusFilter, wardOptions]);
 
   const toggleDateCollapse = (dateKey: string) => {
     setCollapsedDates((prev) => ({ ...prev, [dateKey]: !prev[dateKey] }));
-  };
-
-  const statusMeta = (item: PreAnestheticEvaluation) => {
-    const effStatus = getEffectiveEvaluationStatus(item);
-    const postOp = getPostOpVisitCompleteness(
-      item.formData?.postAnesthesia,
-      item.formData?.postOpComplication,
-    );
-    switch (effStatus) {
-      case 'post_op_completed':
-        return { label: 'เยี่ยม Post-Op แล้ว', cls: 'text-pgreen-800' };
-      case 'evaluated':
-        return {
-          label: postOp.hasAnyInput
-            ? 'Pre-Op แล้ว · ยังไม่เยี่ยม Post-Op (ไม่ครบ)'
-            : 'Pre-Op แล้ว · ยังไม่เยี่ยม Post-Op',
-          cls: 'text-pblue-800',
-        };
-      case 'locked':
-        return { label: 'ปิดบันทึก', cls: 'text-slate-500' };
-      default:
-        return { label: 'รอเยี่ยมที่หอผู้ป่วย', cls: 'text-pyellow-800' };
-    }
   };
 
   const totalFiltered = groupedFolders.reduce((sum, g) => sum + g.total, 0);
@@ -181,7 +200,7 @@ export function CaseFolderSidebar({
   const activeRecordVisible = useMemo(
     () =>
       groupedFolders.some((g) =>
-        g.surgeons.some((s) => s.items.some((item) => item.id === activeId)),
+        g.wards.some((w) => w.items.some((item) => item.id === activeId)),
       ),
     [groupedFolders, activeId],
   );
@@ -431,9 +450,8 @@ export function CaseFolderSidebar({
                         ) : null}
                       </div>
                       <div className="text-[10px] text-slate-500 truncate tabular-nums">
-                        {!isUnspecified ? `${dateMeta.label} · ` : ''}
-                        {group.total} ราย
-                        {group.draftCount > 0 ? ` (รอเยี่ยม ${group.draftCount})` : ''}
+                        {group.total} ราย · Pre {group.preOpDoneCount}/{group.total} · Post{' '}
+                        {group.postOpDoneCount}/{group.total}
                       </div>
                     </div>
                   </button>
@@ -451,24 +469,27 @@ export function CaseFolderSidebar({
                   )}
                 </div>
 
-                {/* Surgeons inside this Date */}
+                {/* Wards inside this Date (same ward together, no surgeon split) */}
                 {!isCollapsed && (
                   <div className="divide-y divide-pborder/60">
-                    {group.surgeons.map((sGroup) => (
-                      <div key={sGroup.surgeon} className="bg-white">
-                        <div className="px-3.5 py-1.5 bg-ppink-50/45 border-b border-ppink-100/80 flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-semibold text-prose-800 truncate">
-                            {sGroup.surgeon}
+                    {group.wards.map((wGroup) => (
+                      <div key={wGroup.ward} className="bg-white">
+                        <div className="px-3.5 py-1.5 bg-emerald-50/60 border-b border-emerald-100 flex items-center justify-between gap-2">
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-900 truncate">
+                            <Building2 className="w-3 h-3 text-emerald-700 shrink-0" />
+                            {wGroup.ward}
                           </span>
                           <span className="text-[10px] font-mono tabular-nums text-slate-500 shrink-0">
-                            {sGroup.items.length} ราย
+                            {wGroup.items.length} ราย
                           </span>
                         </div>
 
                         <div className="divide-y divide-pborder/60">
-                          {sGroup.items.map((item) => {
+                          {wGroup.items.map((item) => {
                             const isActive = item.id === activeId;
-                            const st = statusMeta(item);
+                            const preDone = isPreOpVisited(item);
+                            const preNot = isPreOpDraftNotVisited(item);
+                            const postDone = isPostOpVisited(item);
                             return (
                               <button
                                 key={item.id}
@@ -487,18 +508,55 @@ export function CaseFolderSidebar({
                                     }`}
                                   >
                                     {item.patientName || 'ยังไม่ระบุชื่อ'}
+                                    {item.bed?.trim() ? (
+                                      <span className="ml-1 text-[10px] font-normal text-slate-400">
+                                        เตียง {item.bed.trim()}
+                                      </span>
+                                    ) : null}
                                   </span>
                                   <span className="text-[10px] font-mono tabular-nums text-slate-500 shrink-0">
                                     {item.hn || '—'}
                                   </span>
                                 </div>
                                 <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                                  {formatWardWithBed(item.ward, item.bed) || 'ไม่ระบุหอผู้ป่วย'}
-                                  {item.operation ? ` · ${item.operation}` : ''}
+                                  {item.operation || item.diagnosis || '—'}
                                 </div>
-                                <div className="flex items-center justify-between gap-2 mt-0.5 text-[10px]">
-                                  <span className={`font-medium ${st.cls}`}>{st.label}</span>
-                                  <span className="font-mono tabular-nums text-slate-400">
+                                <div className="flex items-center justify-between gap-2 mt-1 text-[10px]">
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <span
+                                      className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border font-medium ${
+                                        preDone
+                                          ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                          : preNot
+                                          ? 'bg-rose-50 border-rose-200 text-rose-800'
+                                          : 'bg-amber-50 border-amber-200 text-amber-800'
+                                      }`}
+                                    >
+                                      {preDone ? (
+                                        <CheckSquare className="w-2.5 h-2.5 text-emerald-600" />
+                                      ) : preNot ? (
+                                        <XSquare className="w-2.5 h-2.5 text-rose-600" />
+                                      ) : (
+                                        <Square className="w-2.5 h-2.5 text-amber-600" />
+                                      )}
+                                      {preNot ? 'ไม่เยี่ยม Pre' : 'Pre-op'}
+                                    </span>
+                                    <span
+                                      className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border font-medium ${
+                                        postDone
+                                          ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                          : 'bg-slate-50 border-slate-200 text-slate-500'
+                                      }`}
+                                    >
+                                      {postDone ? (
+                                        <CheckSquare className="w-2.5 h-2.5 text-emerald-600" />
+                                      ) : (
+                                        <Square className="w-2.5 h-2.5 text-slate-400" />
+                                      )}
+                                      Post-op
+                                    </span>
+                                  </span>
+                                  <span className="font-mono tabular-nums text-slate-400 truncate">
                                     {[item.orRoom, item.caseOrder ? `#${item.caseOrder}` : '', item.operationTime]
                                       .filter(Boolean)
                                       .join(' ')}

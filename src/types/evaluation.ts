@@ -10,6 +10,7 @@ export const OR_ROOM_OPTIONS = [
   'OR 3',
   'OR 4',
   'OR 5',
+  'OR 6',
   'ห้องคลอด',
 ] as const;
 export type TriStatus = 'none' | 'no' | 'yes';

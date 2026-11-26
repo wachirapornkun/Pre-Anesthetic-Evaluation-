@@ -4766,19 +4766,6 @@ export function generateAutoProblemEntries(
       score: 68,
     });
   }
-  if (isMeaningfulClinicalNote(investigation.other)) {
-    const invOther = investigation.other.trim();
-    if (hasAbnormalClinicalClause(invOther)) {
-      const isCriticalInv = hasPositiveClinicalMatch(
-        invOther,
-        /\b(?:low\s+ef|ef\s*<?\s*[1-4]\d|ich|sdh|edh|sah|intracranial\s+hemorrhage|subdural\s+hematoma|epidural\s+hematoma|herniation|midline\s+shift|ischemi|infarct|embolism|effusion|edema|pneumothorax|tamponade|stenosis|regurgitation|mass|aneurysm|dissection)\b|เลือดออกในสมอง|น้ำท่วมปอด/i,
-      );
-      cardiopulmItems.push({
-        text: invOther,
-        score: isCriticalInv ? 84 : 70,
-      });
-    }
-  }
 
   if (cardiopulmItems.length > 0) {
     cardiopulmItems.sort((a, b) => b.score - a.score);
@@ -4809,55 +4796,166 @@ export function generateAutoProblemEntries(
     .join(' ')
     .toLowerCase();
 
+  // Summarize specific intracranial hemorrhage types (e.g. SDH, EDH, SAH, IVH, ICH) from CT / clinical notes
+  const detectedIchTypes: string[] = [];
+  if (hasPositiveClinicalMatch(clinicalCorpus, /\b(?:sdh|subdural\s+(?:hematoma|hemorrhage|bleed(?:ing)?))\b/i)) {
+    detectedIchTypes.push('SDH');
+  }
+  if (hasPositiveClinicalMatch(clinicalCorpus, /\b(?:edh|epidural\s+(?:hematoma|hemorrhage|bleed(?:ing)?))\b/i)) {
+    detectedIchTypes.push('EDH');
+  }
+  if (hasPositiveClinicalMatch(clinicalCorpus, /\b(?:sah|subarachnoid\s+(?:hemorrhage|bleed(?:ing)?))\b/i)) {
+    detectedIchTypes.push('SAH');
+  }
+  if (hasPositiveClinicalMatch(clinicalCorpus, /\b(?:ivh|intraventricular\s+(?:hemorrhage|bleed(?:ing)?))\b/i)) {
+    detectedIchTypes.push('IVH');
+  }
+  if (
+    hasPositiveClinicalMatch(
+      clinicalCorpus,
+      /\b(?:ich|intracerebral\s+hemorrhage|intraparenchymal\s+hemorrhage|hemorrhagic\s+contusion)\b|เลือดออกในเนื้อสมอง/i,
+    ) ||
+    (detectedIchTypes.length === 0 &&
+      hasPositiveClinicalMatch(
+        clinicalCorpus,
+        /\bintracranial\s+hemorrhage\b|เลือดออกในสมอง|เลือดออกในกะโหลกศีรษะ/i,
+      ))
+  ) {
+    detectedIchTypes.push('ICH');
+  }
+  if (detectedIchTypes.length > 0) {
+    conditionItems.push({
+      text: detectedIchTypes.join(' / '),
+      score: 92,
+    });
+  }
+
+  // Summarize midline shift (with mm if stated in CT)
+  if (hasPositiveClinicalMatch(clinicalCorpus, /\bmidline\s+shift\b|แกนสมองเอียง|สมองเคลื่อน/i)) {
+    const mlsMatch = /\bmidline\s+shift(?:\s+(?:of|about|approx\.?|to\s+(?:the\s+)?(?:left|right|lt|rt)))?\s*(?:[:=]|\b)?\s*(\d+(?:\.\d+)?)\s*(mm|cm)\b/i.exec(
+      clinicalCorpus,
+    );
+    conditionItems.push({
+      text: mlsMatch ? `Midline shift (${mlsMatch[1]} ${mlsMatch[2].toLowerCase()})` : 'Midline shift',
+      score: 92,
+    });
+  }
+
+  // Summarize Low EF / LV systolic dysfunction from Echo / clinical notes (only EF < 50%)
+  const efMatch = /\b(?:lv)?ef\s*(?:=|is|:|<|<=|ประมาณ)?\s*(\d{1,2})\s*%?/i.exec(clinicalCorpus);
+  const parsedEf = efMatch ? parseInt(efMatch[1], 10) : NaN;
+  const hasLowEfValue =
+    Number.isFinite(parsedEf) &&
+    parsedEf > 5 &&
+    parsedEf < 50 &&
+    !isMatchNegated(clinicalCorpus, efMatch!.index, efMatch!.index + efMatch![0].length);
+  const hasLowEfText = hasPositiveClinicalMatch(
+    clinicalCorpus,
+    /\b(?:low\s+(?:lv)?ef|reduced\s+(?:lv)?ef|poor\s+lv\s+(?:function|systolic)|lv\s+systolic\s+dysfunction|impaired\s+lv\s+(?:function|systolic))\b/i,
+  );
+  if (hasLowEfValue || hasLowEfText) {
+    conditionItems.push({
+      text: hasLowEfValue ? `Low EF (${parsedEf}%)` : 'Low EF / LV systolic dysfunction',
+      score: hasLowEfValue && parsedEf < 35 ? 91 : 88,
+    });
+  }
+
+  const hasAorticDissectionOrRupture = hasPositiveClinicalMatch(
+    clinicalCorpus,
+    /\b(?:aortic\s+dissection|ruptured\s+(?:aaa|aortic\s+aneurysm|aneurysm))\b|หลอดเลือดแดงใหญ่ฉีกขาด|เส้นเลือดแดงใหญ่แตก/i,
+  );
+  const hasCardiacTamponade = hasPositiveClinicalMatch(
+    clinicalCorpus,
+    /\b(?:cardiac\s+)?tamponade\b|ภาวะบีบรัดหัวใจ/i,
+  );
+  const hasHemothorax = hasPositiveClinicalMatch(
+    clinicalCorpus,
+    /\bhemothorax\b|เลือดในช่องเยื่อหุ้มปอด/i,
+  );
+  const hasHemoperitoneum = hasPositiveClinicalMatch(
+    clinicalCorpus,
+    /\b(?:hemoperitoneum|splenic\s+(?:injury|laceration|rupture)|liver\s+(?:injury|laceration)|hepatic\s+(?:injury|laceration)|renal\s+(?:injury|laceration))\b|เลือดออกในช่องท้อง|ม้ามแตก|ตับฉีกขาด/i,
+  );
+  const hasPerforation = hasPositiveClinicalMatch(
+    clinicalCorpus,
+    /\b(?:pneumoperitoneum|free\s+air|perforated\s+(?:hollow\s+viscus|viscus|peptic\s+ulcer|ppu|bowel|appendicitis|appendix)|hollow\s+viscus\s+perforation|bowel\s+perforation|gi\s+perforation|perforation)\b|ลมรั่วในช่องท้อง|ลำไส้ทะลุ|กระเพาะทะลุ/i,
+  );
+
   const clinicalMatchers: readonly {
     label: string;
     re: RegExp;
     score: number;
     skipIfInUnderlying?: RegExp;
+    skip?: boolean;
   }[] = [
-    { label: 'Increased ICP / Brain herniation', re: /\b(?:increased\s+icp|iicp|brain\s+herniation|herniation)\b|ความดันในกะโหลกศีรษะสูง/i, score: 94 },
+    { label: 'Aortic dissection / Ruptured aneurysm', re: /\b(?:aortic\s+dissection|ruptured\s+(?:aaa|aortic\s+aneurysm|aneurysm))\b|หลอดเลือดแดงใหญ่ฉีกขาด|เส้นเลือดแดงใหญ่แตก/i, score: 95 },
+    { label: 'Cardiac tamponade', re: /\b(?:cardiac\s+)?tamponade\b|ภาวะบีบรัดหัวใจ/i, score: 95 },
+    { label: 'Increased ICP / Brain herniation', re: /\b(?:increased\s+icp|iicp|brain\s+herniation|uncal\s+herniation|tonsillar\s+herniation|subfalcine\s+herniation|herniation|effacement\s+of\s+(?:basal\s+)?cistern)\b|ความดันในกะโหลกศีรษะสูง/i, score: 94 },
+    { label: 'Pulmonary embolism (PE)', re: /\b(?:pulmonary\s+embolism|acute\s+pe|saddle\s+embolism|pulmonary\s+thromboembolism)\b|ลิ่มเลือดอุดตันในปอด/i, score: 93 },
     { label: 'ACS / MI', re: /\b(?:acs|stemi|nstemi|acute\s+coronary|myocardial\s+infarction)\b|กล้ามเนื้อหัวใจขาดเลือดเฉียบพลัน/i, score: 93 },
-    {
-      label: 'ICH / SDH / EDH',
-      re: /\b(?:ich|sdh|edh|sah|intracranial\s+hemorrhage|intracerebral\s+hemorrhage|subarachnoid\s+hemorrhage|subdural\s+hematoma|epidural\s+hematoma|intraventricular\s+hemorrhage)\b|เลือดออกในสมอง|เลือดออกในกะโหลกศีรษะ/i,
-      score: 92,
-    },
+    { label: 'C-spine injury / Fracture (Airway risk)', re: /\b(?:c-?spine\s+(?:fracture|fx|injury|dislocation|subluxation)|cervical\s+(?:spine\s+)?(?:fracture|fx|injury|cord\s+compression)|atlantoaxial\s+(?:subluxation|dislocation))\b|กระดูกคอหัก/i, score: 92 },
     { label: 'Pneumothorax', re: /\bpneumothorax\b|ลมรั่วในช่องเยื่อหุ้มปอด/i, score: 92 },
     { label: 'Pulmonary edema', re: /\b(?:pulmonary\s+edema|acute\s+pulmonary\s+edema)\b|น้ำท่วมปอด/i, score: 91 },
+    { label: 'Airway compression / Tracheal deviation', re: /\b(?:tracheal\s+(?:deviation|compression|narrowing|stenosis)|airway\s+(?:compression|narrowing|obstruction)|subglottic\s+stenosis)\b|กดเบียดหลอดลม|หลอดลมเอียง/i, score: 91 },
     { label: 'DKA / HHS', re: /\b(?:dka|diabetic\s+ketoacidosis|hhs)\b/i, score: 91 },
+    { label: 'Brain edema / Cerebral edema', re: /\b(?:brain\s+edema|cerebral\s+edema|brain\s+swelling|diffuse\s+axonal\s+injury)\b|สมองบวม/i, score: 90 },
+    { label: 'Deep neck infection / Abscess (Airway risk)', re: /\b(?:deep\s+neck\s+(?:infection|abscess)|retropharyngeal\s+abscess|parapharyngeal\s+abscess|ludwig(?:'s)?\s+angina|peritonsillar\s+abscess)\b|ฝีในลำคอ/i, score: 90 },
+    { label: 'Mediastinal mass (Airway/CV risk)', re: /\b(?:anterior\s+)?mediastinal\s+(?:mass|tumor)\b|ก้อนในช่องอก/i, score: 90 },
+    { label: 'Hemothorax', re: /\bhemothorax\b|เลือดในช่องเยื่อหุ้มปอด/i, score: 90 },
+    { label: 'Hemoperitoneum / Solid organ injury', re: /\b(?:hemoperitoneum|splenic\s+(?:injury|laceration|rupture)|liver\s+(?:injury|laceration)|hepatic\s+(?:injury|laceration)|renal\s+(?:injury|laceration))\b|เลือดออกในช่องท้อง|ม้ามแตก|ตับฉีกขาด/i, score: 90 },
     {
       label: 'Active bleeding / UGIB',
-      re: /\b(?:ugib|ugih|lgib|lgih|gi\s+bleed(?:ing)?|active\s+bleed(?:ing)?|massive\s+bleed(?:ing)?|acute\s+bleed(?:ing)?|active\s+hemorrhage|massive\s+hemorrhage|postpartum\s+hemorrhage|pph|hemoperitoneum|hemothorax|ruptured\s+aaa|ruptured\s+ectopic|hematemesis|melena)\b|เลือดออกในทางเดินอาหาร|เลือดออกมาก|เสียเลือดมาก|ตกเลือด/i,
+      re: /\b(?:ugib|ugih|lgib|lgih|gi\s+bleed(?:ing)?|active\s+bleed(?:ing)?|massive\s+bleed(?:ing)?|acute\s+bleed(?:ing)?|active\s+hemorrhage|massive\s+hemorrhage|postpartum\s+hemorrhage|pph|ruptured\s+ectopic|hematemesis|melena)\b|เลือดออกในทางเดินอาหาร|เลือดออกมาก|เสียเลือดมาก|ตกเลือด/i,
       score: 90,
+      skip: hasHemothorax || hasHemoperitoneum,
     },
     { label: 'Alteration of consciousness / GCS ต่ำ', re: /\b(?:coma|stupor|drowsy|obtunded|alteration\s+of\s+consciousness|gcs\s*(?:<=?|<)?\s*(?:[3-9]|1[0-2])\b)\b|ซึมลง|ไม่รู้สึกตัว/i, score: 90 },
     { label: 'Metabolic acidosis', re: /\b(?:metabolic\s+acidosis|lactic\s+acidosis|acidosis)\b/i, score: 88 },
     { label: 'Eclampsia / Preeclampsia', re: /\b(?:eclampsia|preeclampsia|pre-?eclampsia|hellp|pih)\b|ครรภ์เป็นพิษ/i, score: 88 },
     { label: 'Fetal distress', re: /\bfetal\s+distress\b|ทารกในครรภ์มีภาวะคับขัน/i, score: 88 },
+    { label: 'Pneumoperitoneum / Perforated viscus', re: /\b(?:pneumoperitoneum|free\s+air|perforated\s+(?:hollow\s+viscus|viscus|peptic\s+ulcer|ppu|bowel|appendicitis|appendix)|hollow\s+viscus\s+perforation|bowel\s+perforation|gi\s+perforation|perforation)\b|ลมรั่วในช่องท้อง|ลำไส้ทะลุ|กระเพาะทะลุ/i, score: 88 },
+    { label: 'Bowel ischemia / Necrosis', re: /\b(?:bowel\s+ischemia|mesenteric\s+ischemia|strangulated\s+(?:bowel|hernia)|gangrenous\s+(?:bowel|gallbladder|appendicitis)|necrotizing\s+fasciitis)\b|ลำไส้ขาดเลือด/i, score: 88 },
     { label: 'CHF / Heart failure', re: /\b(?:chf|heart\s+failure|congestive\s+heart\s+failure|hfref|hfpef)\b|หัวใจล้มเหลว|หัวใจวาย/i, score: 87 },
+    { label: 'Hydrocephalus', re: /\b(?:hydrocephalus|ventriculomegaly)\b|น้ำคั่งในโพรงสมอง/i, score: 86 },
+    { label: 'Aortic aneurysm', re: /\b(?:aortic\s+aneurysm|aaa|thoracic\s+aneurysm|abdominal\s+aortic\s+aneurysm)\b|เส้นเลือดแดงใหญ่โป่งพอง/i, score: 86, skip: hasAorticDissectionOrRupture },
+    { label: 'Pulmonary hypertension', re: /\b(?:pulmonary\s+hypertension|pulmonary\s+arterial\s+hypertension|rvsp\s*>\s*(?:[4-9]\d|1\d\d))\b|ความดันหลอดเลือดปอดสูง/i, score: 86 },
     { label: 'Placenta previa / Abruption', re: /\b(?:placenta\s+previa|abruptio\s+placentae|placental\s+abruption)\b|รกเกาะต่ำ|รกลอกตัวก่อนกำหนด/i, score: 86 },
-    { label: 'Peritonitis / Perforated viscus', re: /\b(?:peritonitis|perforated|perforation|bowel\s+ischemia|necrotizing\s+fasciitis)\b|เยื่อบุช่องท้องอักเสบ/i, score: 86 },
-    { label: 'Gut obstruction (Full stomach risk)', re: /\b(?:gut\s+obstruction|bowel\s+obstruction|intestinal\s+obstruction|gastric\s+outlet\s+obstruction)\b|ลำไส้อุดตัน/i, score: 84 },
+    { label: 'Peritonitis', re: /\bperitonitis\b|เยื่อบุช่องท้องอักเสบ/i, score: 86, skip: hasPerforation },
+    { label: 'Intracranial mass / Brain tumor', re: /\b(?:brain\s+(?:tumor|tumour|mass|lesion)|intracranial\s+(?:mass|tumor|tumour)|cerebral\s+mass|space[\s-]occupying\s+lesion|glioma|meningioma|pituitary\s+adenoma|acoustic\s+neuroma)\b|เนื้องอกในสมอง|ก้อนในสมอง/i, score: 84 },
+    { label: 'Valvular heart disease', re: /\b(?:aortic\s+stenosis|mitral\s+stenosis|mitral\s+regurgitation|aortic\s+regurgitation|tricuspid\s+regurgitation|severe\s+(?:as|ms|mr|ar|tr)|valvular\s+heart\s+disease)\b|โรคลิ้นหัวใจ/i, score: 84 },
+    { label: 'Pericardial effusion', re: /\bpericardial\s+effusion\b|น้ำในช่องเยื่อหุ้มหัวใจ/i, score: 84, skip: hasCardiacTamponade },
+    { label: 'Gut obstruction (Full stomach risk)', re: /\b(?:gut\s+obstruction|bowel\s+obstruction|intestinal\s+obstruction|gastric\s+outlet\s+obstruction|small\s+bowel\s+obstruction|large\s+bowel\s+obstruction|\bsbo\b|\blbo\b)\b|ลำไส้อุดตัน/i, score: 84 },
+    { label: 'Skull fracture', re: /\b(?:skull\s+(?:fracture|fx)|depressed\s+skull|basal\s+skull\s+fracture|base\s+of\s+skull\s+fracture)\b|กะโหลกศีรษะแตก|กะโหลกร้าว/i, score: 82 },
+    { label: 'Brain abscess', re: /\bbrain\s+abscess\b|ฝีในสมอง/i, score: 82 },
+    { label: 'Lung contusion / Rib fracture', re: /\b(?:lung\s+contusion|pulmonary\s+contusion|flail\s+chest|(?:multiple\s+)?rib\s+(?:fracture|fx)s?)\b|ปอดช้ำ|กระดูกซี่โครงหัก/i, score: 82 },
+    { label: 'DVT (Deep vein thrombosis)', re: /\b(?:dvt|deep\s+vein\s+thrombosis|deep\s+venous\s+thrombosis)\b|ลิ่มเลือดอุดตันที่ขา/i, score: 82 },
+    { label: 'Pelvic / Femur fracture', re: /\b(?:pelvic\s+(?:fracture|fx)|open[\s-]book\s+pelvic|femur\s+(?:fracture|fx)|femoral\s+(?:neck|shaft|intertrochanteric)?\s*(?:fracture|fx))\b|กระดูกเชิงกรานหัก/i, score: 82 },
     { label: 'Cirrhosis / Liver failure', re: /\b(?:cirrhosis|liver\s+failure|hepatic\s+failure|hepatic\s+encephalopathy)\b|ตับแข็ง|ตับวาย/i, score: 82, skipIfInUnderlying: /cirrhosis|ตับแข็ง/i },
     { label: 'AF / Arrhythmia', re: /\b(?:atrial\s+fibrillation|af\s+with\s+rvr|svt|ventricular\s+tachycardia|arrhythmia|complete\s+heart\s+block|chb)\b/i, score: 82, skipIfInUnderlying: /\baf\b|arrhythmia/i },
-    { label: 'Pneumonia', re: /\b(?:pneumonia|aspiration\s+pneumonia|vap|hap)\b|ปอดอักเสบ|ปอดติดเชื้อ/i, score: 80 },
+    { label: 'Intra-abdominal infection / Abscess', re: /\b(?:liver\s+abscess|hepatic\s+abscess|intra[\s-]?abdominal\s+abscess|pelvic\s+abscess|ruptured\s+appendicitis|acute\s+appendicitis|acute\s+cholecystitis|acute\s+cholangitis|acute\s+pancreatitis)\b|ฝีในตับ|ฝีในช่องท้อง/i, score: 80 },
+    { label: 'Pneumonia', re: /\b(?:pneumonia|aspiration\s+pneumonia|vap|hap|lung\s+consolidation)\b|ปอดอักเสบ|ปอดติดเชื้อ/i, score: 80 },
     { label: 'Thyrotoxicosis / Hyperthyroidism', re: /\b(?:thyrotoxicosis|thyroid\s+storm|hyperthyroid\w*)\b|ไทรอยด์เป็นพิษ/i, score: 80, skipIfInUnderlying: /hyperthyroid|thyrotoxicosis|ไทรอยด์/i },
     { label: 'Active TB', re: /\b(?:pulmonary\s+tb|active\s+tb|tuberculosis)\b|วัณโรคปอด/i, score: 80, skipIfInUnderlying: /\btb\b|วัณโรค/i },
     { label: 'COVID-19', re: /\bcovid[\s-]?19\b|โควิด/i, score: 80 },
-    { label: 'Stroke / CVA', re: /\b(?:stroke|cva|cerebral\s+infarction|ischemic\s+stroke)\b|หลอดเลือดสมอง/i, score: 78, skipIfInUnderlying: /stroke|cva|หลอดเลือดสมอง/i },
+    { label: 'Stroke / Cerebral infarction', re: /\b(?:stroke|cva|cerebral\s+infarction|acute\s+infarct(?:ion)?|brain\s+infarct(?:ion)?|lacunar\s+infarct(?:ion)?|ischemic\s+stroke)\b|หลอดเลือดสมอง|สมองขาดเลือด/i, score: 78, skipIfInUnderlying: /stroke|cva|หลอดเลือดสมอง/i },
     { label: 'IHD / CAD', re: /\b(?:ihd|cad|coronary\s+artery\s+disease|ischemic\s+heart)\b/i, score: 78, skipIfInUnderlying: /\b(?:ihd|cad)\b/i },
     { label: 'Pleural effusion', re: /\bpleural\s+effusion\b|น้ำในช่องเยื่อหุ้มปอด/i, score: 76 },
+    { label: 'Lung mass / Atelectasis', re: /\b(?:lung\s+(?:mass|tumor|cancer)|pulmonary\s+(?:mass|nodule)|ca\s+lung|atelectasis)\b|ก้อนในปอด|ปอดแฟบ/i, score: 75 },
     { label: 'COPD', re: /\bcopd\b|ถุงลมโป่งพอง/i, score: 74, skipIfInUnderlying: /copd|ถุงลมโป่งพอง/i },
+    { label: 'Ascites', re: /\b(?:massive\s+|moderate\s+)?ascites\b|ท้องมาน|น้ำในช่องท้อง/i, score: 74 },
     { label: 'Pregnancy', re: /\b(?:pregnan\w*|g\d+p\d+|ga\s*\d+\s*wk|cesarean|caesarean)\b|ตั้งครรภ์/i, score: 74 },
     { label: 'OSA', re: /\b(?:osa|obstructive\s+sleep\s+apnea)\b|หยุดหายใจขณะหลับ/i, score: 72, skipIfInUnderlying: /\bosa\b/i },
     { label: 'Seizure / Epilepsy', re: /\b(?:seizure|epilepsy|status\s+epilepticus)\b|ลมชัก/i, score: 72, skipIfInUnderlying: /epilepsy|seizure|ลมชัก/i },
     { label: 'Hypothyroidism', re: /\bhypothyroid\w*\b/i, score: 72, skipIfInUnderlying: /hypothyroid/i },
     { label: 'Asthma', re: /\basthma\b|หอบหืด/i, score: 70, skipIfInUnderlying: /asthma|หอบหืด/i },
+    { label: 'Hydronephrosis / Obstructive uropathy', re: /\b(?:hydronephrosis|hydroureter|obstructive\s+uropathy)\b|กรวยไตบวมน้ำ/i, score: 70 },
+    { label: 'Intra-abdominal / Pelvic mass', re: /\b(?:abdominal\s+mass|pelvic\s+mass|ovarian\s+(?:mass|tumor|cyst)|liver\s+mass|hepatic\s+mass|renal\s+mass|pancreatic\s+mass|retroperitoneal\s+mass)\b|ก้อนในช่องท้อง/i, score: 70 },
     { label: 'HIV', re: /\b(?:hiv|anti-?hiv\s*(?:pos|reactive))\b/i, score: 70, skipIfInUnderlying: /\bhiv\b/i },
     { label: 'HBV / HCV', re: /\b(?:hbv|hcv|hbsag\s*(?:pos|reactive)|hepatitis\s+[bc])\b/i, score: 68, skipIfInUnderlying: /\b(?:hbv|hcv)\b/i },
   ];
 
   for (const matcher of clinicalMatchers) {
+    if (matcher.skip) continue;
     if (matcher.label === 'HIV' && laboratory.antiHiv === 'positive') {
       continue;
     }
@@ -5400,6 +5498,19 @@ export function syncProblemListWithPatientData(
     return nextRecord.formData.problemList;
   }
 
+  const prevInvOtherLower = (prevRecord.formData.investigation.other || '').trim().toLowerCase();
+  const nextInvOtherLower = (nextRecord.formData.investigation.other || '').trim().toLowerCase();
+  const hasStaleRawInvLine =
+    prevInvOtherLower !== nextInvOtherLower &&
+    Boolean(prevInvOtherLower) &&
+    nextRecord.formData.problemList.some((it) => {
+      const lower = it.trim().toLowerCase();
+      return (
+        lower === prevInvOtherLower ||
+        (prevInvOtherLower.length >= 12 && lower.includes(prevInvOtherLower))
+      );
+    });
+
   const isIdentical =
     prevAuto.length === nextAuto.length &&
     prevAuto.every(
@@ -5408,7 +5519,7 @@ export function syncProblemListWithPatientData(
         entry.text === nextAuto[i].text &&
         entry.severityScore === nextAuto[i].severityScore,
     );
-  if (isIdentical) {
+  if (isIdentical && !hasStaleRawInvLine) {
     return nextRecord.formData.problemList;
   }
 
@@ -5417,6 +5528,19 @@ export function syncProblemListWithPatientData(
   const nextByKey = new Map(nextAuto.map((e) => [e.key, e]));
   const handledKeys = new Set<string>();
   let mutated = false;
+
+  if (hasStaleRawInvLine) {
+    for (let i = 0; i < items.length; i += 1) {
+      const lower = items[i].trim().toLowerCase();
+      if (
+        lower === prevInvOtherLower ||
+        (prevInvOtherLower.length >= 12 && lower.includes(prevInvOtherLower))
+      ) {
+        items[i] = '';
+        mutated = true;
+      }
+    }
+  }
 
   // 1. Update in-place or remove previous auto-generated problem lines (also upgrades legacy prefixed lines)
   for (const prevEntry of prevAuto) {
@@ -5510,41 +5634,83 @@ export function applyAutoProblems(
 }
 
 const KNOWN_AUTO_CONDITION_TOKENS = new Set([
+  'aortic dissection / ruptured aneurysm',
+  'cardiac tamponade',
   'increased icp / brain herniation',
+  'pulmonary embolism (pe)',
   'acs / mi',
   'ich / sdh / edh',
+  'midline shift',
+  'c-spine injury / fracture (airway risk)',
   'pneumothorax',
   'pulmonary edema',
+  'airway compression / tracheal deviation',
   'dka / hhs',
+  'brain edema / cerebral edema',
+  'deep neck infection / abscess (airway risk)',
+  'mediastinal mass (airway/cv risk)',
+  'hemothorax',
+  'hemoperitoneum / solid organ injury',
   'active bleeding / ugib',
   'alteration of consciousness / gcs ต่ำ',
+  'low ef / lv systolic dysfunction',
   'metabolic acidosis',
   'eclampsia / preeclampsia',
   'fetal distress',
+  'pneumoperitoneum / perforated viscus',
+  'bowel ischemia / necrosis',
   'chf / heart failure',
+  'hydrocephalus',
+  'aortic aneurysm',
+  'pulmonary hypertension',
   'placenta previa / abruption',
   'peritonitis / perforated viscus',
+  'peritonitis',
+  'intracranial mass / brain tumor',
+  'valvular heart disease',
+  'pericardial effusion',
   'gut obstruction (full stomach risk)',
+  'skull fracture',
+  'brain abscess',
+  'lung contusion / rib fracture',
+  'dvt (deep vein thrombosis)',
+  'pelvic / femur fracture',
   'cirrhosis / liver failure',
   'af / arrhythmia',
+  'intra-abdominal infection / abscess',
   'pneumonia',
   'thyrotoxicosis / hyperthyroidism',
   'active tb',
   'covid-19',
   'stroke / cva',
+  'stroke / cerebral infarction',
   'ihd / cad',
   'pleural effusion',
+  'lung mass / atelectasis',
   'copd',
+  'ascites',
   'pregnancy',
   'osa',
   'seizure / epilepsy',
   'hypothyroidism',
   'asthma',
+  'hydronephrosis / obstructive uropathy',
+  'intra-abdominal / pelvic mass',
   'hiv',
   'hbv / hcv',
   'full stomach / not npo',
   'full stomach',
 ]);
+
+function isKnownAutoConditionToken(tokenLower: string): boolean {
+  if (KNOWN_AUTO_CONDITION_TOKENS.has(tokenLower)) return true;
+  if (/^(?:(?:sdh|edh|sah|ivh|ich)(?:\s*\/\s*(?:sdh|edh|sah|ivh|ich))*)$/.test(tokenLower)) {
+    return true;
+  }
+  if (/^midline shift \(\d+(?:\.\d+)? (?:mm|cm)\)$/.test(tokenLower)) return true;
+  if (/^low ef \(\d{1,2}%\)$/.test(tokenLower)) return true;
+  return false;
+}
 
 export interface NpoEvaluationResult {
   operationMinutes: number | null;
@@ -5726,12 +5892,13 @@ export function refreshAutoProblems(record: PreAnestheticEvaluation): string[] {
 
     // Drop stale auto-combined clinical condition lines (e.g. "ICH / SDH / EDH, Active bleeding / UGIB")
     const parts = lower.split(',').map((p) => p.trim()).filter(Boolean);
-    if (parts.length > 0 && parts.every((p) => KNOWN_AUTO_CONDITION_TOKENS.has(p))) {
+    if (parts.length > 0 && parts.every((p) => isKnownAutoConditionToken(p))) {
       continue;
     }
 
-    // Drop stale benign investigation.other or laboratory.other lines previously auto-inserted
-    if (invOtherLower && lower === invOtherLower && !hasAbnormalClinicalClause(invOtherLower)) {
+    // Drop raw investigation.other (e.g. CT report text) previously auto-inserted;
+    // summarized clinical conditions extracted from CT/investigation replace it cleanly.
+    if (invOtherLower && (lower === invOtherLower || (invOtherLower.length >= 12 && lower.includes(invOtherLower)))) {
       continue;
     }
     if (labOtherLower && lower === labOtherLower && !hasAbnormalClinicalClause(labOtherLower)) {

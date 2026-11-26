@@ -45,6 +45,7 @@ import { A4PrintSheet } from './components/A4PrintSheet';
 import { AuthModal } from './components/AuthModal';
 import { ClinicalSummaryBar } from './components/ClinicalSummaryBar';
 import { DashboardView } from './components/DashboardView';
+import { EditableA4PreOpSheet } from './components/EditableA4PreOpSheet';
 import { PostOpA4PrintSheet } from './components/PostOpA4PrintSheet';
 import { PostOpEvaluationForm } from './components/PostOpEvaluationForm';
 import { PreAnestheticForm } from './components/PreAnestheticForm';
@@ -199,6 +200,52 @@ function buildRecordFingerprint(rec: PreAnestheticEvaluation): string {
   return JSON.stringify(sanitized);
 }
 
+function hasPartialPreOpData(rec: PreAnestheticEvaluation): boolean {
+  const fd = rec.formData;
+  const h = fd.history;
+  const pe = fd.physicalExam;
+  const inv = fd.investigation;
+  const lab = fd.laboratory;
+  const pm = fd.premedication;
+  const ap = fd.anestheticPlan;
+  return Boolean(
+    rec.dateOfVisit?.trim() ||
+      rec.diagnosis?.trim() ||
+      rec.operation?.trim() ||
+      rec.asaClass ||
+      h.presentIllness?.trim() ||
+      h.pastIllness?.trim() ||
+      h.allergyStatus !== 'none' ||
+      h.underlyingStatus !== 'none' ||
+      h.dm ||
+      h.ht ||
+      h.dlp ||
+      h.ckd ||
+      h.heartDisease ||
+      (h.otherUnderlying || []).some((u) => u.trim()) ||
+      h.medication?.trim() ||
+      pe.bw?.trim() ||
+      pe.ht?.trim() ||
+      pe.bp?.trim() ||
+      pe.mallampatiClass ||
+      inv.cxrStatus ||
+      inv.ekgStatus ||
+      inv.other?.trim() ||
+      lab.hb?.trim() ||
+      lab.hct?.trim() ||
+      lab.wbc?.trim() ||
+      lab.plt?.trim() ||
+      lab.k?.trim() ||
+      lab.cr?.trim() ||
+      pm.npoTime?.trim() ||
+      (pm.items || []).some((m) => m.trim()) ||
+      (fd.problemList || []).some((p) => p.trim()) ||
+      ap.gaSelected ||
+      ap.raSelected ||
+      ap.macSelected,
+  );
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('form');
   const [printSheetMode, setPrintSheetMode] = useState<PrintSheetMode>('both');
@@ -234,6 +281,9 @@ export default function App() {
   const [registryFocusNonce, setRegistryFocusNonce] = useState(0);
   const [currentForm, setCurrentForm] = useState<PreAnestheticEvaluation>(() =>
     loadActiveDraftOrEmpty(),
+  );
+  const [preOpViewMode, setPreOpViewMode] = useState<'paper' | 'form'>(() =>
+    hasPartialPreOpData(loadActiveDraftOrEmpty()) ? 'paper' : 'form',
   );
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncingLocal, setIsSyncingLocal] = useState(false);
@@ -1992,6 +2042,7 @@ export default function App() {
 
     setCurrentForm(result.record);
     setIsNewFormModalOpen(false);
+    setPreOpViewMode('form');
     setActiveTab('form');
     if (!result.savedToLocalFallback) {
       const dateMeta = formatThaiScheduleDate(chosenDate);
@@ -2139,11 +2190,18 @@ export default function App() {
     if (!currentForm.patientName.trim()) {
       showNotice('error', 'กรุณาระบุชื่อผู้ป่วย (Name) ก่อนบันทึกข้อมูล');
       setActiveTab('form');
+      setPreOpViewMode('form');
       return;
     }
+    const shouldShowPaperAfterSave =
+      activeTab === 'form' && preOpViewMode === 'form' && hasPartialPreOpData(currentForm);
     const result = await saveEvaluationRecord(currentForm);
     if (result) {
       setCurrentForm(result.record);
+      if (shouldShowPaperAfterSave) {
+        setPreOpViewMode('paper');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
     }
   };
 
@@ -2204,6 +2262,7 @@ export default function App() {
     firstDirtyAtRef.current = 0;
     setRemoteUpdateCandidate(null);
     setCurrentForm(copy);
+    setPreOpViewMode('form');
     setActiveTab('form');
     showNotice('success', 'คัดลอกแบบฟอร์มเป็นรายการใหม่แล้ว กรุณากดบันทึกเมื่อแก้ไขเสร็จ');
   };
@@ -2220,6 +2279,7 @@ export default function App() {
     firstDirtyAtRef.current = 0;
     setRemoteUpdateCandidate(null);
     setCurrentForm(latestFromCloud);
+    setPreOpViewMode(hasPartialPreOpData(latestFromCloud) ? 'paper' : 'form');
     setActiveTab('form');
   };
 
@@ -2785,24 +2845,41 @@ export default function App() {
           <div className="bph-screen-only space-y-4">
             <ClinicalSummaryBar evaluation={currentForm} />
 
-              {/* Unified Patient Form Switcher: Pre-op vs Post-op (Same Patient Record) */}
+              {/* Unified Patient Form Switcher: Editable A4 Paper / Detailed Form / Post-op */}
               <div className="no-print flex flex-wrap items-center justify-between gap-2">
-                <div className="inline-flex items-center gap-1 p-1 bg-white/90 border border-pborder rounded-lg shadow-2xs">
+                <div className="inline-flex flex-wrap items-center gap-1 p-1 bg-white/90 border border-pborder rounded-lg shadow-2xs">
                   <button
                     type="button"
-                    onClick={() => setActiveTab('form')}
-                    className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
-                      activeTab === 'form'
+                    onClick={() => {
+                      setActiveTab('form');
+                      setPreOpViewMode('paper');
+                    }}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                      activeTab === 'form' && preOpViewMode === 'paper'
+                        ? 'bg-pblue-600 text-white shadow-2xs'
+                        : 'text-slate-600 hover:text-pblue-800'
+                    }`}
+                  >
+                    เอกสารจริง Pre-op (แก้ไขได้ทันที)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('form');
+                      setPreOpViewMode('form');
+                    }}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                      activeTab === 'form' && preOpViewMode === 'form'
                         ? 'bg-pblue-100 text-pblue-800 shadow-2xs'
                         : 'text-slate-600 hover:text-pblue-800'
                     }`}
                   >
-                    Pre-op Evaluation (ANE-FM-002-03)
+                    แบบฟอร์มกรอกละเอียด (ANE-FM-002-03)
                   </button>
                   <button
                     type="button"
                     onClick={() => setActiveTab('post_op')}
-                    className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap ${
                       activeTab === 'post_op'
                         ? 'bg-pgreen-100 text-pgreen-800 shadow-2xs'
                         : 'text-slate-600 hover:text-pgreen-800'
@@ -2812,11 +2889,26 @@ export default function App() {
                   </button>
                 </div>
                 <span className="text-xs text-slate-500">
-                  เชื่อมข้อมูลผู้ป่วยคนเดียวกัน · กดบันทึกครั้งเดียวจัดเก็บครบทั้ง Pre-op และ Post-op
+                  เมื่อกรอกข้อมูลบางส่วนแล้วจะแสดงหน้าเอกสารจริงแบบเตรียมพิมพ์ พร้อมแก้ไขได้ทันที
                 </span>
               </div>
 
-              {activeTab === 'form' ? (
+              {activeTab === 'form' && preOpViewMode === 'paper' ? (
+                <EditableA4PreOpSheet
+                  value={currentForm}
+                  onChange={handleFormChange}
+                  wardOptions={wardOptions}
+                  specialtyOptions={specialtyOptions}
+                  surgeonOptions={surgeonOptions}
+                  summarizerOptions={summarizerOptions}
+                  onSwitchToDetailedForm={() => setPreOpViewMode('form')}
+                  onGoToPostOp={() => setActiveTab('post_op')}
+                  onPrintPreOp={() => triggerHospitalPrint('pre_op')}
+                  onSave={handleSave}
+                  isSaving={isSaving}
+                  isSaved={savedIdSet.has(currentForm.id)}
+                />
+              ) : activeTab === 'form' ? (
                 <PreAnestheticForm
                   value={currentForm}
                   onChange={handleFormChange}
@@ -2833,6 +2925,8 @@ export default function App() {
                   summarizerOptions={summarizerOptions}
                   onUpdateSummarizerOptions={handleUpdateSummarizerOptions}
                   onGoToPostOp={() => setActiveTab('post_op')}
+                  onSaveAndViewPaper={handleSave}
+                  isSaving={isSaving}
                 />
               ) : (
                 <PostOpEvaluationForm
@@ -2847,7 +2941,10 @@ export default function App() {
                   summarizerOptions={summarizerOptions}
                   visitorOptions={visitorOptions}
                   onUpdateVisitorOptions={handleUpdateVisitorOptions}
-                  onGoToPreOp={() => setActiveTab('form')}
+                  onGoToPreOp={() => {
+                    setPreOpViewMode(hasPartialPreOpData(currentForm) ? 'paper' : 'form');
+                    setActiveTab('form');
+                  }}
                   onSave={handleSave}
                   isSaving={isSaving}
                 />

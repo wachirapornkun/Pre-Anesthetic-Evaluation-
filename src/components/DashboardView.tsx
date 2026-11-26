@@ -22,7 +22,6 @@ import {
   PRE_OP_NOT_VISITED_REASON_OPTIONS,
   PreAnestheticEvaluation,
   PreOpNotVisitedReasonKey,
-  summarizePostOpComplications,
   SURGERY_POSTPONEMENT_REASON_OPTIONS,
   SurgeryPostponementReasonKey,
 } from '../types/evaluation';
@@ -258,7 +257,6 @@ export function DashboardView({
   wardOptions,
   onCreateNew,
   onSelectRecord,
-  onSelectRecordPostOp,
   isLoading,
 }: DashboardViewProps) {
   const [wardFilter, setWardFilter] = useState<string>('ALL');
@@ -279,8 +277,6 @@ export function DashboardView({
   const [operationSortBy, setOperationSortBy] = useState<'count' | 'risk'>('count');
   const [showAllOperations, setShowAllOperations] = useState<boolean>(false);
   const [operationSearch, setOperationSearch] = useState<string>('');
-  const [tableSortBy, setTableSortBy] = useState<'risk' | 'date'>('risk');
-  const [showAllRows, setShowAllRows] = useState<boolean>(false);
   const [visitYearFilter, setVisitYearFilter] = useState<string>('ALL');
   const dashboardRef = useRef<HTMLDivElement | null>(null);
 
@@ -481,19 +477,6 @@ export function DashboardView({
     postponementFilter,
     notVisitedFilter,
   ]);
-
-  const sortedFiltered = useMemo(() => {
-    const list = [...filtered];
-    if (tableSortBy === 'risk') {
-      list.sort((a, b) => {
-        const ra = riskById.get(a.id)?.score ?? 0;
-        const rb = riskById.get(b.id)?.score ?? 0;
-        if (rb !== ra) return rb - ra;
-        return (a.dateOfOperation || '').localeCompare(b.dateOfOperation || '');
-      });
-    }
-    return list;
-  }, [filtered, tableSortBy, riskById]);
 
   const stats = useMemo(() => {
     const total = filtered.length;
@@ -1282,7 +1265,6 @@ export function DashboardView({
     effectiveVisitYear === 'ALL'
       ? stats.allMonthlyElective
       : stats.allMonthlyElective.filter((m) => m.year === effectiveVisitYear);
-  const visibleRows = showAllRows ? sortedFiltered : sortedFiltered.slice(0, 8);
 
   return (
     <div ref={dashboardRef} className="space-y-5">
@@ -1358,7 +1340,7 @@ export function DashboardView({
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => exportEvaluationsCsv(sortedFiltered)}
+            onClick={() => exportEvaluationsCsv(filtered)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-pgreen-800 bg-pgreen-50 border border-pgreen-200 rounded-lg hover:bg-pgreen-100 transition-colors whitespace-nowrap shrink-0"
           >
             <Download className="w-3.5 h-3.5 text-pgreen-600" />
@@ -2640,190 +2622,6 @@ export function DashboardView({
               </>
             );
           })()}
-        </div>
-      </div>
-
-
-      {/* Patient List Table (Sorted by Operation Risk Highest -> Lowest by default) */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        <div className="px-5 py-3.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-slate-900">
-            {tableSortBy === 'risk'
-              ? 'รายการผู้ป่วยเรียงตามความเสี่ยงหัตถการ (มากสุด → น้อยสุด)'
-              : 'รายการผู้ป่วยเรียงตามวันที่ทำผ่าตัด'}
-          </h3>
-          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 tabular-nums">
-            <div className="no-print inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-[11px]">
-              <button
-                type="button"
-                onClick={() => setTableSortBy('risk')}
-                className={`px-2 py-1 rounded-md font-medium transition-colors whitespace-nowrap ${
-                  tableSortBy === 'risk'
-                    ? 'bg-white text-blue-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                เรียงตาม Risk
-              </button>
-              <button
-                type="button"
-                onClick={() => setTableSortBy('date')}
-                className={`px-2 py-1 rounded-md font-medium transition-colors whitespace-nowrap ${
-                  tableSortBy === 'date'
-                    ? 'bg-white text-blue-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                เรียงตามวันที่ผ่าตัด
-              </button>
-            </div>
-            <span>
-              แสดง {visibleRows.length} จาก {sortedFiltered.length} รายการ
-            </span>
-            {sortedFiltered.length > 8 && (
-              <button
-                type="button"
-                onClick={() => setShowAllRows((prev) => !prev)}
-                className="no-print font-medium text-blue-800 hover:underline whitespace-nowrap"
-              >
-                {showAllRows ? 'ย่อรายการ' : `ดูทั้งหมด (${sortedFiltered.length} ราย)`}
-              </button>
-            )}
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
-              <tr>
-                <th className="py-2.5 px-4 font-semibold whitespace-nowrap">HN / AN</th>
-                <th className="py-2.5 px-4 font-semibold whitespace-nowrap">ชื่อผู้ป่วย</th>
-                <th className="py-2.5 px-4 font-semibold whitespace-nowrap">หอผู้ป่วย (Ward)</th>
-                <th className="py-2.5 px-4 font-semibold whitespace-nowrap">การผ่าตัด (Operation)</th>
-                <th className="py-2.5 px-4 font-semibold whitespace-nowrap">ASA</th>
-                <th className="py-2.5 px-4 font-semibold whitespace-nowrap">ความเสี่ยง / ภาวะแทรกซ้อน</th>
-                <th className="py-2.5 px-4 font-semibold text-right whitespace-nowrap">วันที่ผ่าตัด</th>
-                {onSelectRecordPostOp && (
-                  <th className="no-print py-2.5 px-4 font-semibold text-right whitespace-nowrap">
-                    Post-op
-                  </th>
-                )}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {visibleRows.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={onSelectRecordPostOp ? 8 : 7}
-                    className="py-8 px-4 text-center text-slate-500"
-                  >
-                    <div className="space-y-2">
-                      <p>ไม่พบรายการผู้ป่วยตามเงื่อนไขตัวกรองที่เลือก</p>
-                      {hasActiveFilters && (
-                        <button
-                          type="button"
-                          onClick={resetFilters}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-800 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          ล้างตัวกรองทั้งหมด
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                visibleRows.map((r) => {
-                  const risk = riskById.get(r.id) ?? computeCaseRiskProfile(r);
-                  const compSummary = summarizePostOpComplications(r.formData?.postOpComplication);
-                  const flags: string[] = [...risk.topProblems];
-                  if (isSurgeryPostponed(r)) {
-                    const pReason = formatPostponementReasons(r.formData?.surgeryPostponement, true);
-                    flags.unshift(pReason ? `เลื่อนผ่าตัด (${pReason})` : 'เลื่อนผ่าตัด');
-                  }
-                  if (isPreOpDraftNotVisited(r)) {
-                    const nvReason = formatPreOpNotVisitedReasons(r.formData?.preOpNotVisited, true);
-                    flags.unshift(nvReason ? `ไม่ได้เยี่ยม (${nvReason})` : 'ไม่ได้เยี่ยม Pre-op');
-                  }
-                  if (compSummary) {
-                    flags.push(compSummary);
-                  } else if (r.hasComplication && !flags.some((f) => /complication/i.test(f))) {
-                    flags.push('Post-Op Complication');
-                  }
-                  return (
-                    <tr
-                      key={r.id}
-                      onClick={() => onSelectRecord(r)}
-                      className="hover:bg-slate-50 cursor-pointer transition-colors"
-                    >
-                      <td className="py-2.5 px-4 font-mono tabular-nums text-slate-700 whitespace-nowrap">
-                        {r.hn || '—'}
-                        {r.an ? ` · ${r.an}` : ''}
-                      </td>
-                      <td className="py-2.5 px-4 font-semibold text-slate-900 whitespace-nowrap">
-                        {r.patientName} {r.age ? `(${r.age} ปี)` : ''}
-                      </td>
-                      <td className="py-2.5 px-4 text-slate-700 whitespace-nowrap">
-                        {r.ward || '—'}
-                      </td>
-                      <td
-                        className="py-2.5 px-4 text-slate-800 max-w-[240px] truncate"
-                        title={r.operation || ''}
-                      >
-                        {r.operation || '—'}
-                      </td>
-                      <td className="py-2.5 px-4 font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
-                        {r.asaClass ? `ASA ${r.asaClass}${r.asaEmergency ? 'E' : ''}` : '—'}
-                      </td>
-                      <td
-                        className="py-2.5 px-4 text-slate-700 max-w-[280px] truncate"
-                        title={flags.join(' · ')}
-                      >
-                        {flags.length > 0 ? (
-                          <span
-                            className={`font-medium ${
-                              risk.score >= 75 || r.hasComplication || isPreOpDraftNotVisited(r)
-                                ? 'text-red-700'
-                                : risk.score >= 50 || isSurgeryPostponed(r)
-                                ? 'text-amber-800'
-                                : 'text-slate-700'
-                            }`}
-                          >
-                            {flags.join(' · ')}
-                          </span>
-                        ) : (
-                          <span className="text-slate-500">ปกติตามแผน</span>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-4 text-right font-mono tabular-nums text-slate-600 whitespace-nowrap">
-                        <div>{r.dateOfOperation ? formatThaiDateBE(r.dateOfOperation) : '—'}</div>
-                        {r.formData?.surgeryPostponement?.isPostponed &&
-                          r.formData.surgeryPostponement.postponedToDate &&
-                          r.formData.surgeryPostponement.postponedToDate !== r.dateOfOperation && (
-                            <div className="text-[11px] text-amber-800 font-semibold">
-                              → {formatThaiDateBE(r.formData.surgeryPostponement.postponedToDate)}
-                            </div>
-                          )}
-                      </td>
-                      {onSelectRecordPostOp && (
-                        <td className="no-print py-2.5 px-4 text-right whitespace-nowrap">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onSelectRecordPostOp(r);
-                            }}
-                            className="px-2.5 py-1 text-[11px] font-medium text-blue-800 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors whitespace-nowrap"
-                          >
-                            แก้ไข Post-op
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
         </div>
       </div>
     </div>

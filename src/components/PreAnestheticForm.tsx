@@ -9,7 +9,9 @@ import {
   Edit2,
   FileText,
   Plus,
+  Printer,
   RotateCcw,
+  Save,
   Trash2,
   X,
 } from 'lucide-react';
@@ -108,6 +110,8 @@ interface PreAnestheticFormProps {
   summarizerOptions: string[];
   onUpdateSummarizerOptions: (nextSummarizers: string[]) => void;
   onGoToPostOp?: () => void;
+  onSaveAndViewPaper?: () => void;
+  isSaving?: boolean;
 }
 
 export function PreAnestheticForm({
@@ -126,6 +130,8 @@ export function PreAnestheticForm({
   summarizerOptions,
   onUpdateSummarizerOptions,
   onGoToPostOp,
+  onSaveAndViewPaper,
+  isSaving,
 }: PreAnestheticFormProps) {
   const onChange = (next: PreAnestheticEvaluation) => {
     const syncedProblems = syncProblemListWithPatientData(value, next);
@@ -5894,6 +5900,21 @@ export function PreAnestheticForm({
                     ? ` (ลงข้อมูลไม่ครบ ${postOpCheck.filledCount}/${postOpCheck.totalRequired})`
                     : ''}
                 </span>
+              )}
+              {onSaveAndViewPaper && (
+                <button
+                  type="button"
+                  onClick={onSaveAndViewPaper}
+                  disabled={isSaving}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-pblue-600 rounded-lg hover:bg-pblue-700 disabled:opacity-60 transition-colors whitespace-nowrap shadow-xs"
+                >
+                  {isSaving ? (
+                    <Save className="w-3.5 h-3.5" />
+                  ) : (
+                    <Printer className="w-3.5 h-3.5" />
+                  )}
+                  {isSaving ? 'กำลังบันทึก...' : 'บันทึกและแสดงหน้าเอกสารจริง A4 (แก้ไขได้)'}
+                </button>
               )}
               {onGoToPostOp && (
                 <button

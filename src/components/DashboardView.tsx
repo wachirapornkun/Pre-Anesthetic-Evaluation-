@@ -43,7 +43,13 @@ import {
   DonutSegment,
   ElectiveMonthlyVisitChart,
   MonthlyElectiveVisitPoint,
+  OrganSystemChart,
 } from './DashboardCharts';
+import {
+  buildOrganSystemSummary,
+  ORGAN_SYSTEMS,
+  OrganSystemKey,
+} from '../utils/organSystemClassifier';
 
 interface DashboardViewProps {
   records: PreAnestheticEvaluation[];
@@ -261,6 +267,11 @@ export function DashboardView({
   const [complicationFilter, setComplicationFilter] = useState<ActiveComplicationFilter>(null);
   const [postponementFilter, setPostponementFilter] = useState<ActivePostponementFilter>(null);
   const [notVisitedFilter, setNotVisitedFilter] = useState<ActiveNotVisitedFilter>(null);
+  const [organSystemFilter, setOrganSystemFilter] = useState<OrganSystemKey | null>(null);
+  const [showAllSystemCards, setShowAllSystemCards] = useState<boolean>(false);
+  const [expandedSystems, setExpandedSystems] = useState<Partial<Record<OrganSystemKey, boolean>>>(
+    {},
+  );
   const [showAllPostponedList, setShowAllPostponedList] = useState<boolean>(false);
   const [showAllNotVisitedList, setShowAllNotVisitedList] = useState<boolean>(false);
   const [showAllPeriComplications, setShowAllPeriComplications] = useState<boolean>(false);
@@ -371,7 +382,8 @@ export function DashboardView({
     asaFilter !== 'ALL' ||
     complicationFilter !== null ||
     postponementFilter !== null ||
-    notVisitedFilter !== null;
+    notVisitedFilter !== null ||
+    organSystemFilter !== null;
 
   const resetFilters = () => {
     setWardFilter('ALL');
@@ -380,6 +392,7 @@ export function DashboardView({
     setComplicationFilter(null);
     setPostponementFilter(null);
     setNotVisitedFilter(null);
+    setOrganSystemFilter(null);
   };
 
   const baseFiltered = useMemo(() => {
@@ -403,8 +416,15 @@ export function DashboardView({
     });
   }, [records, wardFilter, operationFilter, asaFilter]);
 
+  const baseOrganSummary = useMemo(() => buildOrganSystemSummary(baseFiltered), [baseFiltered]);
+
   const filtered = useMemo(() => {
     return baseFiltered.filter((r) => {
+      if (organSystemFilter) {
+        const profile = baseOrganSummary.profileById.get(r.id);
+        if (!profile || !profile.systems.has(organSystemFilter)) return false;
+      }
+
       if (complicationFilter) {
         const pc = r.formData?.postOpComplication;
         const periList = pc?.periOpComplications ?? [];
@@ -453,7 +473,14 @@ export function DashboardView({
 
       return true;
     });
-  }, [baseFiltered, complicationFilter, postponementFilter, notVisitedFilter]);
+  }, [
+    baseFiltered,
+    baseOrganSummary,
+    organSystemFilter,
+    complicationFilter,
+    postponementFilter,
+    notVisitedFilter,
+  ]);
 
   const sortedFiltered = useMemo(() => {
     const list = [...filtered];
@@ -1833,8 +1860,8 @@ export function DashboardView({
         </div>
       </div>
 
-      {/* Patient Demographics (Age Brackets & Gender) + Comorbidities Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      {/* Patient Demographics Row (Age Brackets & Gender) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Age Distribution: <=1, 1-12, 12-65, >65 */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
           <div className="flex items-start justify-between gap-2">
@@ -1878,27 +1905,174 @@ export function DashboardView({
             centerLabel="ผู้ป่วยทั้งหมด"
           />
         </div>
+      </div>
 
-        {/* Comorbidities & Airway Findings */}
-        <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
-          <h3 className="text-sm font-semibold text-slate-900">
-            โรคประจำตัวและปัจจัยเสี่ยงทางคลินิก
-          </h3>
-          <div className="divide-y divide-slate-100">
-            {stats.comorbidityCounts.map((item) => (
-              <div
-                key={item.label}
-                className="py-1.5 flex items-center justify-between gap-2 text-xs"
+      {/* Comorbidities & Problem List Grouped by International Organ Systems (ASA Standard) */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b border-slate-100">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">
+              โรคประจำตัวและปัจจัยเสี่ยงทางคลินิก — แยกตามระบบมาตรฐานวิสัญญีสากล (9 ระบบ)
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              รวบรวมจากโรคประจำตัวและ Problem List ตามหลัก ASA Preanesthesia Evaluation · คลิกแท่งกราฟเพื่อกรองรายชื่อผู้ป่วย
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5 text-xs font-mono tabular-nums text-slate-600">
+            <span>
+              พบโรคประจำตัว / Problem:{' '}
+              <strong className="text-slate-900">{baseOrganSummary.patientsWithAnyProblem}</strong> /{' '}
+              {baseFiltered.length} ราย (
+              {baseFiltered.length > 0
+                ? Math.round((baseOrganSummary.patientsWithAnyProblem / baseFiltered.length) * 100)
+                : 0}
+              %)
+            </span>
+            {organSystemFilter && (
+              <button
+                type="button"
+                onClick={() => setOrganSystemFilter(null)}
+                className="no-print font-sans inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-blue-800 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg transition-colors whitespace-nowrap"
               >
-                <span className="text-slate-700 font-medium truncate">{item.label}</span>
-                <span className="font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
-                  {item.count} ราย (
-                  {stats.total > 0 ? Math.round((item.count / stats.total) * 100) : 0}%)
-                </span>
-              </div>
-            ))}
+                <RotateCcw className="w-3 h-3" />
+                ล้างตัวกรอง (
+                {ORGAN_SYSTEMS.find((s) => s.key === organSystemFilter)?.title ?? organSystemFilter}
+                )
+              </button>
+            )}
           </div>
         </div>
+
+        {/* Interactive 9-Organ-System Column Chart + Synchronized Breakdown */}
+        <OrganSystemChart
+          buckets={baseOrganSummary.buckets}
+          totalPatients={baseFiltered.length}
+          selectedSystem={organSystemFilter}
+          onSelectSystem={setOrganSystemFilter}
+        />
+
+        {/* Expandable 9-System Full Detail Cards */}
+        <div className="no-print pt-1 flex items-center justify-between border-t border-slate-100">
+          <span className="text-xs text-slate-500">
+            ต้องการเปรียบเทียบรายการโรคย่อยพร้อมกันครบทั้ง 9 ระบบ?
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowAllSystemCards((prev) => !prev)}
+            className="text-xs font-semibold text-blue-800 hover:text-blue-900 hover:underline px-2 py-1"
+          >
+            {showAllSystemCards
+              ? 'ซ่อนการ์ดรายละเอียดทั้ง 9 ระบบ ▲'
+              : 'แสดงการ์ดรายละเอียดครบทั้ง 9 ระบบ ▼'}
+          </button>
+        </div>
+
+        {showAllSystemCards && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {baseOrganSummary.buckets.map((bucket) => {
+            const { meta, patientCount, conditions } = bucket;
+            const pct =
+              baseFiltered.length > 0
+                ? Math.round((patientCount / baseFiltered.length) * 100)
+                : 0;
+            const isSelected = organSystemFilter === meta.key;
+            const isExpanded = Boolean(expandedSystems[meta.key]);
+            const visibleConditions = isExpanded ? conditions : conditions.slice(0, 5);
+
+            return (
+              <div
+                key={meta.key}
+                className={`rounded-xl border flex flex-col overflow-hidden transition-all ${
+                  isSelected
+                    ? `${meta.accentSelectedRing} bg-white shadow-sm`
+                    : `${meta.accentBorder} bg-white`
+                }`}
+              >
+                {/* Clickable System Header */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setOrganSystemFilter((prev) => (prev === meta.key ? null : meta.key))
+                  }
+                  className={`w-full text-left px-3.5 py-2.5 border-b ${meta.accentBorder} ${meta.accentBg} hover:brightness-[0.98] transition-all`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-white/80 border ${meta.accentBorder} ${meta.accentHeaderText} shrink-0`}
+                        >
+                          {meta.code}
+                        </span>
+                        <span className={`text-xs font-bold truncate ${meta.accentHeaderText}`}>
+                          {meta.title}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 truncate mt-0.5">
+                        {meta.thaiSubtitle}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 font-mono tabular-nums">
+                      <div className={`text-base font-bold leading-tight ${meta.accentHeaderText}`}>
+                        {patientCount}
+                      </div>
+                      <div className="text-[10px] text-slate-500">ราย ({pct}%)</div>
+                    </div>
+                  </div>
+                  <div className="mt-2 h-1.5 w-full bg-white/80 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${meta.accentBar} transition-all`}
+                      style={{ width: `${Math.min(100, pct)}%` }}
+                    />
+                  </div>
+                </button>
+
+                {/* Conditions Breakdown */}
+                <div className="p-3 flex-1 flex flex-col justify-between gap-2">
+                  {conditions.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 text-center py-3">
+                      ยังไม่พบรายการในระบบนี้
+                    </p>
+                  ) : (
+                    <div className="divide-y divide-slate-100">
+                      {visibleConditions.map((cond) => (
+                        <div
+                          key={cond.label}
+                          className="py-1 flex items-baseline justify-between gap-2 text-xs"
+                        >
+                          <span className="text-slate-700 font-medium truncate" title={cond.label}>
+                            {cond.label}
+                          </span>
+                          <span className="font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap shrink-0">
+                            {cond.count} ราย
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {conditions.length > 5 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedSystems((prev) => ({
+                          ...prev,
+                          [meta.key]: !prev[meta.key],
+                        }))
+                      }
+                      className="no-print w-full text-center pt-1.5 border-t border-slate-100 text-[11px] font-medium text-blue-800 hover:underline"
+                    >
+                      {isExpanded
+                        ? 'ย่อรายการ'
+                        : `ดูเพิ่มอีก ${conditions.length - 5} รายการ`}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        )}
       </div>
 
       {/* Peri-op & Post-op Complication Summary Dashboard (Side-by-Side, Sorted Highest -> Lowest) */}

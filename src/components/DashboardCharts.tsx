@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { OrganSystemBucket, OrganSystemKey } from '../utils/organSystemClassifier';
 
 export interface DonutSegment {
   key: string;
@@ -903,6 +904,449 @@ export function AgeBracketChart({
           <span className="font-mono tabular-nums">
             {unspecifiedCount} ราย ({total > 0 ? ((unspecifiedCount / total) * 100).toFixed(1) : '0.0'}%)
           </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface OrganSystemChartProps {
+  buckets: OrganSystemBucket[];
+  totalPatients: number;
+  selectedSystem: OrganSystemKey | null;
+  onSelectSystem: (key: OrganSystemKey | null) => void;
+}
+
+function getNiceChartMax(rawMax: number): number {
+  if (rawMax <= 4) return 4;
+  if (rawMax <= 8) return 8;
+  if (rawMax <= 10) return 10;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawMax)));
+  const normalized = rawMax / magnitude;
+  let niceNormalized = 10;
+  if (normalized <= 1.2) niceNormalized = 1.2;
+  else if (normalized <= 1.5) niceNormalized = 1.5;
+  else if (normalized <= 2) niceNormalized = 2;
+  else if (normalized <= 2.5) niceNormalized = 2.5;
+  else if (normalized <= 3) niceNormalized = 3;
+  else if (normalized <= 4) niceNormalized = 4;
+  else if (normalized <= 5) niceNormalized = 5;
+  else if (normalized <= 6) niceNormalized = 6;
+  else if (normalized <= 8) niceNormalized = 8;
+  return Math.ceil(niceNormalized * magnitude);
+}
+
+export function OrganSystemChart({
+  buckets,
+  totalPatients,
+  selectedSystem,
+  onSelectSystem,
+}: OrganSystemChartProps) {
+  const [sortMode, setSortMode] = useState<'count' | 'standard'>('count');
+  const [hoveredKey, setHoveredKey] = useState<OrganSystemKey | null>(null);
+
+  const displayBuckets = useMemo(() => {
+    if (sortMode === 'standard') return buckets;
+    return [...buckets].sort((a, b) => {
+      if (b.patientCount !== a.patientCount) return b.patientCount - a.patientCount;
+      return buckets.indexOf(a) - buckets.indexOf(b);
+    });
+  }, [buckets, sortMode]);
+
+  const topBucket = useMemo(() => {
+    const sorted = [...buckets].sort((a, b) => b.patientCount - a.patientCount);
+    return sorted[0] ?? buckets[0] ?? null;
+  }, [buckets]);
+
+  const activeBucket = useMemo(() => {
+    if (hoveredKey) {
+      return buckets.find((b) => b.meta.key === hoveredKey) ?? topBucket;
+    }
+    if (selectedSystem) {
+      return buckets.find((b) => b.meta.key === selectedSystem) ?? topBucket;
+    }
+    return topBucket;
+  }, [buckets, hoveredKey, selectedSystem, topBucket]);
+
+  const rawMax = Math.max(1, ...displayBuckets.map((b) => b.patientCount));
+  const yMax = getNiceChartMax(rawMax);
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => Math.round(yMax * ratio));
+
+  // SVG layout dimensions
+  const svgW = 700;
+  const svgH = 315;
+  const padLeft = 40;
+  const padRight = 14;
+  const padTop = 34;
+  const padBottom = 64;
+  const plotW = svgW - padLeft - padRight;
+  const plotH = svgH - padTop - padBottom;
+  const colCount = Math.max(1, displayBuckets.length);
+  const slotW = plotW / colCount;
+  const barW = Math.min(44, Math.max(22, slotW * 0.58));
+
+  const activePct =
+    activeBucket && totalPatients > 0
+      ? ((activeBucket.patientCount / totalPatients) * 100).toFixed(1)
+      : '0.0';
+  const activeMaxCondition = Math.max(
+    1,
+    ...(activeBucket?.conditions.map((c) => c.count) ?? [1]),
+  );
+  const isShowingSelected =
+    activeBucket != null && selectedSystem === activeBucket.meta.key;
+  const isHoverPreview =
+    hoveredKey != null && hoveredKey !== selectedSystem;
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+      {/* Left: 9-System Vertical Column Chart */}
+      <div className="lg:col-span-7 flex flex-col justify-between bg-slate-50/60 border border-slate-200/80 rounded-xl p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <div>
+            <div className="text-xs font-semibold text-slate-800">
+              กราฟเปรียบเทียบจำนวนผู้ป่วยทั้ง 9 ระบบอวัยวะ
+            </div>
+            <div className="text-[11px] text-slate-500">
+              วางเมาส์เพื่อดูรายละเอียดโรคย่อยด้านขวา · คลิกแท่งกราฟเพื่อกรองรายชื่อผู้ป่วย
+            </div>
+          </div>
+
+          <div className="no-print inline-flex items-center rounded-lg bg-white border border-slate-200 p-0.5 text-[11px]">
+            <button
+              type="button"
+              onClick={() => setSortMode('count')}
+              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+                sortMode === 'count'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              เรียงมาก → น้อย
+            </button>
+            <button
+              type="button"
+              onClick={() => setSortMode('standard')}
+              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+                sortMode === 'standard'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              มาตรฐาน 1–9
+            </button>
+          </div>
+        </div>
+
+        <div className="w-full overflow-x-auto">
+          <svg
+            viewBox={`0 0 ${svgW} ${svgH}`}
+            className="w-full min-w-[540px] h-auto select-none"
+            role="img"
+            aria-label="กราฟจำนวนผู้ป่วยแยกตาม 9 ระบบอวัยวะมาตรฐานวิสัญญี"
+          >
+            {/* Horizontal gridlines & Y-axis labels */}
+            {yTicks.map((tickVal, idx) => {
+              const y = padTop + plotH - (tickVal / yMax) * plotH;
+              const isZero = idx === 0;
+              return (
+                <g key={`ytick-${idx}-${tickVal}`}>
+                  <line
+                    x1={padLeft}
+                    x2={svgW - padRight}
+                    y1={y}
+                    y2={y}
+                    stroke={isZero ? '#cbd5e1' : '#e2e8f0'}
+                    strokeWidth={isZero ? 1.2 : 1}
+                    strokeDasharray={isZero ? undefined : '3 3'}
+                  />
+                  <text
+                    x={padLeft - 8}
+                    y={y + 3.5}
+                    textAnchor="end"
+                    className="fill-slate-400 text-[10px] font-mono"
+                  >
+                    {tickVal}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Bars */}
+            {displayBuckets.map((bucket, idx) => {
+              const { meta, patientCount } = bucket;
+              const centerX = padLeft + slotW * idx + slotW / 2;
+              const barX = centerX - barW / 2;
+              const rawBarH = yMax > 0 ? (patientCount / yMax) * plotH : 0;
+              const barH = patientCount > 0 ? Math.max(4, rawBarH) : 0;
+              const barY = padTop + plotH - barH;
+              const pct =
+                totalPatients > 0 ? Math.round((patientCount / totalPatients) * 100) : 0;
+
+              const isSelected = selectedSystem === meta.key;
+              const isHovered = hoveredKey === meta.key;
+              const isDimmed =
+                (selectedSystem != null && !isSelected && !isHovered) ||
+                (hoveredKey != null && !isHovered && !isSelected);
+
+              return (
+                <g
+                  key={meta.key}
+                  className="cursor-pointer"
+                  onMouseEnter={() => setHoveredKey(meta.key)}
+                  onMouseLeave={() => setHoveredKey(null)}
+                  onClick={() => onSelectSystem(isSelected ? null : meta.key)}
+                >
+                  {/* Full-column interactive hit target & hover/selection highlight */}
+                  <rect
+                    x={padLeft + slotW * idx + 3}
+                    y={padTop - 22}
+                    width={slotW - 6}
+                    height={plotH + 78}
+                    rx={8}
+                    fill={
+                      isSelected
+                        ? `${meta.hexColor}14`
+                        : isHovered
+                        ? '#e2e8f080'
+                        : 'transparent'
+                    }
+                    stroke={isSelected ? meta.hexColor : 'transparent'}
+                    strokeWidth={isSelected ? 1.5 : 0}
+                  />
+
+                  {/* Zero baseline subtle dot when count is 0 */}
+                  {patientCount === 0 ? (
+                    <rect
+                      x={barX}
+                      y={padTop + plotH - 2}
+                      width={barW}
+                      height={2}
+                      rx={1}
+                      fill="#cbd5e1"
+                    />
+                  ) : (
+                    <rect
+                      x={barX}
+                      y={barY}
+                      width={barW}
+                      height={barH}
+                      rx={6}
+                      fill={meta.hexColor}
+                      opacity={isDimmed ? 0.38 : 1}
+                      style={{ transition: 'opacity 150ms ease, y 200ms ease, height 200ms ease' }}
+                    />
+                  )}
+
+                  {/* Direct count + percentage labels above bar */}
+                  <text
+                    x={centerX}
+                    y={Math.max(14, barY - 14)}
+                    textAnchor="middle"
+                    className={`text-[11px] font-mono font-bold ${
+                      patientCount > 0 ? 'fill-slate-900' : 'fill-slate-400'
+                    }`}
+                    opacity={isDimmed ? 0.5 : 1}
+                  >
+                    {patientCount}
+                  </text>
+                  <text
+                    x={centerX}
+                    y={Math.max(25, barY - 3)}
+                    textAnchor="middle"
+                    className="fill-slate-500 text-[9.5px] font-mono"
+                    opacity={isDimmed ? 0.45 : 1}
+                  >
+                    {pct}%
+                  </text>
+
+                  {/* X-axis system code */}
+                  <text
+                    x={centerX}
+                    y={padTop + plotH + 18}
+                    textAnchor="middle"
+                    fill={isSelected || isHovered ? meta.hexColor : '#0f172a'}
+                    className="text-[10.5px] font-mono font-bold"
+                  >
+                    {meta.code}
+                  </text>
+
+                  {/* X-axis concise Thai label */}
+                  <text
+                    x={centerX}
+                    y={padTop + plotH + 33}
+                    textAnchor="middle"
+                    className="fill-slate-500 text-[9.5px]"
+                  >
+                    {meta.shortThai}
+                  </text>
+
+                  {/* Selected indicator dot */}
+                  {isSelected && (
+                    <circle
+                      cx={centerX}
+                      cy={padTop + plotH + 45}
+                      r={3}
+                      fill={meta.hexColor}
+                    />
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+
+        <div className="mt-2 pt-2 border-t border-slate-200/70 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+          <span>
+            * ผู้ป่วย 1 รายอาจมีภาวะมากกว่า 1 ระบบ (นับจำนวนผู้ป่วยไม่ซ้ำรายภายในแต่ละระบบ)
+          </span>
+          <span className="font-mono tabular-nums text-slate-600">
+            ฐานข้อมูล {totalPatients} ราย
+          </span>
+        </div>
+      </div>
+
+      {/* Right: Synchronized Condition Breakdown Horizontal Bar Chart */}
+      {activeBucket && (
+        <div
+          className={`lg:col-span-5 flex flex-col justify-between rounded-xl border bg-white overflow-hidden transition-colors ${
+            isShowingSelected
+              ? activeBucket.meta.accentSelectedRing
+              : activeBucket.meta.accentBorder
+          }`}
+        >
+          <div>
+            {/* Active System Header */}
+            <div
+              className={`px-4 py-3 border-b ${activeBucket.meta.accentBorder} ${activeBucket.meta.accentBg}`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span
+                      className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-bold text-white shrink-0"
+                      style={{ backgroundColor: activeBucket.meta.hexColor }}
+                    >
+                      {activeBucket.meta.code}
+                    </span>
+                    <span
+                      className={`text-sm font-bold truncate ${activeBucket.meta.accentHeaderText}`}
+                    >
+                      {activeBucket.meta.title}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-600 mt-0.5">
+                    {activeBucket.meta.thaiSubtitle}
+                  </div>
+                </div>
+                <div className="text-right shrink-0 font-mono tabular-nums">
+                  <div
+                    className="text-xl font-bold leading-none"
+                    style={{ color: activeBucket.meta.hexColor }}
+                  >
+                    {activeBucket.patientCount}
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    ราย ({activePct}%)
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                <span>
+                  {isHoverPreview
+                    ? 'กำลังดูรายละเอียดจากแท่งกราฟที่ชี้'
+                    : isShowingSelected
+                    ? 'กำลังกรองผู้ป่วยเฉพาะระบบนี้'
+                    : 'เจาะลึกรายการโรค / Problem ที่พบมากที่สุด'}
+                </span>
+                <span className="font-mono tabular-nums">
+                  {activeBucket.conditions.length} รายการย่อย
+                </span>
+              </div>
+            </div>
+
+            {/* Horizontal Bar List of Top Conditions */}
+            <div className="p-4 space-y-2.5">
+              {activeBucket.conditions.length === 0 ? (
+                <div className="py-10 text-center text-xs text-slate-400">
+                  ยังไม่พบโรคประจำตัวหรือ Problem List ในระบบนี้
+                </div>
+              ) : (
+                <>
+                  {activeBucket.conditions.slice(0, 8).map((cond) => {
+                    const barPct = Math.round((cond.count / activeMaxCondition) * 100);
+                    const systemSharePct =
+                      activeBucket.patientCount > 0
+                        ? Math.round((cond.count / activeBucket.patientCount) * 100)
+                        : 0;
+                    return (
+                      <div key={cond.label} className="space-y-1">
+                        <div className="flex items-baseline justify-between gap-2 text-xs">
+                          <span
+                            className="font-medium text-slate-800 truncate"
+                            title={cond.label}
+                          >
+                            {cond.label}
+                          </span>
+                          <span className="font-mono tabular-nums text-slate-900 font-semibold whitespace-nowrap shrink-0">
+                            {cond.count} ราย{' '}
+                            <span className="text-[11px] font-normal text-slate-400">
+                              ({systemSharePct}%)
+                            </span>
+                          </span>
+                        </div>
+                        <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all duration-300"
+                            style={{
+                              width: `${Math.max(4, barPct)}%`,
+                              backgroundColor: activeBucket.meta.hexColor,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {activeBucket.conditions.length > 8 && (
+                    <div className="pt-1 text-[11px] text-slate-500 text-right">
+                      และอีก {activeBucket.conditions.length - 8} รายการย่อย
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Filter Action Footer */}
+          <div className="no-print px-4 py-2.5 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-2">
+            <span className="text-[11px] text-slate-500">
+              {isShowingSelected
+                ? 'ตารางผู้ป่วยด้านล่างกำลังแสดงเฉพาะระบบนี้'
+                : 'คลิกเพื่อดูรายชื่อผู้ป่วยในระบบนี้'}
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                onSelectSystem(isShowingSelected ? null : activeBucket.meta.key)
+              }
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                isShowingSelected
+                  ? 'bg-slate-200 text-slate-800 hover:bg-slate-300'
+                  : 'text-white hover:opacity-90'
+              }`}
+              style={
+                isShowingSelected
+                  ? undefined
+                  : { backgroundColor: activeBucket.meta.hexColor }
+              }
+            >
+              {isShowingSelected
+                ? 'ล้างตัวกรองระบบนี้'
+                : `กรองระบบ ${activeBucket.meta.code}`}
+            </button>
+          </div>
         </div>
       )}
     </div>
